@@ -1,6 +1,7 @@
-import { DollarSign, Gauge, ParkingSquare, Target, Ticket, Users, CalendarClock, Bell } from "lucide-react";
+import { DollarSign, Gauge, ParkingSquare, Target, Ticket, Users, CalendarClock, Bell, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DemoDataBadge } from "@/components/shared/demo-data-badge";
+import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/cards/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RevenueChart } from "@/components/charts/revenue-chart";
@@ -23,31 +24,79 @@ import { mockRecommendations } from "@/data/mock/agents";
 import { mockCustomers } from "@/data/mock/customers";
 import { vehiclesPerDay, topServices, customersNewVsRecurring } from "@/data/mock/charts";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
+import { isJumpParkConfigured } from "@/lib/config/env";
+import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
 
-export default function DashboardPage() {
+// Evita que dados do JumpPark fiquem congelados no HTML estático gerado em build.
+export const dynamic = "force-dynamic";
+
+async function getOverviewMetrics() {
+  if (!isJumpParkConfigured()) return null;
+  try {
+    return await fetchOverviewMetrics();
+  } catch {
+    return null;
+  }
+}
+
+export default async function DashboardPage() {
   const criticalInventory = mockInventory.filter((item) => item.status === "critico").length;
   const newCustomers = mockCustomers.filter((c) => c.segments.includes("novo")).length;
   const recurringCustomers = mockCustomers.filter((c) => c.segments.includes("recorrente")).length;
+  const overview = await getOverviewMetrics();
+  const liveData = overview !== null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Visão Geral"
         description="Resumo executivo da Sta Monica Estética Automotiva e Estacionamento."
-        actions={<DemoDataBadge />}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {liveData ? (
+              <Badge variant="positive">
+                <Wifi className="h-3 w-3" />
+                JumpPark conectado
+              </Badge>
+            ) : null}
+            <DemoDataBadge />
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Receita hoje" value={formatCurrency(mockFinanceSummary.dailyRevenue)} icon={DollarSign} trend={{ direction: "up", value: 4.2 }} />
-        <StatCard label="Receita no mês" value={formatCurrency(mockFinanceSummary.monthlyRevenue)} icon={DollarSign} trend={{ direction: "up", value: 6.1 }} />
+        <StatCard
+          label="Receita hoje"
+          value={formatCurrency(liveData ? overview.dailyRevenue : mockFinanceSummary.dailyRevenue)}
+          icon={DollarSign}
+          trend={liveData ? undefined : { direction: "up", value: 4.2 }}
+          hint={liveData ? "JumpPark" : "demonstrativo"}
+        />
+        <StatCard
+          label="Receita no mês"
+          value={formatCurrency(liveData ? overview.monthlyRevenue : mockFinanceSummary.monthlyRevenue)}
+          icon={DollarSign}
+          trend={liveData ? undefined : { direction: "up", value: 6.1 }}
+          hint={liveData ? "JumpPark" : "demonstrativo"}
+        />
         <StatCard label="Meta mensal" value={formatCurrency(mockFinanceSummary.monthlyGoal)} icon={Target} hint={formatPercent(mockFinanceSummary.goalPercent, 1) + " atingido"} />
         <StatCard label="Ticket médio" value={formatCurrency(mockFinanceSummary.averageTicket)} icon={Ticket} trend={{ direction: "flat", value: 0 }} />
         <StatCard label="Veículos hoje" value={String(mockWashSummary.vehiclesServed)} icon={Gauge} hint="lavação" />
-        <StatCard label="No estacionamento" value={String(mockParkingSummary.vehiclesPresent)} icon={ParkingSquare} hint={formatPercent(mockParkingSummary.occupancyPercent) + " ocupação"} />
+        <StatCard
+          label="No estacionamento"
+          value={String(liveData ? overview.vehiclesPresent : mockParkingSummary.vehiclesPresent)}
+          icon={ParkingSquare}
+          hint={liveData ? "JumpPark" : "demonstrativo"}
+        />
         <StatCard label="Clientes novos" value={String(newCustomers)} icon={Users} hint="hoje" />
         <StatCard label="Clientes recorrentes" value={String(recurringCustomers)} icon={Users} hint="hoje" />
         <StatCard label="Agenda do dia" value={`${mockSchedule.length} horários`} icon={CalendarClock} />
-        <StatCard label="Taxa de ocupação" value={formatPercent(mockParkingSummary.occupancyPercent)} icon={Gauge} />
+        <StatCard
+          label="Taxa de ocupação"
+          value={liveData ? "Informação indisponível" : formatPercent(mockParkingSummary.occupancyPercent)}
+          icon={Gauge}
+          hint={liveData ? "requer total de vagas" : "demonstrativo"}
+        />
         <StatCard label="Alertas ativos" value={String(mockAlerts.length)} icon={Bell} hint={criticalInventory > 0 ? `${criticalInventory} crítico(s)` : undefined} />
       </div>
 

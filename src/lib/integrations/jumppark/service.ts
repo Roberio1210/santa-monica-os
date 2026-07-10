@@ -24,12 +24,16 @@ export interface JumpParkDailyFinancial {
   paymentBreakdown: PaymentBreakdown[];
 }
 
+function fetchFinancialReport(startDate: string, endDate: string) {
+  return jumpParkClient.request<JumpParkFinancialReport>("/reports/financial", {
+    startDate,
+    endDate,
+  });
+}
+
 /** Espelha `fetch_jumppark_diario` do script Python de referência. */
 export async function fetchDailyFinancial(date: string): Promise<JumpParkDailyFinancial> {
-  const report = await jumpParkClient.request<JumpParkFinancialReport>("/reports/financial", {
-    startDate: date,
-    endDate: date,
-  });
+  const report = await fetchFinancialReport(date, date);
 
   const services = report.data?.services ?? {};
   const total = Number(services.totalAmount ?? 0);
@@ -78,6 +82,51 @@ export async function fetchServiceOrders(
     { startDate, endDate },
   );
   return response.data?.content ?? [];
+}
+
+function isoDate(offsetDays: number, from: Date = new Date()): string {
+  const d = new Date(from);
+  d.setDate(d.getDate() - offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface JumpParkOverviewMetrics {
+  dailyRevenue: number;
+  monthlyRevenue: number;
+  /** Veículos sem saída registrada nos últimos dias (ordens sem serviços = estacionamento). */
+  vehiclesPresent: number;
+  checkedAt: string;
+}
+
+/**
+ * Métricas para os cards da Visão Geral. Taxa de ocupação não é calculada aqui:
+ * a API do JumpPark não expõe a capacidade total de vagas, e o princípio do
+ * projeto é nunca inventar dados ausentes.
+ */
+export async function fetchOverviewMetrics(): Promise<JumpParkOverviewMetrics> {
+  const today = isoDate(0);
+  const firstDayOfMonth = `${today.slice(0, 7)}-01`;
+  const windowStart = isoDate(2);
+
+  const [dailyReport, monthlyReport, recentOrders] = await Promise.all([
+    fetchFinancialReport(today, today),
+    fetchFinancialReport(firstDayOfMonth, today),
+    fetchServiceOrders(windowStart, today),
+  ]);
+
+  const dailyRevenue = Number(dailyReport.data?.services?.totalAmount ?? 0);
+  const monthlyRevenue = Number(monthlyReport.data?.services?.totalAmount ?? 0);
+
+  const vehiclesPresent = recentOrders.filter(
+    (order) => (!order.services || order.services.length === 0) && !order.exitDateTime,
+  ).length;
+
+  return {
+    dailyRevenue,
+    monthlyRevenue,
+    vehiclesPresent,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 export { JumpParkNotConfiguredError, JumpParkRequestError };
