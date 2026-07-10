@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Santa Monica OS
 
-## Getting Started
+Sistema operacional empresarial para a **Estética Automotiva e Estacionamento Sta. Mônica**
+(Florianópolis/SC). Centraliza gestão executiva, indicadores, lavação, estacionamento, agenda,
+clientes, financeiro, marketing, estoque, compras, segurança e agentes de inteligência artificial.
 
-First, run the development server:
+## Recursos
+
+- Dashboard executivo com indicadores, gráficos e alertas
+- Módulos: Visão Geral, Lavação, Estacionamento, Agenda, Clientes, Financeiro, Marketing,
+  Estoque, Compras, Segurança (Vigia), Zézinho IA, Configurações
+- Camada segura de integração com o JumpPark (somente leitura)
+- Arquitetura de agentes de IA documentada (Zézinho e especialistas)
+- Dados demonstrativos claramente identificados enquanto integrações reais não estão conectadas
+
+## Arquitetura
+
+Ver [docs/architecture.md](./docs/architecture.md), [docs/data-model.md](./docs/data-model.md) e
+[docs/integrations.md](./docs/integrations.md).
+
+## Instalação
+
+```bash
+npm install
+```
+
+## Execução (desenvolvimento)
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abra [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+## Variáveis de ambiente
 
-To learn more about Next.js, take a look at the following resources:
+Copie `.env.example` para `.env.local` e preencha com credenciais reais (nunca commitadas):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+cp .env.example .env.local
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Ver a lista completa de variáveis por integração em
+[docs/integrations.md](./docs/integrations.md).
 
-## Deploy on Vercel
+## Segurança
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Credenciais somente no backend, nunca expostas ao frontend.
+- Nenhuma ação financeira, comercial ou destrutiva é executada automaticamente.
+- Detalhes completos em [docs/security.md](./docs/security.md).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Roadmap
+
+Ver [docs/roadmap.md](./docs/roadmap.md).
+
+## Status
+
+🚧 Sprint 1 (Fundação) concluída: interface, navegação, dashboard, módulos demonstrativos,
+documentação e camada segura de integração JumpPark (aguardando credenciais reais para ativação).
