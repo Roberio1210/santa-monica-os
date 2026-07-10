@@ -84,9 +84,9 @@ export default async function DashboardPage() {
         <StatCard label="Veículos hoje" value={String(mockWashSummary.vehiclesServed)} icon={Gauge} hint="lavação" />
         <StatCard
           label="No estacionamento"
-          value={String(liveData ? overview.vehiclesPresent : mockParkingSummary.vehiclesPresent)}
+          value={liveData ? "Informação indisponível" : String(mockParkingSummary.vehiclesPresent)}
           icon={ParkingSquare}
-          hint={liveData ? "JumpPark" : "demonstrativo"}
+          hint={liveData ? "sem endpoint confiável" : "demonstrativo"}
         />
         <StatCard label="Clientes novos" value={String(newCustomers)} icon={Users} hint="hoje" />
         <StatCard label="Clientes recorrentes" value={String(recurringCustomers)} icon={Users} hint="hoje" />

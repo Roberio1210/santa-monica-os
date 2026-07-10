@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Bot,
   Settings,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Visão Geral", icon: LayoutDashboard },
+  { href: "/operacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
   { href: "/estacionamento", label: "Estacionamento", icon: ParkingSquare },
   { href: "/agenda", label: "Agenda", icon: CalendarDays },

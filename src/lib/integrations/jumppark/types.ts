@@ -23,18 +23,29 @@ export interface JumpParkFinancialReport {
 export interface JumpParkServiceEntry {
   description?: string;
   name?: string;
-  amount?: number;
+  /** Vem como string (ex.: "180.00") na API real. */
+  amount?: string | number;
+  quantity?: number;
 }
 
 export interface JumpParkServiceOrder {
+  serviceOrderId?: string;
+  serviceOrderCode?: string;
   entryDateTime?: string;
   exitDateTime?: string;
   plate?: string;
   vehicleModel?: string;
   vehicleColor?: string;
   paymentMethodName?: string;
-  clientName?: string;
+  clientName?: string | null;
+  clientPhone?: string | null;
+  /** Parcela de estacionamento da ordem — vem como string (ex.: "40.00") na API real. */
+  amount?: string | number;
+  /** Parcela de serviços/lavação da ordem — vem como string na API real. */
+  amountServices?: string | number;
   totalAmount?: number;
+  financialSituationName?: string;
+  operationSituationName?: string;
   services?: JumpParkServiceEntry[];
 }
 

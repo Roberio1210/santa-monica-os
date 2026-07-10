@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import type { PaymentBreakdown } from "@/types/finance";
 import type { PaymentMethod } from "@/types/common";
+import { maskPlate, maskPhone } from "@/lib/utils/mask";
 
 function classifyPaymentMethod(name: string): PaymentMethod {
   const normalized = name.toLowerCase();
@@ -103,40 +104,99 @@ function isoDate(offsetDays: number, from: Date = new Date()): string {
 export interface JumpParkOverviewMetrics {
   dailyRevenue: number;
   monthlyRevenue: number;
-  /** Veículos sem saída registrada nos últimos dias (ordens sem serviços = estacionamento). */
-  vehiclesPresent: number;
   checkedAt: string;
 }
 
 /**
- * Métricas para os cards da Visão Geral. Taxa de ocupação não é calculada aqui:
- * a API do JumpPark não expõe a capacidade total de vagas, e o princípio do
- * projeto é nunca inventar dados ausentes.
+ * Métricas para os cards da Visão Geral. Taxa de ocupação e "veículos no
+ * estacionamento" não são calculados aqui: a API do JumpPark não expõe a
+ * capacidade total de vagas, e a amostra investigada em
+ * docs/jumppark-open-orders-investigation.md não trouxe nenhuma ordem em
+ * aberto em `/serviceorders/export/json` — não há endpoint confiável para
+ * veículos presentes. O princípio do projeto é nunca inventar dados ausentes.
  */
 export async function fetchOverviewMetrics(): Promise<JumpParkOverviewMetrics> {
   const today = isoDate(0);
   const firstDayOfMonth = `${today.slice(0, 7)}-01`;
-  const windowStart = isoDate(2);
 
-  const [dailyReport, monthlyReport, recentOrders] = await Promise.all([
+  const [dailyReport, monthlyReport] = await Promise.all([
     fetchFinancialReport(today, today),
     fetchFinancialReport(firstDayOfMonth, today),
-    fetchServiceOrders(windowStart, today),
   ]);
 
-  const dailyRevenue = totalRevenue(dailyReport);
-  const monthlyRevenue = totalRevenue(monthlyReport);
-
-  const vehiclesPresent = recentOrders.filter(
-    (order) => (!order.services || order.services.length === 0) && !order.exitDateTime,
-  ).length;
-
   return {
-    dailyRevenue,
-    monthlyRevenue,
-    vehiclesPresent,
+    dailyRevenue: totalRevenue(dailyReport),
+    monthlyRevenue: totalRevenue(monthlyReport),
     checkedAt: new Date().toISOString(),
   };
+}
+
+export interface OperationServiceItem {
+  description: string;
+  amount: number;
+}
+
+export interface OperationOrder {
+  id: string;
+  code: string | null;
+  entryTime: string | null;
+  exitTime: string | null;
+  plateMasked: string;
+  vehicleModel: string;
+  clientName: string | null;
+  clientPhoneMasked: string | null;
+  services: OperationServiceItem[];
+  hasServices: boolean;
+  parkingAmount: number;
+  servicesAmount: number;
+  totalAmount: number;
+  paymentMethod: string;
+  paymentMethodCategory: PaymentMethod;
+  situation: string;
+}
+
+function formatTime(dateTime?: string): string | null {
+  if (!dateTime) return null;
+  const time = dateTime.split(" ")[1];
+  return time ? time.slice(0, 5) : null;
+}
+
+/**
+ * Ordens finalizadas (com saída registrada) de um dia, já mascaradas e
+ * formatadas para exibição — usado pela tela "Movimentações de Hoje".
+ * Nunca retorna placa ou telefone completos.
+ */
+export async function fetchTodayOperations(date: string): Promise<OperationOrder[]> {
+  const orders = await fetchServiceOrders(date, date);
+
+  return orders
+    .filter((order) => !!order.exitDateTime)
+    .map((order) => {
+      const services: OperationServiceItem[] = (order.services ?? []).map((item) => ({
+        description: item.description ?? item.name ?? "Serviço",
+        amount: Number(item.amount ?? 0),
+      }));
+
+      return {
+        id: order.serviceOrderId ?? `${order.plate ?? "sem-placa"}-${order.entryDateTime ?? ""}`,
+        code: order.serviceOrderCode ?? null,
+        entryTime: formatTime(order.entryDateTime),
+        exitTime: formatTime(order.exitDateTime),
+        plateMasked: maskPlate(order.plate),
+        vehicleModel: order.vehicleModel ?? "Não informado",
+        clientName: order.clientName ?? null,
+        clientPhoneMasked: maskPhone(order.clientPhone),
+        services,
+        hasServices: services.length > 0,
+        parkingAmount: Number(order.amount ?? 0),
+        servicesAmount: Number(order.amountServices ?? 0),
+        totalAmount: Number(order.totalAmount ?? 0),
+        paymentMethod: order.paymentMethodName ?? "Não informado",
+        paymentMethodCategory: classifyPaymentMethod(order.paymentMethodName ?? ""),
+        situation: order.financialSituationName ?? order.operationSituationName ?? "Não informado",
+      };
+    })
+    .sort((a, b) => (b.exitTime ?? "").localeCompare(a.exitTime ?? ""));
 }
 
 export { JumpParkNotConfiguredError, JumpParkRequestError };
