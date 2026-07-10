@@ -125,6 +125,13 @@ export default function ConfiguracoesPage() {
           <CardContent className="space-y-1 pt-0 text-xs text-foreground-muted">
             <p>Consulte <code className="text-foreground">/api/health</code> para verificação básica da aplicação.</p>
             <p>Consulte <code className="text-foreground">/api/jumppark/status</code> para diagnóstico seguro da integração JumpPark.</p>
+            <p>
+              Veja{" "}
+              <a href="/configuracoes/status" className="text-foreground underline underline-offset-2">
+                /configuracoes/status
+              </a>{" "}
+              para um resumo administrativo de banco, autenticação e estoque.
+            </p>
           </CardContent>
         </Card>
       </div>
