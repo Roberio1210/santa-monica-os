@@ -1,10 +1,12 @@
 import "server-only";
 import type { InventoryRepository } from "@/lib/inventory/repository";
-import type { InventoryItem, StockMovement, MovementType } from "@/lib/inventory/types";
+import type { InventoryItem, StockMovement } from "@/lib/inventory/types";
 import { initialCount20260710 } from "@/lib/inventory/data/initial-count-2026-07-10";
+import { applyMovementDelta } from "@/lib/inventory/movement-math";
 
 /**
- * Implementação em memória, baseada em dados iniciais tipados no código.
+ * Implementação em memória, baseada em dados iniciais tipados no código. Usada automaticamente
+ * quando DATABASE_URL não está configurada (ver src/lib/inventory/repository-factory.ts).
  *
  * LIMITAÇÃO CRÍTICA: em ambiente serverless (Vercel), cada invocação/cold start pode rodar em
  * um processo isolado, sem memória compartilhada. Isso significa que qualquer movimentação
@@ -16,21 +18,6 @@ import { initialCount20260710 } from "@/lib/inventory/data/initial-count-2026-07
  *
  * Ver docs/inventory-module.md para o caminho de migração recomendado.
  */
-function applyDelta(current: number, type: MovementType, quantity: number): number {
-  switch (type) {
-    case "entrada":
-    case "compra":
-      return current + quantity;
-    case "saida":
-    case "perda":
-    case "consumo_interno":
-      return current - quantity;
-    case "ajuste_inventario":
-      // Para ajuste de inventário, quantity é o valor absoluto recontado, não um delta.
-      return quantity;
-  }
-}
-
 export class StaticInventoryRepository implements InventoryRepository {
   private items: InventoryItem[] = initialCount20260710.map((item) => ({ ...item }));
   private movements: StockMovement[] = [];
@@ -54,12 +41,10 @@ export class StaticInventoryRepository implements InventoryRepository {
     const item = this.items.find((i) => i.id === movement.itemId);
     if (!item) throw new Error(`Item de estoque não encontrado: ${movement.itemId}`);
 
-    item.currentQuantity = applyDelta(item.currentQuantity, movement.type, movement.quantity);
+    item.currentQuantity = applyMovementDelta(item.currentQuantity, movement.type, movement.quantity);
 
     const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++) };
     this.movements.push(recorded);
     return { ...recorded };
   }
 }
-
-export const inventoryRepository: InventoryRepository = new StaticInventoryRepository();

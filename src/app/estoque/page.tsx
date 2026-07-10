@@ -1,11 +1,14 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
+import { StorageModeBadge } from "@/components/shared/storage-mode-badge";
 import { InventoryView } from "@/components/inventory/inventory-view";
 import { fetchInventoryOverview } from "@/lib/inventory/service";
+import { getStorageMode } from "@/lib/storage/mode";
 import { ClipboardCheck } from "lucide-react";
 
 export default async function EstoquePage() {
   const { items, summary } = await fetchInventoryOverview();
+  const storageMode = getStorageMode();
 
   return (
     <div className="space-y-6">
@@ -13,10 +16,13 @@ export default async function EstoquePage() {
         title="Estoque"
         description="Contagem física registrada em 10/07/2026 — dados reais, sem estimativas inventadas."
         actions={
-          <Badge variant="positive">
-            <ClipboardCheck className="h-3 w-3" />
-            Contagem manual
-          </Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant="positive">
+              <ClipboardCheck className="h-3 w-3" />
+              Contagem manual
+            </Badge>
+            <StorageModeBadge mode={storageMode} />
+          </div>
         }
       />
 
