@@ -84,10 +84,11 @@ export async function GET(request: Request) {
 
   const today = new Date().toISOString().slice(0, 10);
   const wideStart = "2026-01-01";
+  const financialDate = searchParams.get("date") ?? today;
 
   try {
     const [financial, orders] = await Promise.all([
-      jumpParkClient.request<JsonRecord>("/reports/financial", { startDate: today, endDate: today }),
+      jumpParkClient.request<JsonRecord>("/reports/financial", { startDate: financialDate, endDate: financialDate }),
       jumpParkClient.request<{ data: { content: JsonRecord[] } }>("/serviceorders/export/json", {
         startDate: wideStart,
         endDate: today,
@@ -106,6 +107,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       configured: true,
+      financialDate,
       totalOrdersInRange: orderList.length,
       financialReportSanitized: sanitizeObject(financial),
       orderFieldsObserved: Array.from(orderKeys).sort(),
