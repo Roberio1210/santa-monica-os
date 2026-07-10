@@ -9,6 +9,11 @@ export interface JumpParkFinancialReport {
       total?: number;
       totalAmount?: number;
     };
+    /** Receita de estacionamento puro (ordens sem serviços agregados). */
+    serviceOrders?: {
+      total?: number;
+      totalAmount?: number;
+    };
     paymentMethods?: {
       content?: JumpParkPaymentMethodEntry[];
     };

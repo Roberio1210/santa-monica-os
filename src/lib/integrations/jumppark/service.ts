@@ -31,13 +31,23 @@ function fetchFinancialReport(startDate: string, endDate: string) {
   });
 }
 
+/**
+ * Faturamento total do período: soma a parcela de estacionamento puro
+ * (`serviceOrders.totalAmount`) com a de serviços/lavação (`services.totalAmount`).
+ * Usar só `services.totalAmount` subestima o faturamento real — ver docs/jumppark-data-map.md.
+ */
+function totalRevenue(report: JumpParkFinancialReport): number {
+  const parking = Number(report.data?.serviceOrders?.totalAmount ?? 0);
+  const services = Number(report.data?.services?.totalAmount ?? 0);
+  return parking + services;
+}
+
 /** Espelha `fetch_jumppark_diario` do script Python de referência. */
 export async function fetchDailyFinancial(date: string): Promise<JumpParkDailyFinancial> {
   const report = await fetchFinancialReport(date, date);
 
-  const services = report.data?.services ?? {};
-  const total = Number(services.totalAmount ?? 0);
-  const vehicles = Number(services.total ?? 0);
+  const total = totalRevenue(report);
+  const vehicles = Number(report.data?.services?.total ?? 0);
 
   const content = report.data?.paymentMethods?.content ?? [];
   const totals: Record<PaymentMethod, number> = {
@@ -114,8 +124,8 @@ export async function fetchOverviewMetrics(): Promise<JumpParkOverviewMetrics> {
     fetchServiceOrders(windowStart, today),
   ]);
 
-  const dailyRevenue = Number(dailyReport.data?.services?.totalAmount ?? 0);
-  const monthlyRevenue = Number(monthlyReport.data?.services?.totalAmount ?? 0);
+  const dailyRevenue = totalRevenue(dailyReport);
+  const monthlyRevenue = totalRevenue(monthlyReport);
 
   const vehiclesPresent = recentOrders.filter(
     (order) => (!order.services || order.services.length === 0) && !order.exitDateTime,
