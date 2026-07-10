@@ -49,15 +49,21 @@ async function request<T>(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${env.token}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "SantaMonicaOS/1.0",
+  };
+  if (env.origin) {
+    headers.Origin = env.origin;
+    headers.Referer = env.origin.endsWith("/") ? env.origin : `${env.origin}/`;
+  }
+
   try {
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${env.token}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": "SantaMonicaOS/1.0",
-      },
+      headers,
       signal: controller.signal,
       cache: "no-store",
     });

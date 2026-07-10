@@ -17,7 +17,8 @@
   - `GET /serviceorders/export/json?startDate&endDate` — ordens de serviço (estacionamento,
     lavação, martelinho)
 - **Variáveis de ambiente**: `JUMPPARK_API_BASE_URL`, `JUMPPARK_API_TOKEN`,
-  `JUMPPARK_API_USER_ID`, `JUMPPARK_ESTABLISHMENT_ID`
+  `JUMPPARK_API_USER_ID`, `JUMPPARK_ESTABLISHMENT_ID`, `JUMPPARK_API_ORIGIN` (opcional —
+  origem autorizada no painel JumpPark, enviada em `Origin`/`Referer`)
 - **Implementação**: `src/lib/integrations/jumppark/`
 - **Riscos**: nenhum nesta fase (somente leitura, sem exposição de token ao frontend)
 

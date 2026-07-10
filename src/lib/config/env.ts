@@ -8,6 +8,8 @@ export interface JumpParkEnv {
   token: string;
   userId: string;
   establishmentId: string;
+  /** Origem autorizada no painel JumpPark para Origin/Referer. Opcional. */
+  origin: string | null;
 }
 
 export function getJumpParkEnv(): JumpParkEnv | null {
@@ -15,12 +17,13 @@ export function getJumpParkEnv(): JumpParkEnv | null {
   const token = process.env.JUMPPARK_API_TOKEN;
   const userId = process.env.JUMPPARK_API_USER_ID;
   const establishmentId = process.env.JUMPPARK_ESTABLISHMENT_ID;
+  const origin = process.env.JUMPPARK_API_ORIGIN || null;
 
   if (!baseUrl || !token || !userId || !establishmentId) {
     return null;
   }
 
-  return { baseUrl, token, userId, establishmentId };
+  return { baseUrl, token, userId, establishmentId, origin };
 }
 
 export function isJumpParkConfigured(): boolean {
