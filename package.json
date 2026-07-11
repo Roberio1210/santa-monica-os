@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:inventory": "tsx src/db/seed/inventory.ts",
-    "db:seed:contracts": "tsx src/db/seed/contracts.ts"
+    "db:seed:contracts": "tsx src/db/seed/contracts.ts",
+    "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",
@@ -42,6 +44,7 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }

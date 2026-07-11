@@ -1,7 +1,16 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { contractBenefits, contracts, invoices, partners, payments, receivables, services } from "@/db/schema";
+import {
+  accountsReceivable,
+  contractBenefits,
+  contractValuePeriods,
+  contracts,
+  invoices,
+  partners,
+  payments,
+  services,
+} from "@/db/schema";
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -18,13 +27,13 @@ async function getContractId(db: Db, externalIdValue: string): Promise<string> {
   return rows[0].id;
 }
 
-async function getReceivableId(db: Db, externalIdValue: string): Promise<string> {
+async function getAccountsReceivableId(db: Db, externalIdValue: string): Promise<string> {
   const rows = await db
-    .select({ id: receivables.id })
-    .from(receivables)
-    .where(eq(receivables.externalId, externalIdValue))
+    .select({ id: accountsReceivable.id })
+    .from(accountsReceivable)
+    .where(eq(accountsReceivable.externalId, externalIdValue))
     .limit(1);
-  if (!rows[0]) throw new Error(`Receivable não encontrado para external_id=${externalIdValue}`);
+  if (!rows[0]) throw new Error(`Conta a receber não encontrada para external_id=${externalIdValue}`);
   return rows[0].id;
 }
 
@@ -33,9 +42,9 @@ async function getReceivableId(db: Db, externalIdValue: string): Promise<string>
  * (npm run db:seed:contracts). Idempotente via `external_id` único em cada tabela — rodar mais
  * de uma vez não duplica registros (ON CONFLICT DO NOTHING).
  *
- * Só registra como `receivables`/`payments`/`invoices` eventos financeiros confirmados
+ * Só registra em `accounts_receivable`/`payments`/`invoices` eventos financeiros confirmados
  * explicitamente pelo proprietário. Contratos sem um recebimento confirmado (Funerária, Don
- * Juan) ficam apenas com a regra estrutural (contrato + benefício) — nenhuma cobrança é
+ * Juan) ficam apenas com a regra estrutural (contrato + benefício/vigência) — nenhuma cobrança é
  * inventada ou presumida. Nenhuma cobrança automática é implementada aqui.
  */
 async function main() {
@@ -107,30 +116,41 @@ async function main() {
   const iesaContractId = iesaContract?.id ?? (await getContractId(db, "contrato-iesa-nissan-lavacao"));
 
   // Único evento financeiro confirmado: recebimento de R$ 900,00 em 10/07/2026 referente a
-  // junho/2026, com nota fiscal emitida e forma de pagamento NÃO informada (armazenada como
-  // "desconhecida" — nunca inventada).
+  // junho/2026 (competência do mês anterior), com nota fiscal emitida e forma de pagamento NÃO
+  // informada (armazenada como "desconhecida" — nunca inventada). O caixa entra em 10/07/2026,
+  // mas a competência (o período a que o valor se refere) permanece junho/2026 — essas duas
+  // datas nunca devem ser confundidas na UI (ver /financeiro/contas-a-receber).
   const [iesaReceivable] = await db
-    .insert(receivables)
+    .insert(accountsReceivable)
     .values({
-      contractId: iesaContractId,
       partnerId: iesaPartnerId,
-      referenceMonth: "2026-06-01",
-      amount: "900.00",
+      contractId: iesaContractId,
+      description: "Parceria IESA/Nissan — lavações de junho/2026",
+      competenceDate: "2026-06-01",
+      issueDate: null,
       dueDate: "2026-07-10",
-      status: "pago",
+      expectedAmount: "900.00",
+      receivedAmount: "900.00",
+      outstandingAmount: "0.00",
+      status: "paid",
+      paymentMethod: "desconhecido",
+      invoiceNumber: null,
+      invoiceIssued: true,
+      receivedAt: "2026-07-10",
       source: "seed:contratos-reais",
       externalId: "iesa-recebivel-2026-06",
-      notes: "Referente ao mês anterior (junho/2026), confirmado pelo proprietário.",
+      notes:
+        "Recebido em 10/07/2026, mas referente à competência de junho/2026. Registros do JumpPark lançados como dinheiro não significam necessariamente caixa recebido — este valor confirma o recebimento real relatado pelo proprietário.",
     })
-    .onConflictDoNothing({ target: receivables.externalId })
-    .returning({ id: receivables.id });
+    .onConflictDoNothing({ target: accountsReceivable.externalId })
+    .returning({ id: accountsReceivable.id });
 
-  const iesaReceivableId = iesaReceivable?.id ?? (await getReceivableId(db, "iesa-recebivel-2026-06"));
+  const iesaReceivableId = iesaReceivable?.id ?? (await getAccountsReceivableId(db, "iesa-recebivel-2026-06"));
 
   await db
     .insert(payments)
     .values({
-      receivableId: iesaReceivableId,
+      accountsReceivableId: iesaReceivableId,
       amount: "900.00",
       paidAt: "2026-07-10",
       method: "desconhecido",
@@ -144,7 +164,7 @@ async function main() {
   await db
     .insert(invoices)
     .values({
-      receivableId: iesaReceivableId,
+      accountsReceivableId: iesaReceivableId,
       contractId: iesaContractId,
       number: null,
       issuedAt: null,
@@ -217,7 +237,7 @@ async function main() {
 
   const donJuanPartnerId = donJuanPartner?.id ?? (await getPartnerId(db, "don-juan-fast-burger"));
 
-  await db
+  const [donJuanContract] = await db
     .insert(contracts)
     .values({
       partnerId: donJuanPartnerId,
@@ -226,14 +246,43 @@ async function main() {
       status: "ativo",
       dueDay: 15,
       // Valor varia por competência (R$ 550 até 15/07/2026, R$ 800 a partir de 15/08/2026) —
-      // não há um único "valor base" correto, por isso fica null. Ver notes para o histórico.
+      // não há um único "valor base" correto, por isso fica null. A vigência exata está em
+      // contract_value_periods (abaixo).
       baseValue: null,
       source: "seed:contratos-reais",
       externalId: "contrato-don-juan-fast-burger",
       notes:
-        "R$ 550,00 até 15/07/2026; R$ 800,00 a partir de 15/08/2026. Nenhum recebimento específico foi confirmado pelo proprietário nesta execução — nenhuma receivable foi criada para este contrato.",
+        "R$ 550,00 até 15/07/2026; R$ 800,00 a partir de 15/08/2026. Nenhum recebimento específico foi confirmado pelo proprietário nesta execução — nenhuma conta a receber foi criada para este contrato, apenas a regra de vigência.",
     })
-    .onConflictDoNothing({ target: contracts.externalId });
+    .onConflictDoNothing({ target: contracts.externalId })
+    .returning({ id: contracts.id });
+
+  const donJuanContractId = donJuanContract?.id ?? (await getContractId(db, "contrato-don-juan-fast-burger"));
+
+  await db
+    .insert(contractValuePeriods)
+    .values([
+      {
+        contractId: donJuanContractId,
+        amount: "550.00",
+        effectiveFrom: null, // data de início real não informada — nunca inferida
+        effectiveUntil: "2026-07-15",
+        source: "seed:contratos-reais",
+        externalId: "don-juan-valor-550",
+        notes: "Vigente até 15/07/2026 (data informada pelo proprietário). Início da vigência não informado.",
+      },
+      {
+        contractId: donJuanContractId,
+        amount: "800.00",
+        effectiveFrom: "2026-08-15",
+        effectiveUntil: null,
+        source: "seed:contratos-reais",
+        externalId: "don-juan-valor-800",
+        notes:
+          "Vigente a partir de 15/08/2026 (data informada pelo proprietário). O período entre 16/07/2026 e 14/08/2026 não foi coberto por nenhuma informação do proprietário — não foi inventado nenhum valor para essa lacuna.",
+      },
+    ])
+    .onConflictDoNothing({ target: contractValuePeriods.externalId });
 
   console.log("Seed de contratos/contas a receber aplicado (ou já existente — idempotente).");
   await client.end();
