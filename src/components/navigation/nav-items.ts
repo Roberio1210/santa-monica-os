@@ -12,6 +12,7 @@ import {
   Bot,
   Settings,
   ClipboardList,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ export const navItems: NavItem[] = [
   { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/financeiro", label: "Financeiro", icon: Wallet },
+  { href: "/financeiro/contas-a-receber", label: "Contas a Receber", icon: Receipt },
   { href: "/marketing", label: "Marketing", icon: Megaphone },
   { href: "/estoque", label: "Estoque", icon: Boxes },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
