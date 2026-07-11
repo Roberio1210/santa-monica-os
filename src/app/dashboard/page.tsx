@@ -17,7 +17,6 @@ import { mockFinanceSummary, mockRevenueSeries } from "@/data/mock/finance";
 import { mockWashSummary } from "@/data/mock/wash";
 import { mockParkingSummary } from "@/data/mock/parking";
 import { mockSchedule } from "@/data/mock/schedule";
-import { mockInventory } from "@/data/mock/inventory";
 import { mockCampaigns, mockMarketingSummary } from "@/data/mock/marketing";
 import { mockAlerts } from "@/data/mock/alerts";
 import { mockRecommendations } from "@/data/mock/agents";
@@ -26,6 +25,7 @@ import { vehiclesPerDay, topServices, customersNewVsRecurring } from "@/data/moc
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
+import { fetchInventoryOverview } from "@/lib/inventory/service";
 
 // Evita que dados do JumpPark fiquem congelados no HTML estático gerado em build.
 export const dynamic = "force-dynamic";
@@ -40,7 +40,8 @@ async function getOverviewMetrics() {
 }
 
 export default async function DashboardPage() {
-  const criticalInventory = mockInventory.filter((item) => item.status === "critico").length;
+  const { summary: inventorySummary } = await fetchInventoryOverview();
+  const criticalInventory = inventorySummary.lowStockCount;
   const newCustomers = mockCustomers.filter((c) => c.segments.includes("novo")).length;
   const recurringCustomers = mockCustomers.filter((c) => c.segments.includes("recorrente")).length;
   const overview = await getOverviewMetrics();
@@ -187,10 +188,10 @@ export default async function DashboardPage() {
           title="Estoque"
           href="/estoque"
           rows={[
-            { label: "Itens críticos", value: String(mockInventory.filter((i) => i.status === "critico").length) },
-            { label: "Próximos do mínimo", value: String(mockInventory.filter((i) => i.status === "atencao").length) },
-            { label: "Itens monitorados", value: String(mockInventory.length) },
-            { label: "Sugestões de compra", value: String(mockInventory.filter((i) => i.purchaseSuggestion).length) },
+            { label: "Itens cadastrados", value: String(inventorySummary.totalItems) },
+            { label: "Estoque baixo", value: String(inventorySummary.lowStockCount) },
+            { label: "Próximos do fim", value: String(inventorySummary.nearEmptyCount) },
+            { label: "Sem mínimo definido", value: String(inventorySummary.itemsWithoutMinimum) },
           ]}
         />
         <SummaryBlock

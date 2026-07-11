@@ -1,14 +1,10 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, DollarSign, FileClock, Handshake, TrendingUp, Wallet, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { DemoDataBadge } from "@/components/shared/demo-data-badge";
 import { Unavailable } from "@/components/shared/unavailable";
 import { StatCard } from "@/components/cards/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { RevenueChart } from "@/components/charts/revenue-chart";
-import { PaymentMethodsChart } from "@/components/charts/payment-methods-chart";
-import { mockFinanceSummary, mockRevenueSeries, mockMonthlyRevenueSeries } from "@/data/mock/finance";
 import { formatCurrency } from "@/lib/utils/format";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
@@ -222,38 +218,14 @@ export default async function FinanceiroPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">Histórico e formas de pagamento</p>
-          <DemoDataBadge />
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Receita diária — últimos 7 dias</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <RevenueChart data={mockRevenueSeries} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Formas de pagamento</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <PaymentMethodsChart data={mockFinanceSummary.paymentBreakdown} />
-            </CardContent>
-          </Card>
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Receita mensal — Lavação x Estacionamento</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <RevenueChart data={mockMonthlyRevenueSeries} />
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Histórico e formas de pagamento</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <Unavailable label="Informação indisponível — ainda não há série histórica real de receita nem volume suficiente de contas a receber (hoje só 1 registro) para uma distribuição por forma de pagamento. Nenhum número foi inventado para preencher este espaço." />
+        </CardContent>
+      </Card>
     </div>
   );
 }
