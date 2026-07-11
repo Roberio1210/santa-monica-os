@@ -1,0 +1,2 @@
+ALTER TABLE "contract_benefits" ADD CONSTRAINT "contract_benefits_external_id_unique" UNIQUE("external_id");--> statement-breakpoint
+ALTER TABLE "contract_value_periods" ADD CONSTRAINT "contract_value_periods_external_id_unique" UNIQUE("external_id");

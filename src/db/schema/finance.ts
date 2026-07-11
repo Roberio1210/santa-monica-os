@@ -68,7 +68,8 @@ export const contractValuePeriods = pgTable("contract_value_periods", {
   effectiveUntil: date("effective_until"),
   active: active(),
   source: source(),
-  externalId: externalId(),
+  /** Slug estável (ex.: "don-juan-valor-550"), único, para seed idempotente. */
+  externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
 });
@@ -85,7 +86,8 @@ export const contractBenefits = pgTable("contract_benefits", {
   cumulative: boolean("cumulative").notNull().default(false),
   active: active(),
   source: source(),
-  externalId: externalId(),
+  /** Slug estável (ex.: "beneficio-funeraria-6-lavacoes"), único, para seed idempotente. */
+  externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
 });
