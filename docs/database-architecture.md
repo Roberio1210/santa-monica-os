@@ -1,8 +1,11 @@
 # Arquitetura de banco de dados — Santa Monica OS
 
-Preparação de fundação técnica para banco de dados real, feita em 10/07/2026. **Nenhum banco foi
-criado, nenhuma conta foi aberta, nenhuma credencial foi solicitada.** Esta é só a arquitetura —
-ativação é decisão do proprietário (ver `docs/database-and-auth-setup-guide.md`).
+Fundação técnica para banco de dados real, iniciada em 10/07/2026 e **migrada para produção no
+mesmo dia**: o proprietário criou e conectou um banco Neon Postgres à Vercel
+(`DATABASE_URL`/`POSTGRES_*` configuradas por ele), e as migrations/seeds foram aplicadas e
+confirmadas contra esse banco real. Nenhuma credencial foi solicitada nem manuseada por esta
+sessão além do necessário para rodar os comandos localmente — ver
+`docs/next-session-handoff.md` para o estado exato pós-migração.
 
 ## ORM escolhido: Drizzle
 
@@ -113,11 +116,18 @@ limitação conhecida e documentada, não um esquecimento.
 Registros de auditoria são imutáveis por design: nunca são editados ou desativados, apenas
 criados. Adicionar `updatedAt`/`active` sugeriria uma mutabilidade que não deveria existir.
 
-## Migração inicial
+## Migrações
 
-`drizzle/0000_initial_schema.sql` foi gerada localmente com `npx drizzle-kit generate` (comando
-que não precisa de conexão com banco — apenas lê o schema TypeScript). Cria as 25 tabelas, seus
-enums e foreign keys. Ainda não foi aplicada a nenhum banco real.
+- `drizzle/0000_initial_schema.sql` — gerada localmente com `npx drizzle-kit generate` (sem
+  conexão com banco). Cria as 25 tabelas, seus enums e foreign keys.
+- `drizzle/0001_last_tomorrow_man.sql` — gerada e aplicada em 10/07/2026, na migração real para
+  Neon Postgres. Adiciona `UNIQUE` em `contract_benefits.external_id` e
+  `contract_value_periods.external_id`, que faltavam desde a criação dessas tabelas — o gap só
+  se manifestou ao rodar o seed contra um banco real (o fallback em memória nunca validou a
+  constraint). Ver `docs/next-session-handoff.md`, seção "O que foi corrigido nesta execução".
+
+**Ambas já foram aplicadas ao banco Neon de produção** (conectado à Vercel). `npm run db:migrate`
+continua seguro de rodar de novo — o Drizzle não reaplica migrations já concluídas.
 
 ## Seeds disponíveis
 
@@ -127,12 +137,18 @@ enums e foreign keys. Ainda não foi aplicada a nenhum banco real.
   Juan), e o único evento financeiro confirmado (recebimento IESA de R$ 900,00 em 10/07/2026) —
   `src/db/seed/contracts.ts`.
 - `npm run db:seed:chart-of-accounts` — plano de contas (10 categorias de receita, 15 de
-  despesa) e 6 centros de custo — `src/db/seed/chart-of-accounts.ts`. Só estrutura, nenhum
-  lançamento.
+  despesa) e 6 centros de custo, **e o movimento de caixa da IESA** (R$ 900,00 em 10/07/2026,
+  vinculado à conta a receber e às categorias/centro de custo acima) —
+  `src/db/seed/chart-of-accounts.ts`. **Deve rodar por último**, depois de `contracts.ts`: o
+  movimento de caixa depende da conta a receber já existir, e das categorias/centro de custo
+  criadas neste mesmo script. Se rodado antes de `contracts.ts`, avisa e pula o movimento de
+  caixa em vez de inventar o vínculo.
 
 Todos são idempotentes via colunas `external_id` únicas (ver constraints
-`*_external_id_unique` em `drizzle/0000_initial_schema.sql`) e usam `ON CONFLICT DO NOTHING`:
-rodar o mesmo comando várias vezes nunca duplica dados.
+`*_external_id_unique` em `drizzle/0000_initial_schema.sql` e `drizzle/0001_last_tomorrow_man.sql`)
+e usam `ON CONFLICT DO NOTHING`: rodar o mesmo comando várias vezes nunca duplica dados. **Todos
+os três já foram aplicados e confirmados** contra o Neon de produção em 10/07/2026 — ver
+`docs/next-session-handoff.md` para as contagens exatas de registros.
 
 ## Próximo passo
 

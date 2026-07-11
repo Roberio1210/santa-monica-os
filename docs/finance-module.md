@@ -138,8 +138,11 @@ seção "Histórico e formas de pagamento" com `DemoDataBadge` próprio.
 
 ## Limitações conhecidas
 
-1. Sem banco configurado, nada gravado via `recordPayment` persiste entre invocações serverless
-   em produção — mesma limitação já documentada para o estoque.
+1. **Atualização de 10/07/2026: o banco Neon já está conectado e migrado** — `/financeiro` e
+   `/financeiro/contas-a-receber` agora leem do Postgres real (`PostgresFinanceRepository`), não
+   mais do fallback em memória. `recordPayment` foi testado diretamente contra o Neon e persiste
+   corretamente, mas continua **sem nenhuma UI que o chame** — decisão de segurança deliberada,
+   mantida até haver autenticação completa (ver `docs/next-session-handoff.md`).
 2. Contas a Pagar não existe ainda — só o plano de contas de despesas (estrutura).
 3. Gráficos de `/financeiro` (série histórica, formas de pagamento) continuam demonstrativos —
    não há fonte real de série histórica de receita ainda.

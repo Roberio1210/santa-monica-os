@@ -1,19 +1,24 @@
 # Guia de implantação — banco de dados e autenticação
 
-Roteiro para o proprietário executar, em linguagem simples, sem precisar do Claude. Nenhum passo
-aqui foi executado nesta tarefa — o projeto continua funcionando exatamente como está até que
-você decida seguir este guia. **Nunca cole senhas ou tokens reais em conversas com IA, issues do
-GitHub ou qualquer lugar público.**
+Roteiro para o proprietário executar, em linguagem simples, sem precisar do Claude. **Nunca cole
+senhas ou tokens reais em conversas com IA, issues do GitHub ou qualquer lugar público.**
+
+**Atualização de 10/07/2026: os passos 1 a 4 já foram concluídos.** O proprietário criou e
+conectou um banco Neon Postgres à Vercel, e as migrations + os 3 seeds foram aplicados e
+confirmados (ver `docs/next-session-handoff.md` para as contagens exatas). Os passos 1–4 abaixo
+ficam documentados para referência futura (ex.: recriar o ambiente, montar um banco de
+staging) — o que falta agora são os passos 5–7.
 
 ## Visão geral (ordem recomendada)
 
-1. Criar o banco de dados.
-2. Conectar o banco na Vercel.
-3. Rodar as migrations (cria as tabelas).
-4. Aplicar os seeds (estoque + contratos).
-5. Criar o primeiro usuário `owner` (manual, direto no banco, por enquanto).
+1. ~~Criar o banco de dados.~~ ✅ Concluído (Neon).
+2. ~~Conectar o banco na Vercel.~~ ✅ Concluído.
+3. ~~Rodar as migrations (cria as tabelas).~~ ✅ Concluído — 25 tabelas, 2 migrations aplicadas.
+4. ~~Aplicar os seeds (estoque + contratos + plano de contas).~~ ✅ Concluído — todos os três.
+5. Criar o primeiro usuário `owner` (manual, direto no banco, por enquanto). **Pendente.**
 6. Ativar o gate de acesso temporário (proteção rápida, antes da autenticação completa).
-7. Validar tudo.
+   **Pendente — recomendado com prioridade alta agora que há dado real persistente.**
+7. Validar tudo. Parcialmente feito (banco/seeds validados nesta execução) — falta validar 5–6.
 
 ## 1. Qual banco criar
 
@@ -53,27 +58,32 @@ conta por esta tarefa.
 Todas essas variáveis já estão documentadas (sem valores) em `.env.example` — é só usar os mesmos
 nomes no painel da Vercel.
 
-## 4. Como rodar as migrations (cria as tabelas)
+## 4. Como rodar as migrations (cria as tabelas) — ✅ já feito
 
 Depois de `DATABASE_URL` estar configurada (pode ser rodando localmente com um arquivo
-`.env.local`, ou usando `vercel env pull` para baixar as variáveis de produção para sua máquina):
+`.env.local`, obtido com `vercel env pull .env.local`, ou direto na Vercel):
 
 ```bash
 npm install
-npm run db:migrate
+npx tsx --env-file=.env.local src/db/migrate.ts
 ```
 
-Isso cria as 20 tabelas descritas em `docs/database-architecture.md`. É seguro rodar mais de uma
-vez — o Drizzle sabe quais migrations já foram aplicadas.
+Isso cria as 25 tabelas descritas em `docs/database-architecture.md`. É seguro rodar mais de uma
+vez — o Drizzle sabe quais migrations já foram aplicadas. (`npm run db:migrate` funciona igual,
+desde que `DATABASE_URL` já esteja exportada no shell.)
 
-## 5. Como aplicar os seeds
+## 5. Como aplicar os seeds — ✅ já feito
 
 ```bash
-npm run db:seed:inventory   # os 48 itens da contagem física de 10/07/2026
-npm run db:seed:contracts   # contratos reais: IESA/Nissan, Funerária, Don Juan Fast Burger
+npx tsx --env-file=.env.local src/db/seed/inventory.ts          # os 48 itens da contagem física
+npx tsx --env-file=.env.local src/db/seed/contracts.ts          # IESA/Nissan, Funerária, Don Juan
+npx tsx --env-file=.env.local src/db/seed/chart-of-accounts.ts  # plano de contas + rodar por último
 ```
 
-Também seguro rodar mais de uma vez — os dois scripts são idempotentes (não duplicam registros).
+A ordem importa: `chart-of-accounts.ts` precisa rodar depois de `contracts.ts`, porque também
+grava o movimento de caixa da IESA (vinculado à conta a receber criada pelo seed anterior). Se
+rodado fora de ordem, ele apenas avisa e pula esse vínculo — nunca inventa. Todos os três são
+idempotentes (seguro rodar de novo a qualquer momento).
 
 ## 6. Como criar o primeiro usuário `owner`
 
@@ -109,10 +119,12 @@ essa etapa. Enquanto isso, o Nível 1 é a proteção real do app.
 
 Depois de cada etapa:
 
-- **Depois do passo 4 (migrations):** confira no painel do banco se as 20 tabelas apareceram
-  (`users`, `inventory_items`, `contracts`, etc.).
-- **Depois do passo 5 (seeds):** rode uma consulta simples, `SELECT COUNT(*) FROM inventory_items;`
-  — deve retornar `48`. `SELECT COUNT(*) FROM partners;` deve retornar `3`.
+- **Depois do passo 4 (migrations):** confira no painel do banco se as 25 tabelas apareceram
+  (`users`, `inventory_items`, `contracts`, etc.). ✅ Confirmado em 10/07/2026.
+- **Depois do passo 5 (seeds):** `SELECT COUNT(*) FROM inventory_items;` deve retornar `48`.
+  `SELECT COUNT(*) FROM partners;` deve retornar `3`. `SELECT COUNT(*) FROM cash_movements;` deve
+  retornar `1`. ✅ Confirmado em 10/07/2026 — ver `docs/next-session-handoff.md` para a lista
+  completa de contagens.
 - **Depois do passo 6 (gate temporário):** acesse o site em uma aba anônima — o navegador deve
   pedir usuário/senha antes de mostrar qualquer página. Acesse `/api/health` — deve continuar
   respondendo sem pedir senha.

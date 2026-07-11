@@ -68,7 +68,7 @@ tela/uso real) · **não iniciado** · **bloqueado**.
   nesta execução mantendo as duas fontes separadas na UI, nunca somadas automaticamente.
 - **Critério de aceite:** o recebimento de R$ 900,00 da IESA aparece como entrada de caixa e como
   baixa de conta a receber, nunca como faturamento operacional do dia 10/07/2026. **Atendido.**
-- **Status:** concluído (para o escopo desta execução — falta apenas banco real em produção).
+- **Status:** concluído — banco real conectado em 10/07/2026 (Neon), dados confirmados persistindo.
 
 ## Contas a Receber
 
@@ -86,7 +86,7 @@ tela/uso real) · **não iniciado** · **bloqueado**.
 - **Critério de aceite:** a conta da IESA aparece com status `paid`, valor recebido = R$ 900,00,
   forma de pagamento "não informado", nota fiscal emitida = sim, sem valores inventados.
   **Atendido — verificado por teste automatizado.**
-- **Status:** concluído (para o escopo desta execução — falta apenas persistência real em banco).
+- **Status:** concluído — persistindo em Postgres real (Neon) desde 10/07/2026.
 
 ## Contas a Pagar
 
@@ -103,17 +103,18 @@ tela/uso real) · **não iniciado** · **bloqueado**.
 ## Estoque
 
 - **Objetivo:** controle de produtos, quantidade e movimentações.
-- **Prontas:** 48 itens da contagem física; repositório com fallback automático Postgres/memória;
-  seed idempotente; UI de consulta, busca e filtros.
-- **Pendentes:** ativar `PostgresInventoryRepository` em produção (precisa de banco); habilitar UI
-  de movimentação manual (precisa de banco + autenticação); baixa automática por consumo de
-  serviço (Fase 7 do roadmap).
+- **Prontas:** 48 itens da contagem física, persistindo em Postgres real (Neon) desde 10/07/2026;
+  repositório com fallback automático Postgres/memória (`PostgresInventoryRepository` ativo em
+  produção); seed idempotente; UI de consulta, busca e filtros.
+- **Pendentes:** habilitar UI de movimentação manual (arquitetura testada contra o banco real,
+  falta autenticação para proteger a ação); baixa automática por consumo de serviço (Fase 7 do
+  roadmap).
 - **Prioridade:** alta (Fase 3 do roadmap consolidado).
-- **Dependências:** banco de dados, autenticação.
-- **Riscos:** sem banco, qualquer movimentação futura não persiste — já documentado e a UI de
-  escrita já está desabilitada por esse motivo.
-- **Critério de aceite:** já atendido para consulta; persistência real terá critério próprio.
-- **Status:** preparado (consulta concluída, persistência bloqueada por falta de banco).
+- **Dependências:** autenticação (para habilitar a UI de escrita).
+- **Riscos:** nenhuma UI grava ainda, de propósito — não confundir com limitação técnica.
+- **Critério de aceite:** já atendido para consulta e persistência real (confirmado por teste
+  funcional de create/edit/delete contra o Neon).
+- **Status:** concluído (consulta + persistência real); UI de escrita aguardando autenticação.
 
 ## Compras
 
@@ -265,8 +266,8 @@ entregas/dependências/critérios por fase) — aqui é só o mapa de prioridade
 
 | Fase | Foco | Módulos envolvidos | Status geral |
 | --- | --- | --- | --- |
-| **Fase 1** | Segurança e banco | Segurança, (todos os módulos dependem indiretamente) | Em andamento — gate temporário pronto, autenticação completa e banco real pendentes |
-| **Fase 2** | Financeiro e contratos | Financeiro, Contas a Receber, Contratos | Concluído (escopo desta execução) — falta apenas banco real e Contas a Pagar |
+| **Fase 1** | Segurança e banco | Segurança, (todos os módulos dependem indiretamente) | Em andamento — banco real conectado e migrado (10/07/2026); gate temporário pronto mas ainda desativado; autenticação completa pendente |
+| **Fase 2** | Financeiro e contratos | Financeiro, Contas a Receber, Contratos | Concluído, incl. banco real (Neon) — falta apenas Contas a Pagar |
 | **Fase 3** | Estoque persistente | Estoque | Preparado — falta banco em produção |
 | **Fase 4** | CRM | CRM, Dashboard (parcial) | Preparado — modelo pronto, tela ainda mock |
 | **Fase 5** | RH | RH | Bloqueado — aguarda contratos PJ assinados |
