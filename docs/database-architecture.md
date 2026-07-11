@@ -38,13 +38,16 @@ src/db/
     crm.ts                   # customers, vehicles
     inventory.ts              # inventory_items, inventory_movements, services, service_consumption_rules
     jumppark.ts                 # jumppark_service_orders, jumppark_sync_logs
-    finance.ts                   # partners, contracts, contract_benefits, receivables, payments, invoices
+    finance.ts                   # partners, contracts, contract_value_periods, contract_benefits,
+                                  # accounts_receivable, payments, invoices, financial_categories,
+                                  # cost_centers, cash_movements, reconciliation_records
     system.ts                     # alerts, audit_logs
     index.ts                       # barrel
   migrate.ts               # script de linha de comando (npm run db:migrate)
   seed/
     inventory.ts            # seed idempotente dos 48 itens (npm run db:seed:inventory)
     contracts.ts              # seed dos 3 contratos reais (IESA, Funerária, Don Juan)
+    chart-of-accounts.ts        # seed do plano de contas e centros de custo (npm run db:seed:chart-of-accounts)
 drizzle/
   0000_initial_schema.sql   # migration inicial, gerada offline (sem conexão com banco)
   meta/                        # metadados internos do drizzle-kit
@@ -66,7 +69,7 @@ drizzle.config.ts             # config da CLI drizzle-kit (não usado pelo app e
 
 Build validado nesta tarefa com `DATABASE_URL` ausente (ver relatório final da execução).
 
-## Tabelas modeladas (20)
+## Tabelas modeladas (25)
 
 Todas incluem `createdAt`, `updatedAt`, `active`, `source`, `externalId`, `notes` (exceto
 `audit_logs`, ver nota abaixo), conforme pedido. Colunas de negócio específicas resumidas:
@@ -87,10 +90,15 @@ Todas incluem `createdAt`, `updatedAt`, `active`, `source`, `externalId`, `notes
 | `jumppark_sync_logs` | Auditoria de sincronizações | `status`, `attempt`, `errorMessage` sanitizado |
 | `partners` | Parceiros/contratantes B2B | `name`, `type` |
 | `contracts` | Contratos com parceiros | `type`, `status`, `billingClosingDay`, `dueDay`, `baseValue` nullable |
+| `contract_value_periods` | Vigências de valor de um contrato (ex.: reajuste Don Juan) | `amount`, `effectiveFrom`/`effectiveUntil` nullable |
 | `contract_benefits` | Benefícios inclusos no contrato | `description`, `quantityPerPeriod`, `cumulative` |
-| `receivables` | Contas a receber | `referenceMonth`, `amount`, `dueDate`, `status` (inclui `desconhecido`) |
-| `payments` | Recebimentos efetivos | `method` (inclui `desconhecido`), `invoiceIssued` |
-| `invoices` | Notas fiscais emitidas | `number`, `issuedAt`, `amount` nullable |
+| `accounts_receivable` | Contas a receber (módulo Financeiro, ver `docs/finance-module.md`) | `customerId`/`partnerId`/`contractId`, `competenceDate`, `dueDate`, `expectedAmount`/`receivedAmount`/`outstandingAmount`, `status` (draft/open/partially_paid/paid/overdue/cancelled), `paymentMethod` (inclui `desconhecido`), `invoiceNumber` nullable |
+| `payments` | Recebimentos efetivos | `accountsReceivableId` FK, `method` (inclui `desconhecido`), `invoiceIssued` |
+| `invoices` | Notas fiscais emitidas | `accountsReceivableId` FK, `number`, `issuedAt`, `amount` nullable |
+| `financial_categories` | Plano de contas (receitas/despesas) | `name`, `type` (receita/despesa) — só estrutura, sem lançamentos |
+| `cost_centers` | Centros de custo | `name` — só estrutura |
+| `cash_movements` | Entradas/saídas de caixa reais | `date`, `type`, `amount`, `accountsReceivableId`/`categoryId`/`costCenterId` FK nullable |
+| `reconciliation_records` | Conciliação futura (Stone/banco) | `cashMovementId` FK, `externalReference`, `matchStatus` — preparada, vazia |
 | `alerts` | Alertas do sistema | `severity`, `message`, `resolved` |
 | `audit_logs` | Trilha de auditoria | `actorUserId`, `action`, `beforeState`/`afterState` jsonb |
 
@@ -108,17 +116,21 @@ criados. Adicionar `updatedAt`/`active` sugeriria uma mutabilidade que não deve
 ## Migração inicial
 
 `drizzle/0000_initial_schema.sql` foi gerada localmente com `npx drizzle-kit generate` (comando
-que não precisa de conexão com banco — apenas lê o schema TypeScript). Cria as 20 tabelas, seus
+que não precisa de conexão com banco — apenas lê o schema TypeScript). Cria as 25 tabelas, seus
 enums e foreign keys. Ainda não foi aplicada a nenhum banco real.
 
 ## Seeds disponíveis
 
 - `npm run db:seed:inventory` — os 48 itens da contagem física (`src/db/seed/inventory.ts`).
 - `npm run db:seed:contracts` — os 2 serviços de referência (Lavação parceria IESA, Lavação
-  funerária), os 3 parceiros reais e seus contratos, e o único evento financeiro confirmado
-  (recebimento IESA de R$ 900,00 em 10/07/2026) — `src/db/seed/contracts.ts`.
+  funerária), os 3 parceiros reais e seus contratos (com vigências de valor, no caso do Don
+  Juan), e o único evento financeiro confirmado (recebimento IESA de R$ 900,00 em 10/07/2026) —
+  `src/db/seed/contracts.ts`.
+- `npm run db:seed:chart-of-accounts` — plano de contas (10 categorias de receita, 15 de
+  despesa) e 6 centros de custo — `src/db/seed/chart-of-accounts.ts`. Só estrutura, nenhum
+  lançamento.
 
-Ambos são idempotentes via colunas `external_id` únicas (ver constraints
+Todos são idempotentes via colunas `external_id` únicas (ver constraints
 `*_external_id_unique` em `drizzle/0000_initial_schema.sql`) e usam `ON CONFLICT DO NOTHING`:
 rodar o mesmo comando várias vezes nunca duplica dados.
 

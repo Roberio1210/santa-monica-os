@@ -7,11 +7,14 @@ CREATE TYPE "public"."inventory_condition" AS ENUM('lacrado', 'aberto', 'pela_me
 CREATE TYPE "public"."inventory_unit" AS ENUM('L', 'ml', 'kg', 'g', 'unidade', 'caixa');--> statement-breakpoint
 CREATE TYPE "public"."movement_type" AS ENUM('entrada', 'saida', 'ajuste_inventario', 'perda', 'consumo_interno', 'compra');--> statement-breakpoint
 CREATE TYPE "public"."sync_status" AS ENUM('running', 'success', 'partial', 'error');--> statement-breakpoint
+CREATE TYPE "public"."accounts_receivable_status" AS ENUM('draft', 'open', 'partially_paid', 'paid', 'overdue', 'cancelled');--> statement-breakpoint
+CREATE TYPE "public"."cash_movement_type" AS ENUM('entrada', 'saida');--> statement-breakpoint
 CREATE TYPE "public"."contract_status" AS ENUM('ativo', 'suspenso', 'encerrado');--> statement-breakpoint
 CREATE TYPE "public"."contract_type" AS ENUM('parceria_pos_paga', 'mensalidade');--> statement-breakpoint
+CREATE TYPE "public"."financial_category_type" AS ENUM('receita', 'despesa');--> statement-breakpoint
 CREATE TYPE "public"."partner_type" AS ENUM('parceria_pos_paga', 'contrato_mensal', 'outro');--> statement-breakpoint
 CREATE TYPE "public"."payment_method_extended" AS ENUM('dinheiro', 'debito', 'credito', 'pix', 'boleto', 'transferencia', 'outro', 'desconhecido');--> statement-breakpoint
-CREATE TYPE "public"."receivable_status" AS ENUM('pendente', 'pago', 'atrasado', 'desconhecido');--> statement-breakpoint
+CREATE TYPE "public"."reconciliation_match_status" AS ENUM('matched', 'unmatched', 'partial');--> statement-breakpoint
 CREATE TYPE "public"."alert_severity" AS ENUM('info', 'warning', 'critical');--> statement-breakpoint
 CREATE TABLE "users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -220,6 +223,50 @@ CREATE TABLE "jumppark_sync_logs" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "accounts_receivable" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"customer_id" uuid,
+	"partner_id" uuid,
+	"contract_id" uuid,
+	"description" text NOT NULL,
+	"competence_date" date NOT NULL,
+	"issue_date" date,
+	"due_date" date NOT NULL,
+	"expected_amount" numeric(12, 2) NOT NULL,
+	"received_amount" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"outstanding_amount" numeric(12, 2) NOT NULL,
+	"status" "accounts_receivable_status" DEFAULT 'open' NOT NULL,
+	"payment_method" "payment_method_extended" DEFAULT 'desconhecido' NOT NULL,
+	"invoice_number" text,
+	"invoice_issued" boolean DEFAULT false NOT NULL,
+	"received_at" date,
+	"active" boolean DEFAULT true NOT NULL,
+	"source" text DEFAULT 'manual' NOT NULL,
+	"external_id" text,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "accounts_receivable_external_id_unique" UNIQUE("external_id")
+);
+--> statement-breakpoint
+CREATE TABLE "cash_movements" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"date" date NOT NULL,
+	"type" "cash_movement_type" NOT NULL,
+	"amount" numeric(12, 2) NOT NULL,
+	"description" text NOT NULL,
+	"accounts_receivable_id" uuid,
+	"category_id" uuid,
+	"cost_center_id" uuid,
+	"active" boolean DEFAULT true NOT NULL,
+	"source" text DEFAULT 'manual' NOT NULL,
+	"external_id" text,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "cash_movements_external_id_unique" UNIQUE("external_id")
+);
+--> statement-breakpoint
 CREATE TABLE "contract_benefits" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"contract_id" uuid NOT NULL,
@@ -227,6 +274,20 @@ CREATE TABLE "contract_benefits" (
 	"quantity_per_period" integer,
 	"period_type" text DEFAULT 'mensal' NOT NULL,
 	"cumulative" boolean DEFAULT false NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"source" text DEFAULT 'manual' NOT NULL,
+	"external_id" text,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "contract_value_periods" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"contract_id" uuid NOT NULL,
+	"amount" numeric(12, 2) NOT NULL,
+	"effective_from" date,
+	"effective_until" date,
 	"active" boolean DEFAULT true NOT NULL,
 	"source" text DEFAULT 'manual' NOT NULL,
 	"external_id" text,
@@ -255,9 +316,34 @@ CREATE TABLE "contracts" (
 	CONSTRAINT "contracts_external_id_unique" UNIQUE("external_id")
 );
 --> statement-breakpoint
+CREATE TABLE "cost_centers" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"name" text NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"source" text DEFAULT 'manual' NOT NULL,
+	"external_id" text,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "cost_centers_external_id_unique" UNIQUE("external_id")
+);
+--> statement-breakpoint
+CREATE TABLE "financial_categories" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"name" text NOT NULL,
+	"type" "financial_category_type" NOT NULL,
+	"active" boolean DEFAULT true NOT NULL,
+	"source" text DEFAULT 'manual' NOT NULL,
+	"external_id" text,
+	"notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "financial_categories_external_id_unique" UNIQUE("external_id")
+);
+--> statement-breakpoint
 CREATE TABLE "invoices" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"receivable_id" uuid,
+	"accounts_receivable_id" uuid,
 	"contract_id" uuid,
 	"number" text,
 	"issued_at" date,
@@ -288,7 +374,7 @@ CREATE TABLE "partners" (
 --> statement-breakpoint
 CREATE TABLE "payments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"receivable_id" uuid,
+	"accounts_receivable_id" uuid,
 	"amount" numeric(12, 2) NOT NULL,
 	"paid_at" date,
 	"method" "payment_method_extended" DEFAULT 'desconhecido' NOT NULL,
@@ -302,21 +388,19 @@ CREATE TABLE "payments" (
 	CONSTRAINT "payments_external_id_unique" UNIQUE("external_id")
 );
 --> statement-breakpoint
-CREATE TABLE "receivables" (
+CREATE TABLE "reconciliation_records" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"contract_id" uuid,
-	"partner_id" uuid,
-	"reference_month" date NOT NULL,
-	"amount" numeric(12, 2) NOT NULL,
-	"due_date" date NOT NULL,
-	"status" "receivable_status" DEFAULT 'pendente' NOT NULL,
+	"cash_movement_id" uuid,
+	"external_reference" text,
+	"matched_amount" numeric(12, 2),
+	"match_status" "reconciliation_match_status" DEFAULT 'unmatched' NOT NULL,
+	"reconciled_at" date,
 	"active" boolean DEFAULT true NOT NULL,
 	"source" text DEFAULT 'manual' NOT NULL,
 	"external_id" text,
 	"notes" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "receivables_external_id_unique" UNIQUE("external_id")
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "alerts" (
@@ -354,11 +438,17 @@ ALTER TABLE "vehicles" ADD CONSTRAINT "vehicles_customer_id_customers_id_fk" FOR
 ALTER TABLE "inventory_movements" ADD CONSTRAINT "inventory_movements_item_id_inventory_items_id_fk" FOREIGN KEY ("item_id") REFERENCES "public"."inventory_items"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "service_consumption_rules" ADD CONSTRAINT "service_consumption_rules_service_id_services_id_fk" FOREIGN KEY ("service_id") REFERENCES "public"."services"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "service_consumption_rules" ADD CONSTRAINT "service_consumption_rules_item_id_inventory_items_id_fk" FOREIGN KEY ("item_id") REFERENCES "public"."inventory_items"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "accounts_receivable" ADD CONSTRAINT "accounts_receivable_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "accounts_receivable" ADD CONSTRAINT "accounts_receivable_partner_id_partners_id_fk" FOREIGN KEY ("partner_id") REFERENCES "public"."partners"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "accounts_receivable" ADD CONSTRAINT "accounts_receivable_contract_id_contracts_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."contracts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cash_movements" ADD CONSTRAINT "cash_movements_accounts_receivable_id_accounts_receivable_id_fk" FOREIGN KEY ("accounts_receivable_id") REFERENCES "public"."accounts_receivable"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cash_movements" ADD CONSTRAINT "cash_movements_category_id_financial_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."financial_categories"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cash_movements" ADD CONSTRAINT "cash_movements_cost_center_id_cost_centers_id_fk" FOREIGN KEY ("cost_center_id") REFERENCES "public"."cost_centers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contract_benefits" ADD CONSTRAINT "contract_benefits_contract_id_contracts_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."contracts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contract_value_periods" ADD CONSTRAINT "contract_value_periods_contract_id_contracts_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."contracts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contracts" ADD CONSTRAINT "contracts_partner_id_partners_id_fk" FOREIGN KEY ("partner_id") REFERENCES "public"."partners"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "invoices" ADD CONSTRAINT "invoices_receivable_id_receivables_id_fk" FOREIGN KEY ("receivable_id") REFERENCES "public"."receivables"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "invoices" ADD CONSTRAINT "invoices_accounts_receivable_id_accounts_receivable_id_fk" FOREIGN KEY ("accounts_receivable_id") REFERENCES "public"."accounts_receivable"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invoices" ADD CONSTRAINT "invoices_contract_id_contracts_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."contracts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "payments" ADD CONSTRAINT "payments_receivable_id_receivables_id_fk" FOREIGN KEY ("receivable_id") REFERENCES "public"."receivables"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "receivables" ADD CONSTRAINT "receivables_contract_id_contracts_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."contracts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "receivables" ADD CONSTRAINT "receivables_partner_id_partners_id_fk" FOREIGN KEY ("partner_id") REFERENCES "public"."partners"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payments" ADD CONSTRAINT "payments_accounts_receivable_id_accounts_receivable_id_fk" FOREIGN KEY ("accounts_receivable_id") REFERENCES "public"."accounts_receivable"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "reconciliation_records" ADD CONSTRAINT "reconciliation_records_cash_movement_id_cash_movements_id_fk" FOREIGN KEY ("cash_movement_id") REFERENCES "public"."cash_movements"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_actor_user_id_users_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;

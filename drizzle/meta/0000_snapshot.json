@@ -1,5 +1,5 @@
 {
-  "id": "56e32bf5-75f8-4acb-87ea-f6d9b88c9f16",
+  "id": "6da4b5b4-0fc2-48a1-9352-e73ea94610f3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1355,6 +1355,361 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.accounts_receivable": {
+      "name": "accounts_receivable",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "partner_id": {
+          "name": "partner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contract_id": {
+          "name": "contract_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "competence_date": {
+          "name": "competence_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issue_date": {
+          "name": "issue_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expected_amount": {
+          "name": "expected_amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_amount": {
+          "name": "received_amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "outstanding_amount": {
+          "name": "outstanding_amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "accounts_receivable_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "payment_method": {
+          "name": "payment_method",
+          "type": "payment_method_extended",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'desconhecido'"
+        },
+        "invoice_number": {
+          "name": "invoice_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_issued": {
+          "name": "invoice_issued",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "accounts_receivable_customer_id_customers_id_fk": {
+          "name": "accounts_receivable_customer_id_customers_id_fk",
+          "tableFrom": "accounts_receivable",
+          "tableTo": "customers",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "accounts_receivable_partner_id_partners_id_fk": {
+          "name": "accounts_receivable_partner_id_partners_id_fk",
+          "tableFrom": "accounts_receivable",
+          "tableTo": "partners",
+          "columnsFrom": [
+            "partner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "accounts_receivable_contract_id_contracts_id_fk": {
+          "name": "accounts_receivable_contract_id_contracts_id_fk",
+          "tableFrom": "accounts_receivable",
+          "tableTo": "contracts",
+          "columnsFrom": [
+            "contract_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "accounts_receivable_external_id_unique": {
+          "name": "accounts_receivable_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.cash_movements": {
+      "name": "cash_movements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "cash_movement_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accounts_receivable_id": {
+          "name": "accounts_receivable_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost_center_id": {
+          "name": "cost_center_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cash_movements_accounts_receivable_id_accounts_receivable_id_fk": {
+          "name": "cash_movements_accounts_receivable_id_accounts_receivable_id_fk",
+          "tableFrom": "cash_movements",
+          "tableTo": "accounts_receivable",
+          "columnsFrom": [
+            "accounts_receivable_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cash_movements_category_id_financial_categories_id_fk": {
+          "name": "cash_movements_category_id_financial_categories_id_fk",
+          "tableFrom": "cash_movements",
+          "tableTo": "financial_categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cash_movements_cost_center_id_cost_centers_id_fk": {
+          "name": "cash_movements_cost_center_id_cost_centers_id_fk",
+          "tableFrom": "cash_movements",
+          "tableTo": "cost_centers",
+          "columnsFrom": [
+            "cost_center_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cash_movements_external_id_unique": {
+          "name": "cash_movements_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.contract_benefits": {
       "name": "contract_benefits",
       "schema": "",
@@ -1444,6 +1799,104 @@
         "contract_benefits_contract_id_contracts_id_fk": {
           "name": "contract_benefits_contract_id_contracts_id_fk",
           "tableFrom": "contract_benefits",
+          "tableTo": "contracts",
+          "columnsFrom": [
+            "contract_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.contract_value_periods": {
+      "name": "contract_value_periods",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "contract_id": {
+          "name": "contract_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(12, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effective_until": {
+          "name": "effective_until",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "contract_value_periods_contract_id_contracts_id_fk": {
+          "name": "contract_value_periods_contract_id_contracts_id_fk",
+          "tableFrom": "contract_value_periods",
           "tableTo": "contracts",
           "columnsFrom": [
             "contract_id"
@@ -1600,6 +2053,161 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.cost_centers": {
+      "name": "cost_centers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cost_centers_external_id_unique": {
+          "name": "cost_centers_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.financial_categories": {
+      "name": "financial_categories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "financial_category_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "financial_categories_external_id_unique": {
+          "name": "financial_categories_external_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "external_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.invoices": {
       "name": "invoices",
       "schema": "",
@@ -1611,8 +2219,8 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "receivable_id": {
-          "name": "receivable_id",
+        "accounts_receivable_id": {
+          "name": "accounts_receivable_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -1684,12 +2292,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "invoices_receivable_id_receivables_id_fk": {
-          "name": "invoices_receivable_id_receivables_id_fk",
+        "invoices_accounts_receivable_id_accounts_receivable_id_fk": {
+          "name": "invoices_accounts_receivable_id_accounts_receivable_id_fk",
           "tableFrom": "invoices",
-          "tableTo": "receivables",
+          "tableTo": "accounts_receivable",
           "columnsFrom": [
-            "receivable_id"
+            "accounts_receivable_id"
           ],
           "columnsTo": [
             "id"
@@ -1829,8 +2437,8 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "receivable_id": {
-          "name": "receivable_id",
+        "accounts_receivable_id": {
+          "name": "accounts_receivable_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -1905,12 +2513,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "payments_receivable_id_receivables_id_fk": {
-          "name": "payments_receivable_id_receivables_id_fk",
+        "payments_accounts_receivable_id_accounts_receivable_id_fk": {
+          "name": "payments_accounts_receivable_id_accounts_receivable_id_fk",
           "tableFrom": "payments",
-          "tableTo": "receivables",
+          "tableTo": "accounts_receivable",
           "columnsFrom": [
-            "receivable_id"
+            "accounts_receivable_id"
           ],
           "columnsTo": [
             "id"
@@ -1933,8 +2541,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.receivables": {
-      "name": "receivables",
+    "public.reconciliation_records": {
+      "name": "reconciliation_records",
       "schema": "",
       "columns": {
         "id": {
@@ -1944,43 +2552,37 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "contract_id": {
-          "name": "contract_id",
+        "cash_movement_id": {
+          "name": "cash_movement_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "partner_id": {
-          "name": "partner_id",
-          "type": "uuid",
+        "external_reference": {
+          "name": "external_reference",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "reference_month": {
-          "name": "reference_month",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount": {
-          "name": "amount",
+        "matched_amount": {
+          "name": "matched_amount",
           "type": "numeric(12, 2)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "due_date": {
-          "name": "due_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "receivable_status",
+        "match_status": {
+          "name": "match_status",
+          "type": "reconciliation_match_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pendente'"
+          "default": "'unmatched'"
+        },
+        "reconciled_at": {
+          "name": "reconciled_at",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         },
         "active": {
           "name": "active",
@@ -2025,25 +2627,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "receivables_contract_id_contracts_id_fk": {
-          "name": "receivables_contract_id_contracts_id_fk",
-          "tableFrom": "receivables",
-          "tableTo": "contracts",
+        "reconciliation_records_cash_movement_id_cash_movements_id_fk": {
+          "name": "reconciliation_records_cash_movement_id_cash_movements_id_fk",
+          "tableFrom": "reconciliation_records",
+          "tableTo": "cash_movements",
           "columnsFrom": [
-            "contract_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "receivables_partner_id_partners_id_fk": {
-          "name": "receivables_partner_id_partners_id_fk",
-          "tableFrom": "receivables",
-          "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
+            "cash_movement_id"
           ],
           "columnsTo": [
             "id"
@@ -2053,15 +2642,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "receivables_external_id_unique": {
-          "name": "receivables_external_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "external_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2364,6 +2945,26 @@
         "error"
       ]
     },
+    "public.accounts_receivable_status": {
+      "name": "accounts_receivable_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "open",
+        "partially_paid",
+        "paid",
+        "overdue",
+        "cancelled"
+      ]
+    },
+    "public.cash_movement_type": {
+      "name": "cash_movement_type",
+      "schema": "public",
+      "values": [
+        "entrada",
+        "saida"
+      ]
+    },
     "public.contract_status": {
       "name": "contract_status",
       "schema": "public",
@@ -2379,6 +2980,14 @@
       "values": [
         "parceria_pos_paga",
         "mensalidade"
+      ]
+    },
+    "public.financial_category_type": {
+      "name": "financial_category_type",
+      "schema": "public",
+      "values": [
+        "receita",
+        "despesa"
       ]
     },
     "public.partner_type": {
@@ -2404,14 +3013,13 @@
         "desconhecido"
       ]
     },
-    "public.receivable_status": {
-      "name": "receivable_status",
+    "public.reconciliation_match_status": {
+      "name": "reconciliation_match_status",
       "schema": "public",
       "values": [
-        "pendente",
-        "pago",
-        "atrasado",
-        "desconhecido"
+        "matched",
+        "unmatched",
+        "partial"
       ]
     },
     "public.alert_severity": {
