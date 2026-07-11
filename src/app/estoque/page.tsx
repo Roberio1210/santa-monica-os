@@ -6,6 +6,11 @@ import { fetchInventoryOverview } from "@/lib/inventory/service";
 import { getStorageMode } from "@/lib/storage/mode";
 import { ClipboardCheck } from "lucide-react";
 
+// Evita que o estoque fique congelado no HTML estático gerado em build — agora que pode vir de
+// um banco real e mutável (PostgresInventoryRepository), o build-time snapshot ficaria
+// permanentemente desatualizado sem isso.
+export const dynamic = "force-dynamic";
+
 export default async function EstoquePage() {
   const { items, summary } = await fetchInventoryOverview();
   const storageMode = getStorageMode();

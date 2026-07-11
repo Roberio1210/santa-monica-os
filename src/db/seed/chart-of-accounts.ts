@@ -1,6 +1,7 @@
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { costCenters, financialCategories } from "@/db/schema";
+import { accountsReceivable, cashMovements, costCenters, financialCategories } from "@/db/schema";
 
 /**
  * Plano de contas inicial (Parte 6 da execução de 10/07/2026) — npm run db:seed:chart-of-accounts.
@@ -100,6 +101,53 @@ async function main() {
   console.log(
     `Plano de contas aplicado: ${revenueCategories.length} categorias de receita, ${expenseCategories.length} de despesa, ${costCenterNames.length} centros de custo (idempotente).`,
   );
+
+  // --- Movimento de caixa real da IESA (Parte 3 do módulo Financeiro) ---
+  // Depende de contracts.ts (accounts_receivable) já ter rodado. Roda aqui, por último, porque
+  // também depende das categorias/centros de custo acima já existirem. Se a conta a receber da
+  // IESA ainda não existir (ex.: chart-of-accounts rodado isoladamente, fora da ordem
+  // recomendada), o movimento de caixa é pulado com um aviso — nunca inventamos o vínculo.
+  const [iesaReceivable] = await db
+    .select({ id: accountsReceivable.id })
+    .from(accountsReceivable)
+    .where(eq(accountsReceivable.externalId, "iesa-recebivel-2026-06"))
+    .limit(1);
+
+  if (!iesaReceivable) {
+    console.warn(
+      "Aviso: conta a receber 'iesa-recebivel-2026-06' não encontrada — rode 'npm run db:seed:contracts' antes deste seed para registrar o movimento de caixa correspondente. Nenhum movimento foi inventado.",
+    );
+  } else {
+    const [category] = await db
+      .select({ id: financialCategories.id })
+      .from(financialCategories)
+      .where(eq(financialCategories.externalId, "receita-parcerias-pos-pagas"))
+      .limit(1);
+    const [costCenter] = await db
+      .select({ id: costCenters.id })
+      .from(costCenters)
+      .where(eq(costCenters.externalId, "cc-lavacao"))
+      .limit(1);
+
+    await db
+      .insert(cashMovements)
+      .values({
+        date: "2026-07-10",
+        type: "entrada",
+        amount: "900.00",
+        description: "Recebimento parceria IESA/Nissan (competência junho/2026)",
+        accountsReceivableId: iesaReceivable.id,
+        categoryId: category?.id ?? null,
+        costCenterId: costCenter?.id ?? null,
+        source: "seed:contratos-reais",
+        externalId: "iesa-pagamento-2026-07-10",
+        notes: "Entrada de caixa em 10/07/2026 — não deve ser somada como faturamento operacional gerado nesse dia.",
+      })
+      .onConflictDoNothing({ target: cashMovements.externalId });
+
+    console.log("Movimento de caixa da IESA (R$ 900,00 em 10/07/2026) aplicado (idempotente).");
+  }
+
   await client.end();
 }
 

@@ -4,6 +4,10 @@ import { AccountsReceivableView } from "@/components/finance/accounts-receivable
 import { fetchAccountsReceivableOverview } from "@/lib/finance/service";
 import { getStorageMode } from "@/lib/storage/mode";
 
+// Evita que a lista de contas a receber fique congelada no HTML estático gerado em build —
+// mesmo motivo de /estoque: agora pode vir de um banco real e mutável.
+export const dynamic = "force-dynamic";
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
