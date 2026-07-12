@@ -29,6 +29,20 @@
       "when": 1783822801283,
       "tag": "0003_cash_movements_payment_link",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783825131491,
+      "tag": "0004_accounts_receivable_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783825781273,
+      "tag": "0005_payments_fee_net",
+      "breakpoints": true
     }
   ]
 }

@@ -99,6 +99,9 @@ export const contractBenefits = pgTable("contract_benefits", {
  * paid: outstandingAmount = 0.
  * overdue: em aberto (ou parcial) e dueDate já passou.
  * cancelled: cancelada, não entra em nenhum total.
+ * reversed: recebimento estornado — status manual, nunca recalculado automaticamente (módulo
+ *   Contas a Receber, 10/07/2026). Adicionado ao enum existente via ALTER TYPE ... ADD VALUE,
+ *   sem alterar nenhum valor já em uso.
  */
 export const accountsReceivableStatusEnum = pgEnum("accounts_receivable_status", [
   "draft",
@@ -107,6 +110,7 @@ export const accountsReceivableStatusEnum = pgEnum("accounts_receivable_status",
   "paid",
   "overdue",
   "cancelled",
+  "reversed",
 ]);
 
 export const paymentMethodEnum = pgEnum("payment_method_extended", [
@@ -131,6 +135,12 @@ export const accountsReceivable = pgTable("accounts_receivable", {
   customerId: uuid("customer_id").references(() => customers.id),
   partnerId: uuid("partner_id").references(() => partners.id),
   contractId: uuid("contract_id").references(() => contracts.id),
+  /** Centro de custo da receita (Estética Automotiva, Estacionamento, Administrativo). Reaproveita cost_centers. */
+  costCenterId: uuid("cost_center_id").references(() => costCenters.id),
+  /** Categoria de receita (Lavação, Polimento, Faróis, etc.). Reaproveita financial_categories. */
+  categoryId: uuid("category_id").references(() => financialCategories.id),
+  /** Conta onde o valor é esperado/foi recebido (Stone, Ailos). Reaproveita financial_accounts. */
+  financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
   description: text("description").notNull(),
   /** Mês/data de competência (a que período o valor se refere) — nunca a data de recebimento. */
   competenceDate: date("competence_date").notNull(),
@@ -149,6 +159,17 @@ export const accountsReceivable = pgTable("accounts_receivable", {
   invoiceIssued: boolean("invoice_issued").notNull().default(false),
   /** Data efetiva do recebimento (pode ser diferente de dueDate). Null enquanto não recebido. */
   receivedAt: date("received_at"),
+  /** Agrupa parcelas da mesma receita (ex.: 4x Stone). Mesmo padrão de accounts_payable. */
+  installmentGroupId: uuid("installment_group_id"),
+  installmentNumber: integer("installment_number"),
+  installmentTotal: integer("installment_total"),
+  /** Taxa cobrada no recebimento (ex.: taxa Stone da parcela). Null até a baixa acontecer. */
+  feeAmount: numeric("fee_amount", { precision: 12, scale: 2 }),
+  /** receivedAmount - feeAmount desta baixa. Null até haver recebimento com taxa informada. */
+  netAmount: numeric("net_amount", { precision: 12, scale: 2 }),
+  /** Texto livre — sem sessão de usuário real ainda, mesmo padrão de inventory_movements.responsible. */
+  responsibleName: text("responsible_name"),
+  approverName: text("approver_name"),
   active: active(),
   source: source(),
   /** Slug estável (ex.: "iesa-recebivel-2026-06"), único, para seed idempotente. */
@@ -172,6 +193,10 @@ export const payments = pgTable("payments", {
   paidAt: date("paid_at"),
   /** "desconhecido" é um valor válido e esperado — nunca inventar a forma de pagamento. */
   method: paymentMethodEnum("method").notNull().default("desconhecido"),
+  /** Taxa cobrada nesta baixa (ex.: taxa Stone de um recebimento). Null quando não informada. */
+  feeAmount: numeric("fee_amount", { precision: 12, scale: 2 }),
+  /** amount - feeAmount desta baixa. Null quando não informada. Usado hoje só por Contas a Receber. */
+  netAmount: numeric("net_amount", { precision: 12, scale: 2 }),
   invoiceIssued: boolean("invoice_issued").notNull().default(false),
   /** Estorno: quando true, esta baixa foi revertida e não deve mais contar no saldo. */
   reversed: boolean("reversed").notNull().default(false),
