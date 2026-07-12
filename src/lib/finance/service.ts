@@ -360,21 +360,34 @@ export async function fetchRecurringBillTemplates(): Promise<RecurringBillTempla
   return getFinanceRepository().listRecurringBillTemplates();
 }
 
+export interface GenerateAccountsPayableFromTemplateOptions {
+  amountOverride?: number;
+  issueDate?: string | null;
+  documentNumber?: string | null;
+  notes?: string | null;
+  /** Texto livre — sem sessão de usuário real ainda (mesmo padrão de inventory_movements.responsible). */
+  responsibleName?: string | null;
+}
+
 /**
  * Gera (ou reaproveita, se já existir) a conta a pagar de uma competência específica a partir
  * de um modelo de recorrência. Idempotente: nunca cria uma segunda conta para o mesmo
  * (recurringBillTemplateId, competência) — checa antes de criar. Nunca é chamada
- * automaticamente por nenhuma tela; é uma ação explícita (ver Parte 5 do módulo Contas a Pagar).
+ * automaticamente por nenhuma tela; é uma ação explícita (ver /financeiro/contas-a-pagar/gerar-recorrentes).
  * Modelos de valor variável (água/energia) exigem o valor informado manualmente — não
  * inventamos um valor a partir do template.
  */
-export async function generateAccountsPayableFromTemplate(templateId: string, competenceDate: string, amountOverride?: number) {
+export async function generateAccountsPayableFromTemplate(
+  templateId: string,
+  competenceDate: string,
+  options: GenerateAccountsPayableFromTemplateOptions = {},
+) {
   const repo = getFinanceRepository();
   const templates = await repo.listRecurringBillTemplates();
   const template = templates.find((t) => t.id === templateId);
   if (!template) throw new Error(`Modelo de recorrência não encontrado: ${templateId}`);
 
-  const amount = template.variableAmount ? amountOverride : template.amount;
+  const amount = template.variableAmount ? options.amountOverride : template.amount;
   if (amount === undefined || amount === null) {
     throw new Error("Este modelo tem valor variável — informe o valor desta competência manualmente.");
   }
@@ -388,6 +401,9 @@ export async function generateAccountsPayableFromTemplate(templateId: string, co
 
   const dueDate = template.dueDay ? `${competenceDate.slice(0, 7)}-${String(template.dueDay).padStart(2, "0")}` : competenceDate;
 
+  const generationNote = `Gerado da recorrência "${template.description}" para a competência ${competenceDate.slice(0, 7)}${options.responsibleName ? ` por ${options.responsibleName}` : ""}.`;
+  const notes = [options.notes, generationNote].filter(Boolean).join(" ");
+
   const [created] = await repo.createAccountsPayable({
     description: template.description,
     supplierId: template.supplierId,
@@ -395,12 +411,39 @@ export async function generateAccountsPayableFromTemplate(templateId: string, co
     costCenterId: template.costCenterId,
     financialAccountId: template.financialAccountId,
     competenceDate,
+    issueDate: options.issueDate ?? null,
     dueDate,
     originalAmount: amount,
+    documentNumber: options.documentNumber ?? null,
     pendingData: template.pendingData,
     recurringBillTemplateId: templateId,
+    notes,
   });
   return created;
+}
+
+export interface RecurringGenerationStatusItem {
+  template: RecurringBillTemplate;
+  alreadyGenerated: boolean;
+  existingAccountsPayableId: string | null;
+  /** Vencimento calculado a partir do dia fixo do modelo — null quando o modelo não tem dia fixo (valor variável). */
+  dueDate: string | null;
+}
+
+/**
+ * Status de geração de cada modelo de recorrência para uma competência — nunca grava nada, só
+ * lê. Usado pela tela /financeiro/contas-a-pagar/gerar-recorrentes para montar a prévia antes da
+ * confirmação explícita do usuário.
+ */
+export async function fetchRecurringGenerationStatus(competenceMonth: string): Promise<RecurringGenerationStatusItem[]> {
+  const repo = getFinanceRepository();
+  const [templates, existingAp] = await Promise.all([repo.listRecurringBillTemplates(), repo.listAccountsPayable()]);
+
+  return templates.map((template) => {
+    const existing = existingAp.find((ap) => ap.recurringBillTemplateId === template.id && ap.competenceDate.slice(0, 7) === competenceMonth);
+    const dueDate = template.dueDay ? `${competenceMonth}-${String(template.dueDay).padStart(2, "0")}` : null;
+    return { template, alreadyGenerated: Boolean(existing), existingAccountsPayableId: existing?.id ?? null, dueDate };
+  });
 }
 
 export async function fetchExpenseCategories(): Promise<FinancialCategory[]> {

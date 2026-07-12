@@ -36,7 +36,7 @@ describe("Recorrência sem duplicidade", () => {
   });
 
   it("modelo de valor variável aceita valor informado explicitamente para a competência", async () => {
-    const created = await generateAccountsPayableFromTemplate("recorrencia-energia-celesc", "2026-09-01", 312.45);
+    const created = await generateAccountsPayableFromTemplate("recorrencia-energia-celesc", "2026-09-01", { amountOverride: 312.45 });
     expect(created?.originalAmount).toBe(312.45);
   });
 });

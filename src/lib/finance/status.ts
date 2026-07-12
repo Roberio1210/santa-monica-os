@@ -148,6 +148,27 @@ export function computeAccountBalance(
 }
 
 /**
+ * Quinto dia útil de uma competência (formato "YYYY-MM") — preparado para recorrências de
+ * prestadores cujo vencimento é "5º dia útil", ainda não vinculado a nenhum modelo real. "Dia
+ * útil" aqui exclui só sábado/domingo; feriados nacionais/estaduais/municipais não são
+ * considerados nesta etapa, por não haver uma fonte confiável cadastrada no sistema.
+ */
+export function computeFifthBusinessDay(competenceMonth: string): string {
+  const [year, month] = competenceMonth.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, 1));
+  let businessDays = 0;
+  while (true) {
+    const dayOfWeek = date.getUTCDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      businessDays++;
+      if (businessDays === 5) break;
+    }
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/**
  * Retorna o valor vigente de um contrato numa data específica, a partir das vigências
  * cadastradas (contract_value_periods). Retorna null quando nenhuma vigência cobre a data —
  * nunca inventa um valor para uma lacuna (ex.: Don Juan entre 16/07/2026 e 14/08/2026).
