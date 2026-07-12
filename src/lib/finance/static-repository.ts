@@ -10,10 +10,12 @@ import type {
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateCashMovementInput,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  InformAccountBalanceInput,
   Partner,
   PayableSettlement,
   ReceivableSettlement,
@@ -319,6 +321,81 @@ export class StaticFinanceRepository implements FinanceRepository {
     return this.cashMovements.map((item) => ({ ...item }));
   }
 
+  private resolveCashMovementPartyName(customerId: string | null, partnerId: string | null, supplierId: string | null): string | null {
+    if (partnerId) return initialPartners.find((p) => p.id === partnerId)?.name ?? null;
+    if (customerId) return null; // sem seed de customers em memória — nunca inventado
+    if (supplierId) return this.suppliers.find((s) => s.id === supplierId)?.name ?? null;
+    return null;
+  }
+
+  async createCashMovement(input: CreateCashMovementInput): Promise<CashMovement> {
+    const account = this.financialAccounts.find((a) => a.id === input.financialAccountId);
+    if (!account) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);
+
+    const movements = this.cashMovements.filter((m) => m.financialAccountId === input.financialAccountId);
+    const transfersIn = this.accountTransfers.filter((t) => t.toAccountId === input.financialAccountId);
+    const transfersOut = this.accountTransfers.filter((t) => t.fromAccountId === input.financialAccountId);
+    const balanceBefore = computeAccountBalance(account.fixedFundAmount, movements, transfersIn, transfersOut);
+    const balanceAfter = Math.round((balanceBefore + (input.type === "entrada" ? input.amount : -input.amount)) * 100) / 100;
+
+    const category = input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId) : undefined;
+    const costCenter = input.costCenterId ? initialCostCenters.find((c) => c.id === input.costCenterId) : undefined;
+
+    const row: CashMovement = {
+      id: generateId("movimento"),
+      date: input.date,
+      type: input.type,
+      nature: input.nature ?? null,
+      amount: input.amount,
+      description: input.description,
+      accountsReceivableId: null,
+      accountsPayableId: null,
+      categoryId: category?.id ?? null,
+      categoryName: category?.name ?? null,
+      costCenterId: costCenter?.id ?? null,
+      costCenterName: costCenter?.name ?? null,
+      financialAccountId: input.financialAccountId,
+      financialAccountName: account.name,
+      paymentId: null,
+      partnerId: input.partnerId ?? null,
+      customerId: input.customerId ?? null,
+      supplierId: input.supplierId ?? null,
+      partyName: this.resolveCashMovementPartyName(input.customerId ?? null, input.partnerId ?? null, input.supplierId ?? null),
+      responsibleName: input.responsibleName ?? null,
+      documentRef: input.documentRef ?? null,
+      competenceDate: input.competenceDate ?? null,
+      balanceBefore,
+      balanceAfter,
+      source: "manual",
+      externalId: null,
+      notes: input.notes ?? null,
+    };
+    this.cashMovements.push(row);
+    this.appendAudit("create", "cash_movement", row.id, null, row);
+    return { ...row };
+  }
+
+  async informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance> {
+    const account = this.financialAccounts.find((a) => a.id === input.financialAccountId);
+    if (!account) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);
+    const before = { ...account };
+
+    account.informedBalance = input.informedBalance;
+    account.informedBalanceAt = new Date().toISOString();
+    this.appendAudit("inform_balance", "financial_account", account.id, before, account);
+
+    const movements = this.cashMovements.filter((m) => m.financialAccountId === account.id);
+    const transfersIn = this.accountTransfers.filter((t) => t.toAccountId === account.id);
+    const transfersOut = this.accountTransfers.filter((t) => t.fromAccountId === account.id);
+    const currentBalance = computeAccountBalance(account.fixedFundAmount, movements, transfersIn, transfersOut);
+
+    return {
+      ...account,
+      currentBalance,
+      belowThreshold: account.fixedFundAmount !== null && currentBalance < account.fixedFundAmount,
+    };
+  }
+
   async listContracts(): Promise<Contract[]> {
     return this.contracts.map((item) => ({ ...item }));
   }
@@ -355,18 +432,28 @@ export class StaticFinanceRepository implements FinanceRepository {
   }
 
   async recordAccountTransfer(input: RecordAccountTransferInput): Promise<AccountTransfer> {
+    const fromAccountId = input.fromAccountId ?? null;
+    const toAccountId = input.toAccountId ?? null;
     const transfer: AccountTransfer = {
       id: generateId("transferencia"),
       type: input.type,
-      fromAccountId: input.fromAccountId ?? null,
-      toAccountId: input.toAccountId ?? null,
+      fromAccountId,
+      fromAccountName: fromAccountId ? this.financialAccounts.find((a) => a.id === fromAccountId)?.name ?? null : null,
+      toAccountId,
+      toAccountName: toAccountId ? this.financialAccounts.find((a) => a.id === toAccountId)?.name ?? null : null,
       amount: input.amount,
       date: input.date,
       description: input.description,
+      responsibleName: input.responsibleName ?? null,
+      documentRef: input.documentRef ?? null,
       notes: input.notes ?? null,
     };
     this.accountTransfers.push(transfer);
     return { ...transfer };
+  }
+
+  async listAccountTransfers(): Promise<AccountTransfer[]> {
+    return this.accountTransfers.map((item) => ({ ...item }));
   }
 
   async listRecurringBillTemplates(): Promise<RecurringBillTemplate[]> {

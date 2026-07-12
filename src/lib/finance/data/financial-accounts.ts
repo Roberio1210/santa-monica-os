@@ -7,6 +7,8 @@ export const initialFinancialAccounts: FinancialAccount[] = [
     name: "Stone",
     type: "conta_pagamento",
     fixedFundAmount: null,
+    informedBalance: null,
+    informedBalanceAt: null,
     notes: "Recebimentos de cartão, Pix Stone e antecipação D+1.",
   },
   {
@@ -14,6 +16,8 @@ export const initialFinancialAccounts: FinancialAccount[] = [
     name: "Ailos / CredCrea",
     type: "conta_bancaria",
     fixedFundAmount: null,
+    informedBalance: null,
+    informedBalanceAt: null,
     notes: null,
   },
   {
@@ -21,6 +25,8 @@ export const initialFinancialAccounts: FinancialAccount[] = [
     name: "Caixa físico",
     type: "dinheiro",
     fixedFundAmount: 100,
+    informedBalance: null,
+    informedBalanceAt: null,
     notes: "Fundo fixo desejado: R$ 100,00. Alerta quando o saldo calculado ficar abaixo desse valor.",
   },
 ];

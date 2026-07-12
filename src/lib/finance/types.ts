@@ -154,20 +154,62 @@ export interface RecordReceivablePaymentInput {
 
 export type CashMovementType = "entrada" | "saida";
 
+/** Classificação opcional — só relevante para lançamentos manuais (ver schema, cash_movement_nature). */
+export type CashMovementNature = "receita" | "despesa" | "ajuste" | "estorno" | "taxa_bancaria" | "tarifa" | "juros";
+
 export interface CashMovement {
   id: string;
   date: string;
   type: CashMovementType;
+  nature: CashMovementNature | null;
   amount: number;
   description: string;
   accountsReceivableId: string | null;
+  accountsPayableId: string | null;
   categoryId: string | null;
+  categoryName: string | null;
   costCenterId: string | null;
+  costCenterName: string | null;
   financialAccountId: string | null;
+  financialAccountName: string | null;
   paymentId: string | null;
+  partnerId: string | null;
+  customerId: string | null;
+  supplierId: string | null;
+  /** Nome resolvido de partner/customer/supplier — o que estiver preenchido, sem exigir join na UI. */
+  partyName: string | null;
+  responsibleName: string | null;
+  documentRef: string | null;
+  competenceDate: string | null;
+  /** Fotografia do saldo da conta imediatamente antes/depois deste movimento (ver schema). */
+  balanceBefore: number | null;
+  balanceAfter: number | null;
   source: string;
   externalId: string | null;
   notes: string | null;
+}
+
+export interface CreateCashMovementInput {
+  date: string;
+  type: CashMovementType;
+  nature?: CashMovementNature | null;
+  amount: number;
+  description: string;
+  categoryId?: string | null;
+  costCenterId?: string | null;
+  financialAccountId: string;
+  partnerId?: string | null;
+  customerId?: string | null;
+  supplierId?: string | null;
+  responsibleName?: string | null;
+  documentRef?: string | null;
+  competenceDate?: string | null;
+  notes?: string | null;
+}
+
+export interface InformAccountBalanceInput {
+  financialAccountId: string;
+  informedBalance: number;
 }
 
 export type ContractType = "parceria_pos_paga" | "mensalidade";
@@ -233,6 +275,9 @@ export interface FinancialAccount {
   type: FinancialAccountType;
   /** Fundo fixo desejado (só relevante para "dinheiro") e limiar de alerta de saldo baixo. */
   fixedFundAmount: number | null;
+  /** Saldo conferido manualmente pelo usuário (ex.: olhando extrato) — nunca calculado. */
+  informedBalance: number | null;
+  informedBalanceAt: string | null;
   notes: string | null;
 }
 
@@ -242,16 +287,24 @@ export interface FinancialAccountBalance extends FinancialAccount {
   belowThreshold: boolean;
 }
 
-export type AccountTransferType = "transferencia" | "reposicao_caixa";
+/**
+ * "aporte_socios" (fromAccountId null) e "retirada" (toAccountId null) reaproveitam o mesmo
+ * padrão from/to nullable já usado por transferência/reposição de caixa.
+ */
+export type AccountTransferType = "transferencia" | "reposicao_caixa" | "aporte_socios" | "retirada";
 
 export interface AccountTransfer {
   id: string;
   type: AccountTransferType;
   fromAccountId: string | null;
+  fromAccountName: string | null;
   toAccountId: string | null;
+  toAccountName: string | null;
   amount: number;
   date: string;
   description: string;
+  responsibleName: string | null;
+  documentRef: string | null;
   notes: string | null;
 }
 
@@ -262,6 +315,8 @@ export interface RecordAccountTransferInput {
   amount: number;
   date: string;
   description: string;
+  responsibleName?: string | null;
+  documentRef?: string | null;
   notes?: string | null;
 }
 
@@ -410,4 +465,80 @@ export interface Contract {
   notes: string | null;
   valuePeriods: ContractValuePeriod[];
   benefits: ContractBenefit[];
+}
+
+// --- Fluxo de Caixa / Livro Caixa ---
+
+/**
+ * Livro Caixa unificado: cada linha vem de cash_movements ("movimento") ou de account_transfers
+ * ("transferencia") — nunca uma tabela nova, só uma visão combinada e ordenada
+ * cronologicamente. Transferências nunca contam como receita/despesa (ver computeAccountBalance).
+ */
+export type CashLedgerEntryKind = "movimento" | "transferencia";
+
+export interface CashLedgerEntry {
+  id: string;
+  kind: CashLedgerEntryKind;
+  date: string;
+  /** Rótulo de exibição: type/nature do movimento, ou o type da transferência. */
+  label: string;
+  amount: number;
+  description: string;
+  financialAccountId: string | null;
+  financialAccountName: string | null;
+  /** Só preenchido para kind "transferencia". */
+  toAccountId: string | null;
+  toAccountName: string | null;
+  categoryName: string | null;
+  costCenterName: string | null;
+  partyName: string | null;
+  responsibleName: string | null;
+  documentRef: string | null;
+  competenceDate: string | null;
+  balanceBefore: number | null;
+  balanceAfter: number | null;
+  notes: string | null;
+}
+
+export interface CashFlowAccountBalance {
+  financialAccountId: string;
+  name: string;
+  currentBalance: number;
+  informedBalance: number | null;
+  belowThreshold: boolean;
+}
+
+export interface CashFlowDashboard {
+  saldoGeral: number;
+  saldoPorConta: CashFlowAccountBalance[];
+  entradasHoje: number;
+  saidasHoje: number;
+  resultadoDia: number;
+  resultadoSemana: number;
+  resultadoMes: number;
+  receitasPrevistas: number;
+  despesasPrevistas: number;
+  maioresDespesas: { description: string; amount: number; date: string }[];
+  maioresReceitas: { description: string; amount: number; date: string }[];
+  entradasPorCentroCusto: { costCenterName: string; amount: number }[];
+  saidasPorCentroCusto: { costCenterName: string; amount: number }[];
+}
+
+export type CashFlowProjectionWindow = "hoje" | "amanha" | "7_dias" | "15_dias" | "30_dias" | "90_dias";
+
+export interface CashFlowProjectionPoint {
+  window: CashFlowProjectionWindow;
+  contasAReceber: number;
+  contasAPagar: number;
+  saldoProjetado: number;
+}
+
+export type CashFlowAlertLevel = "saldo_negativo" | "conta_zerando" | "fluxo_negativo_futuro" | "conta_sem_movimentacao" | "diferenca_saldo_informado";
+
+export interface CashFlowAlert {
+  level: CashFlowAlertLevel;
+  financialAccountId: string | null;
+  financialAccountName: string | null;
+  message: string;
+  amount: number | null;
 }

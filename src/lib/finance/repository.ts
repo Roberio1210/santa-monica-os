@@ -8,9 +8,11 @@ import type {
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateCashMovementInput,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  InformAccountBalanceInput,
   Partner,
   PayableSettlement,
   ReceivableSettlement,
@@ -64,6 +66,13 @@ export interface FinanceRepository {
   listFinancialAccounts(): Promise<FinancialAccountBalance[]>;
   recordAccountTransfer(input: RecordAccountTransferInput): Promise<AccountTransfer>;
   listRecurringBillTemplates(): Promise<RecurringBillTemplate[]>;
+
+  // --- Fluxo de Caixa ---
+  /** Lançamento manual (entrada/saída/ajuste/estorno/taxa/tarifa/juros) — gera balanceBefore/After. */
+  createCashMovement(input: CreateCashMovementInput): Promise<CashMovement>;
+  /** Grava o saldo conferido manualmente pelo usuário, para o alerta de divergência. */
+  informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance>;
+  listAccountTransfers(): Promise<AccountTransfer[]>;
 
   // --- Contas a Pagar ---
   listAccountsPayable(): Promise<AccountsPayable[]>;

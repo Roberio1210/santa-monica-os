@@ -29,6 +29,7 @@ import type {
   AccountTransferType,
   AuditLogEntry,
   CashMovement,
+  CashMovementNature,
   CashMovementType,
   Contract,
   ContractStatus,
@@ -36,11 +37,13 @@ import type {
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateCashMovementInput,
   FinancePaymentMethod,
   FinancialAccountBalance,
   FinancialAccountType,
   FinancialCategory,
   FinancialCategoryType,
+  InformAccountBalanceInput,
   Partner,
   PayableSettlement,
   ReceivableSettlement,
@@ -80,24 +83,6 @@ function toPaymentReceivableSettlement(row: typeof paymentsTable.$inferSelect): 
   };
 }
 
-function toCashMovement(row: typeof cashMovementsTable.$inferSelect): CashMovement {
-  return {
-    id: row.id,
-    date: row.date,
-    type: row.type as CashMovementType,
-    amount: Number(row.amount),
-    description: row.description,
-    accountsReceivableId: row.accountsReceivableId,
-    categoryId: row.categoryId,
-    costCenterId: row.costCenterId,
-    financialAccountId: row.financialAccountId,
-    paymentId: row.paymentId,
-    source: row.source,
-    externalId: row.externalId,
-    notes: row.notes,
-  };
-}
-
 function toSupplier(row: typeof suppliersTable.$inferSelect): Supplier {
   return {
     id: row.id,
@@ -107,19 +92,6 @@ function toSupplier(row: typeof suppliersTable.$inferSelect): Supplier {
     phone: row.phone,
     email: row.email,
     address: row.address,
-    notes: row.notes,
-  };
-}
-
-function toAccountTransfer(row: typeof accountTransfersTable.$inferSelect): AccountTransfer {
-  return {
-    id: row.id,
-    type: row.type as AccountTransferType,
-    fromAccountId: row.fromAccountId,
-    toAccountId: row.toAccountId,
-    amount: Number(row.amount),
-    date: row.date,
-    description: row.description,
     notes: row.notes,
   };
 }
@@ -557,9 +529,82 @@ export class PostgresFinanceRepository implements FinanceRepository {
     });
   }
 
+  private async toCashMovement(row: typeof cashMovementsTable.$inferSelect): Promise<CashMovement> {
+    const db = this.db();
+    let categoryName: string | null = null;
+    if (row.categoryId) {
+      const [cat] = await db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.id, row.categoryId)).limit(1);
+      categoryName = cat?.name ?? null;
+    }
+    let costCenterName: string | null = null;
+    if (row.costCenterId) {
+      const [cc] = await db.select().from(costCentersTable).where(eq(costCentersTable.id, row.costCenterId)).limit(1);
+      costCenterName = cc?.name ?? null;
+    }
+    let financialAccountName: string | null = null;
+    if (row.financialAccountId) {
+      const [fa] = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, row.financialAccountId)).limit(1);
+      financialAccountName = fa?.name ?? null;
+    }
+    const partyName = await this.resolveCashMovementPartyName(row.customerId, row.partnerId, row.supplierId);
+
+    return {
+      id: row.id,
+      date: row.date,
+      type: row.type as CashMovementType,
+      nature: row.nature as CashMovementNature | null,
+      amount: Number(row.amount),
+      description: row.description,
+      accountsReceivableId: row.accountsReceivableId,
+      accountsPayableId: row.accountsPayableId,
+      categoryId: row.categoryId,
+      categoryName,
+      costCenterId: row.costCenterId,
+      costCenterName,
+      financialAccountId: row.financialAccountId,
+      financialAccountName,
+      paymentId: row.paymentId,
+      partnerId: row.partnerId,
+      customerId: row.customerId,
+      supplierId: row.supplierId,
+      partyName,
+      responsibleName: row.responsibleName,
+      documentRef: row.documentRef,
+      competenceDate: row.competenceDate,
+      balanceBefore: row.balanceBefore !== null ? Number(row.balanceBefore) : null,
+      balanceAfter: row.balanceAfter !== null ? Number(row.balanceAfter) : null,
+      source: row.source,
+      externalId: row.externalId,
+      notes: row.notes,
+    };
+  }
+
+  private async resolveCashMovementPartyName(
+    customerId: string | null,
+    partnerId: string | null,
+    supplierId: string | null,
+  ): Promise<string | null> {
+    const db = this.db();
+    if (partnerId) {
+      const [row] = await db.select().from(partnersTable).where(eq(partnersTable.id, partnerId)).limit(1);
+      if (row) return row.name;
+    }
+    if (customerId) {
+      const [row] = await db.select().from(customersTable).where(eq(customersTable.id, customerId)).limit(1);
+      if (row?.name) return row.name;
+    }
+    if (supplierId) {
+      const [row] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, supplierId)).limit(1);
+      if (row?.name) return row.name;
+    }
+    return null;
+  }
+
   async listCashMovements(): Promise<CashMovement[]> {
     const rows = await this.db().select().from(cashMovementsTable).where(eq(cashMovementsTable.active, true));
-    return rows.map(toCashMovement);
+    const results: CashMovement[] = [];
+    for (const row of rows) results.push(await this.toCashMovement(row));
+    return results;
   }
 
   async listContracts(): Promise<Contract[]> {
@@ -645,44 +690,80 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return rows.map((r) => ({ id: r.id, name: r.name }));
   }
 
+  /** Saldo real ao vivo de uma conta — nunca lido de balanceBefore/After (só uma fotografia histórica). */
+  private async getAccountCurrentBalance(accountId: string, fixedFundAmount: number | null): Promise<number> {
+    const db = this.db();
+    const movements = await db
+      .select()
+      .from(cashMovementsTable)
+      .where(and(eq(cashMovementsTable.financialAccountId, accountId), eq(cashMovementsTable.active, true)));
+    const transfersIn = await db
+      .select()
+      .from(accountTransfersTable)
+      .where(and(eq(accountTransfersTable.toAccountId, accountId), eq(accountTransfersTable.active, true)));
+    const transfersOut = await db
+      .select()
+      .from(accountTransfersTable)
+      .where(and(eq(accountTransfersTable.fromAccountId, accountId), eq(accountTransfersTable.active, true)));
+
+    return computeAccountBalance(
+      fixedFundAmount,
+      movements.map((m) => ({ type: m.type as CashMovementType, amount: Number(m.amount) })),
+      transfersIn.map((t) => ({ amount: Number(t.amount) })),
+      transfersOut.map((t) => ({ amount: Number(t.amount) })),
+    );
+  }
+
   async listFinancialAccounts(): Promise<FinancialAccountBalance[]> {
     const db = this.db();
     const accounts = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.active, true));
 
     const results: FinancialAccountBalance[] = [];
     for (const account of accounts) {
-      const movements = await db
-        .select()
-        .from(cashMovementsTable)
-        .where(and(eq(cashMovementsTable.financialAccountId, account.id), eq(cashMovementsTable.active, true)));
-      const transfersIn = await db
-        .select()
-        .from(accountTransfersTable)
-        .where(and(eq(accountTransfersTable.toAccountId, account.id), eq(accountTransfersTable.active, true)));
-      const transfersOut = await db
-        .select()
-        .from(accountTransfersTable)
-        .where(and(eq(accountTransfersTable.fromAccountId, account.id), eq(accountTransfersTable.active, true)));
-
       const fixedFundAmount = account.fixedFundAmount !== null ? Number(account.fixedFundAmount) : null;
-      const currentBalance = computeAccountBalance(
-        fixedFundAmount,
-        movements.map((m) => ({ type: m.type as CashMovementType, amount: Number(m.amount) })),
-        transfersIn.map((t) => ({ amount: Number(t.amount) })),
-        transfersOut.map((t) => ({ amount: Number(t.amount) })),
-      );
+      const currentBalance = await this.getAccountCurrentBalance(account.id, fixedFundAmount);
 
       results.push({
         id: account.id,
         name: account.name,
         type: account.type as FinancialAccountType,
         fixedFundAmount,
+        informedBalance: account.informedBalance !== null ? Number(account.informedBalance) : null,
+        informedBalanceAt: account.informedBalanceAt ? account.informedBalanceAt.toISOString() : null,
         notes: account.notes,
         currentBalance,
         belowThreshold: fixedFundAmount !== null && currentBalance < fixedFundAmount,
       });
     }
     return results;
+  }
+
+  private async toAccountTransfer(row: typeof accountTransfersTable.$inferSelect): Promise<AccountTransfer> {
+    const db = this.db();
+    let fromAccountName: string | null = null;
+    if (row.fromAccountId) {
+      const [fa] = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, row.fromAccountId)).limit(1);
+      fromAccountName = fa?.name ?? null;
+    }
+    let toAccountName: string | null = null;
+    if (row.toAccountId) {
+      const [ta] = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, row.toAccountId)).limit(1);
+      toAccountName = ta?.name ?? null;
+    }
+    return {
+      id: row.id,
+      type: row.type as AccountTransferType,
+      fromAccountId: row.fromAccountId,
+      fromAccountName,
+      toAccountId: row.toAccountId,
+      toAccountName,
+      amount: Number(row.amount),
+      date: row.date,
+      description: row.description,
+      responsibleName: row.responsibleName,
+      documentRef: row.documentRef,
+      notes: row.notes,
+    };
   }
 
   async recordAccountTransfer(input: RecordAccountTransferInput): Promise<AccountTransfer> {
@@ -695,11 +776,106 @@ export class PostgresFinanceRepository implements FinanceRepository {
         amount: String(input.amount),
         date: input.date,
         description: input.description,
+        responsibleName: input.responsibleName ?? null,
+        documentRef: input.documentRef ?? null,
         source: "manual",
         notes: input.notes ?? null,
       })
       .returning();
-    return toAccountTransfer(row);
+    return this.toAccountTransfer(row);
+  }
+
+  async listAccountTransfers(): Promise<AccountTransfer[]> {
+    const rows = await this.db().select().from(accountTransfersTable).where(eq(accountTransfersTable.active, true));
+    const results: AccountTransfer[] = [];
+    for (const row of rows) results.push(await this.toAccountTransfer(row));
+    return results;
+  }
+
+  async createCashMovement(input: CreateCashMovementInput): Promise<CashMovement> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [account] = await tx.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, input.financialAccountId)).limit(1);
+      if (!account) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);
+
+      const fixedFundAmount = account.fixedFundAmount !== null ? Number(account.fixedFundAmount) : null;
+      const balanceBefore = await this.getAccountCurrentBalance(input.financialAccountId, fixedFundAmount);
+      const balanceAfter =
+        Math.round((balanceBefore + (input.type === "entrada" ? input.amount : -input.amount)) * 100) / 100;
+
+      const [row] = await tx
+        .insert(cashMovementsTable)
+        .values({
+          date: input.date,
+          type: input.type,
+          nature: input.nature ?? null,
+          amount: String(input.amount),
+          description: input.description,
+          categoryId: input.categoryId ?? null,
+          costCenterId: input.costCenterId ?? null,
+          financialAccountId: input.financialAccountId,
+          partnerId: input.partnerId ?? null,
+          customerId: input.customerId ?? null,
+          supplierId: input.supplierId ?? null,
+          responsibleName: input.responsibleName ?? null,
+          documentRef: input.documentRef ?? null,
+          competenceDate: input.competenceDate ?? null,
+          balanceBefore: String(balanceBefore),
+          balanceAfter: String(balanceAfter),
+          source: "manual",
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "create",
+        entityType: "cash_movement",
+        entityId: row.id,
+        beforeState: null,
+        afterState: row,
+        source: "manual",
+      });
+
+      return this.toCashMovement(row);
+    });
+  }
+
+  async informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [before] = await tx.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, input.financialAccountId)).limit(1);
+      if (!before) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);
+
+      const [updated] = await tx
+        .update(financialAccountsTable)
+        .set({ informedBalance: String(input.informedBalance), informedBalanceAt: new Date(), updatedAt: new Date() })
+        .where(eq(financialAccountsTable.id, input.financialAccountId))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "inform_balance",
+        entityType: "financial_account",
+        entityId: updated.id,
+        beforeState: before,
+        afterState: updated,
+        source: "manual",
+      });
+
+      const fixedFundAmount = updated.fixedFundAmount !== null ? Number(updated.fixedFundAmount) : null;
+      const currentBalance = await this.getAccountCurrentBalance(updated.id, fixedFundAmount);
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        type: updated.type as FinancialAccountType,
+        fixedFundAmount,
+        informedBalance: updated.informedBalance !== null ? Number(updated.informedBalance) : null,
+        informedBalanceAt: updated.informedBalanceAt ? updated.informedBalanceAt.toISOString() : null,
+        notes: updated.notes,
+        currentBalance,
+        belowThreshold: fixedFundAmount !== null && currentBalance < fixedFundAmount,
+      };
+    });
   }
 
   async listRecurringBillTemplates(): Promise<RecurringBillTemplate[]> {
