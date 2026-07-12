@@ -13,7 +13,8 @@
     "db:seed:inventory": "tsx src/db/seed/inventory.ts",
     "db:seed:contracts": "tsx src/db/seed/contracts.ts",
     "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts",
-    "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts"
+    "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts",
+    "db:seed:classification-rules": "tsx src/db/seed/classification-rules.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",

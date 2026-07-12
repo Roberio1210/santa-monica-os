@@ -3,7 +3,7 @@ import type { Contract, Partner } from "@/lib/finance/types";
 /** Espelha exatamente o seed real de banco (src/db/seed/contracts.ts). */
 export const initialPartners: Partner[] = [
   { id: "iesa-nissan", name: "Grupo IESA/Nissan", type: "parceria_pos_paga" },
-  { id: "funeraria", name: "Funerária", type: "contrato_mensal" },
+  { id: "funeraria", name: "Serviços Funerários Tamandaré", type: "contrato_mensal" },
   { id: "don-juan-fast-burger", name: "Don Juan Fast Burger (Jean)", type: "contrato_mensal" },
   { id: "wecharge", name: "WeCharge", type: "outro" },
 ];
