@@ -542,3 +542,238 @@ export interface CashFlowAlert {
   message: string;
   amount: number | null;
 }
+
+// --- Contabilidade Gerencial: classificação, DRE, rateio, fechamento ---
+// DRE gerencial para apoio à administração. Não substitui escrituração contábil,
+// demonstrações oficiais ou obrigações preparadas pela contabilidade.
+
+export type DreLine = "receita_bruta" | "deducoes_receita" | "custos_diretos" | "despesas_operacionais" | "resultado_financeiro" | "tributos" | "fora_dre";
+
+export type FinancialNature =
+  | "receita_operacional"
+  | "deducao_receita"
+  | "custo_direto"
+  | "despesa_operacional"
+  | "resultado_financeiro"
+  | "investimento"
+  | "ativo"
+  | "passivo"
+  | "transferencia"
+  | "aporte"
+  | "retirada"
+  | "reembolso"
+  | "nao_classificavel";
+
+export type ClassificationOrigin = "regra_automatica" | "herdada_categoria" | "herdada_fornecedor" | "herdada_cliente" | "manual" | "importacao_futura" | "pendente";
+
+export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer";
+
+export interface FinancialClassification {
+  id: string;
+  accountsPayableId: string | null;
+  accountsReceivableId: string | null;
+  cashMovementId: string | null;
+  accountTransferId: string | null;
+  dreLine: DreLine;
+  nature: FinancialNature;
+  includeInDre: boolean;
+  origin: ClassificationOrigin;
+  reviewNeeded: boolean;
+  classifiedBy: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClassifyEntityInput {
+  sourceKind: ClassificationSourceKind;
+  sourceId: string;
+  dreLine: DreLine;
+  nature: FinancialNature;
+  includeInDre?: boolean;
+  reviewNeeded?: boolean;
+  classifiedBy?: string | null;
+  notes?: string | null;
+  /** Cria/atualiza também uma regra automática a partir desta classificação. */
+  createRule?: {
+    matchType: ClassificationMatchType;
+    supplierId?: string | null;
+    partnerId?: string | null;
+    categoryId?: string | null;
+    keyword?: string | null;
+  };
+  /** Reclassifica também lançamentos já existentes que combinem com a regra criada, quando confirmado explicitamente. */
+  applyToExisting?: boolean;
+}
+
+export type ClassificationMatchType = "fornecedor" | "parceiro" | "categoria" | "palavra_chave";
+
+export interface ClassificationRule {
+  id: string;
+  matchType: ClassificationMatchType;
+  supplierId: string | null;
+  supplierName: string | null;
+  partnerId: string | null;
+  partnerName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  keyword: string | null;
+  dreLine: DreLine;
+  nature: FinancialNature;
+  suggestedCostCenterId: string | null;
+  suggestedCostCenterName: string | null;
+  includeInDre: boolean;
+  reviewNeeded: boolean;
+  enabled: boolean;
+  notes: string | null;
+}
+
+export interface CreateClassificationRuleInput {
+  matchType: ClassificationMatchType;
+  supplierId?: string | null;
+  partnerId?: string | null;
+  categoryId?: string | null;
+  keyword?: string | null;
+  dreLine: DreLine;
+  nature: FinancialNature;
+  suggestedCostCenterId?: string | null;
+  includeInDre?: boolean;
+  reviewNeeded?: boolean;
+  enabled?: boolean;
+  notes?: string | null;
+}
+
+export interface AllocationRuleShareInput {
+  costCenterId: string;
+  percentage: number;
+}
+
+export interface AllocationRule {
+  id: string;
+  name: string;
+  description: string | null;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  shares: { costCenterId: string; costCenterName: string; percentage: number }[];
+  notes: string | null;
+}
+
+export interface CreateAllocationRuleInput {
+  name: string;
+  description?: string | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  shares: AllocationRuleShareInput[];
+  notes?: string | null;
+}
+
+export type AccountingPeriodStatus = "aberto" | "em_revisao" | "fechado" | "reaberto";
+
+export interface AccountingPeriod {
+  id: string;
+  competenceMonth: string;
+  status: AccountingPeriodStatus;
+  closedBy: string | null;
+  closedAt: string | null;
+  reopenedBy: string | null;
+  reopenedAt: string | null;
+  reopenJustification: string | null;
+  notes: string | null;
+}
+
+export interface CloseAccountingPeriodInput {
+  competenceMonth: string;
+  closedBy: string;
+  notes?: string | null;
+}
+
+export interface ReopenAccountingPeriodInput {
+  competenceMonth: string;
+  reopenedBy: string;
+  reopenJustification: string;
+}
+
+// --- DRE Gerencial ---
+
+export type DreRegime = "competencia" | "caixa";
+
+export type DreCostCenterGroup = "estetica_automotiva" | "estacionamento" | "administrativo_geral";
+
+/** Um lançamento real que compõe uma linha da DRE — sempre com link de volta ao registro original. */
+export interface DreLineItem {
+  sourceKind: ClassificationSourceKind;
+  sourceId: string;
+  date: string;
+  description: string;
+  partyName: string | null;
+  categoryName: string | null;
+  costCenterName: string | null;
+  amount: number;
+  origin: ClassificationOrigin;
+}
+
+export interface DreGroupTotal {
+  label: string;
+  amount: number;
+  items: DreLineItem[];
+}
+
+export interface DreReport {
+  regime: DreRegime;
+  competenceFrom: string;
+  competenceTo: string;
+  costCenterGroup: DreCostCenterGroup | "consolidado";
+
+  receitaBrutaEstetica: DreGroupTotal;
+  receitaBrutaEstacionamento: DreGroupTotal;
+  receitaBrutaOutras: DreGroupTotal;
+  receitaBruta: number;
+
+  deducoes: DreGroupTotal;
+  receitaLiquida: number;
+
+  custosDiretos: DreGroupTotal;
+  margemContribuicao: number;
+
+  despesasOperacionais: DreGroupTotal;
+  resultadoOperacional: number;
+
+  resultadoFinanceiro: DreGroupTotal;
+  resultadoAntesTributos: number;
+
+  tributos: DreGroupTotal;
+  resultadoLiquido: number;
+
+  /** Lançamentos encontrados mas sem classificação (nature=nao_classificavel ou pendente) — não entram nos totais acima. */
+  naoClassificados: DreLineItem[];
+
+  margemContribuicaoPercentual: number | null;
+  margemOperacionalPercentual: number | null;
+  margemLiquidaPercentual: number | null;
+  participacaoEsteticaReceita: number | null;
+  participacaoEstacionamentoReceita: number | null;
+  ebitda: number | null;
+  ebitdaIndisponivelMotivo: string | null;
+}
+
+export interface DreComparisonPoint {
+  label: string;
+  receitaBruta: number;
+  receitaLiquida: number;
+  margemContribuicao: number;
+  resultadoOperacional: number;
+  resultadoLiquido: number;
+}
+
+/** Fila de pendências do módulo de classificação (aba /financeiro/classificacao). */
+export interface ClassificationQueueItem {
+  sourceKind: ClassificationSourceKind;
+  sourceId: string;
+  date: string;
+  description: string;
+  partyName: string | null;
+  categoryName: string | null;
+  costCenterName: string | null;
+  amount: number;
+  reason: "sem_classificacao" | "revisao_necessaria" | "despesa_compartilhada_sem_rateio" | "acordo_sem_detalhamento" | "fornecedor_sem_regra" | "cliente_sem_regra";
+}

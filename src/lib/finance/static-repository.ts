@@ -1,20 +1,28 @@
 import "server-only";
 import type { FinanceRepository } from "@/lib/finance/repository";
 import type {
+  AccountingPeriod,
   AccountsPayable,
   AccountsReceivable,
   AccountTransfer,
+  AllocationRule,
   AuditLogEntry,
   CashMovement,
+  ClassificationRule,
+  ClassifyEntityInput,
+  CloseAccountingPeriodInput,
   Contract,
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateAllocationRuleInput,
   CreateCashMovementInput,
+  CreateClassificationRuleInput,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  FinancialClassification,
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
@@ -24,6 +32,7 @@ import type {
   RecordPayablePaymentInput,
   RecordReceivablePaymentInput,
   RecurringBillTemplate,
+  ReopenAccountingPeriodInput,
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
@@ -84,6 +93,10 @@ export class StaticFinanceRepository implements FinanceRepository {
   private payableSettlements: PayableSettlement[] = [];
   private receivableSettlements: ReceivableSettlement[] = [];
   private auditLog: AuditLogEntry[] = [];
+  private financialClassifications: FinancialClassification[] = [];
+  private classificationRules: ClassificationRule[] = [];
+  private allocationRules: AllocationRule[] = [];
+  private accountingPeriods: AccountingPeriod[] = [];
 
   /** Aceita dados iniciais alternativos — usado pelos testes para preparar cenários específicos. */
   constructor(seed: StaticFinanceRepositorySeed = {}) {
@@ -667,5 +680,188 @@ export class StaticFinanceRepository implements FinanceRepository {
       afterState: after as Record<string, unknown> | null,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  // --- Contabilidade Gerencial ---
+
+  async listFinancialClassifications(): Promise<FinancialClassification[]> {
+    return this.financialClassifications.map((c) => ({ ...c }));
+  }
+
+  async classifyEntity(input: ClassifyEntityInput): Promise<FinancialClassification> {
+    const columnMap: Record<ClassifyEntityInput["sourceKind"], keyof FinancialClassification> = {
+      accounts_payable: "accountsPayableId",
+      accounts_receivable: "accountsReceivableId",
+      cash_movement: "cashMovementId",
+      account_transfer: "accountTransferId",
+    };
+    const key = columnMap[input.sourceKind];
+    const existing = this.financialClassifications.find((c) => c[key] === input.sourceId);
+    const now = new Date().toISOString();
+
+    const row: FinancialClassification = {
+      id: existing?.id ?? generateId("classificacao"),
+      accountsPayableId: input.sourceKind === "accounts_payable" ? input.sourceId : null,
+      accountsReceivableId: input.sourceKind === "accounts_receivable" ? input.sourceId : null,
+      cashMovementId: input.sourceKind === "cash_movement" ? input.sourceId : null,
+      accountTransferId: input.sourceKind === "account_transfer" ? input.sourceId : null,
+      dreLine: input.dreLine,
+      nature: input.nature,
+      includeInDre: input.includeInDre ?? true,
+      origin: "manual",
+      reviewNeeded: input.reviewNeeded ?? false,
+      classifiedBy: input.classifiedBy ?? null,
+      notes: input.notes ?? null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    const before = existing ? { ...existing } : null;
+    if (existing) {
+      this.financialClassifications = this.financialClassifications.map((c) => (c.id === existing.id ? row : c));
+    } else {
+      this.financialClassifications.push(row);
+    }
+    this.appendAudit(existing ? "update" : "create", "financial_classification", row.id, before, row);
+
+    if (input.createRule) {
+      this.classificationRules.push({
+        id: generateId("regra"),
+        matchType: input.createRule.matchType,
+        supplierId: input.createRule.supplierId ?? null,
+        supplierName: input.createRule.supplierId ? this.suppliers.find((s) => s.id === input.createRule!.supplierId)?.name ?? null : null,
+        partnerId: input.createRule.partnerId ?? null,
+        partnerName: input.createRule.partnerId ? initialPartners.find((p) => p.id === input.createRule!.partnerId)?.name ?? null : null,
+        categoryId: input.createRule.categoryId ?? null,
+        categoryName: input.createRule.categoryId ? initialFinancialCategories.find((c) => c.id === input.createRule!.categoryId)?.name ?? null : null,
+        keyword: input.createRule.keyword ?? null,
+        dreLine: input.dreLine,
+        nature: input.nature,
+        suggestedCostCenterId: null,
+        suggestedCostCenterName: null,
+        includeInDre: input.includeInDre ?? true,
+        reviewNeeded: input.reviewNeeded ?? false,
+        enabled: true,
+        notes: null,
+      });
+    }
+
+    return { ...row };
+  }
+
+  async listClassificationRules(): Promise<ClassificationRule[]> {
+    return this.classificationRules.map((r) => ({ ...r }));
+  }
+
+  async createClassificationRule(input: CreateClassificationRuleInput): Promise<ClassificationRule> {
+    const rule: ClassificationRule = {
+      id: generateId("regra"),
+      matchType: input.matchType,
+      supplierId: input.supplierId ?? null,
+      supplierName: input.supplierId ? this.suppliers.find((s) => s.id === input.supplierId)?.name ?? null : null,
+      partnerId: input.partnerId ?? null,
+      partnerName: input.partnerId ? initialPartners.find((p) => p.id === input.partnerId)?.name ?? null : null,
+      categoryId: input.categoryId ?? null,
+      categoryName: input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId)?.name ?? null : null,
+      keyword: input.keyword ?? null,
+      dreLine: input.dreLine,
+      nature: input.nature,
+      suggestedCostCenterId: input.suggestedCostCenterId ?? null,
+      suggestedCostCenterName: input.suggestedCostCenterId ? initialCostCenters.find((c) => c.id === input.suggestedCostCenterId)?.name ?? null : null,
+      includeInDre: input.includeInDre ?? true,
+      reviewNeeded: input.reviewNeeded ?? false,
+      enabled: input.enabled ?? true,
+      notes: input.notes ?? null,
+    };
+    this.classificationRules.push(rule);
+    this.appendAudit("create", "classification_rule", rule.id, null, rule);
+    return { ...rule };
+  }
+
+  async deleteClassificationRule(id: string): Promise<void> {
+    const rule = this.classificationRules.find((r) => r.id === id);
+    if (!rule) throw new Error(`Regra de classificação não encontrada: ${id}`);
+    this.classificationRules = this.classificationRules.filter((r) => r.id !== id);
+    this.appendAudit("delete", "classification_rule", id, rule, null);
+  }
+
+  async listAllocationRules(): Promise<AllocationRule[]> {
+    return this.allocationRules.map((r) => ({ ...r, shares: r.shares.map((s) => ({ ...s })) }));
+  }
+
+  async createAllocationRule(input: CreateAllocationRuleInput): Promise<AllocationRule> {
+    const total = Math.round(input.shares.reduce((sum, s) => sum + s.percentage, 0) * 100) / 100;
+    if (total !== 100) {
+      throw new Error(`A soma dos percentuais do rateio deve ser exatamente 100% (atual: ${total}%).`);
+    }
+    const rule: AllocationRule = {
+      id: generateId("rateio"),
+      name: input.name,
+      description: input.description ?? null,
+      effectiveFrom: input.effectiveFrom,
+      effectiveUntil: input.effectiveUntil ?? null,
+      shares: input.shares.map((s) => ({
+        costCenterId: s.costCenterId,
+        costCenterName: initialCostCenters.find((c) => c.id === s.costCenterId)?.name ?? "Não informado",
+        percentage: s.percentage,
+      })),
+      notes: input.notes ?? null,
+    };
+    this.allocationRules.push(rule);
+    this.appendAudit("create", "allocation_rule", rule.id, null, rule);
+    return { ...rule, shares: rule.shares.map((s) => ({ ...s })) };
+  }
+
+  async listAccountingPeriods(): Promise<AccountingPeriod[]> {
+    return this.accountingPeriods.map((p) => ({ ...p }));
+  }
+
+  async getAccountingPeriod(competenceMonth: string): Promise<AccountingPeriod | null> {
+    const period = this.accountingPeriods.find((p) => p.competenceMonth === competenceMonth);
+    return period ? { ...period } : null;
+  }
+
+  async closeAccountingPeriod(input: CloseAccountingPeriodInput): Promise<AccountingPeriod> {
+    const existing = this.accountingPeriods.find((p) => p.competenceMonth === input.competenceMonth);
+    if (existing?.status === "fechado") throw new Error(`Competência ${input.competenceMonth} já está fechada.`);
+
+    const period: AccountingPeriod = {
+      id: existing?.id ?? generateId("competencia"),
+      competenceMonth: input.competenceMonth,
+      status: "fechado",
+      closedBy: input.closedBy,
+      closedAt: new Date().toISOString(),
+      reopenedBy: existing?.reopenedBy ?? null,
+      reopenedAt: existing?.reopenedAt ?? null,
+      reopenJustification: existing?.reopenJustification ?? null,
+      notes: input.notes ?? null,
+    };
+    const before = existing ? { ...existing } : null;
+    if (existing) {
+      this.accountingPeriods = this.accountingPeriods.map((p) => (p.id === existing.id ? period : p));
+    } else {
+      this.accountingPeriods.push(period);
+    }
+    this.appendAudit("close", "accounting_period", period.id, before, period);
+    return { ...period };
+  }
+
+  async reopenAccountingPeriod(input: ReopenAccountingPeriodInput): Promise<AccountingPeriod> {
+    const existing = this.accountingPeriods.find((p) => p.competenceMonth === input.competenceMonth);
+    if (!existing) throw new Error(`Competência ${input.competenceMonth} nunca foi fechada.`);
+    if (existing.status !== "fechado") throw new Error(`Competência ${input.competenceMonth} não está fechada.`);
+    if (!input.reopenJustification.trim()) throw new Error("Justificativa obrigatória para reabrir uma competência.");
+
+    const before = { ...existing };
+    const updated: AccountingPeriod = {
+      ...existing,
+      status: "reaberto",
+      reopenedBy: input.reopenedBy,
+      reopenedAt: new Date().toISOString(),
+      reopenJustification: input.reopenJustification,
+    };
+    this.accountingPeriods = this.accountingPeriods.map((p) => (p.id === existing.id ? updated : p));
+    this.appendAudit("reopen", "accounting_period", updated.id, before, updated);
+    return { ...updated };
   }
 }

@@ -1,17 +1,25 @@
 import type {
+  AccountingPeriod,
   AccountsPayable,
   AccountsReceivable,
   AccountTransfer,
+  AllocationRule,
   AuditLogEntry,
   CashMovement,
+  ClassificationRule,
+  ClassifyEntityInput,
+  CloseAccountingPeriodInput,
   Contract,
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateAllocationRuleInput,
   CreateCashMovementInput,
+  CreateClassificationRuleInput,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  FinancialClassification,
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
@@ -21,6 +29,7 @@ import type {
   RecordPayablePaymentInput,
   RecordReceivablePaymentInput,
   RecurringBillTemplate,
+  ReopenAccountingPeriodInput,
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
@@ -89,4 +98,19 @@ export interface FinanceRepository {
   /** Só permitido quando não há nenhuma baixa registrada — senão lança erro (preferir cancelar). */
   deleteAccountsPayable(id: string): Promise<void>;
   listAuditLog(entityType: string, entityId: string): Promise<AuditLogEntry[]>;
+
+  // --- Contabilidade Gerencial ---
+  listFinancialClassifications(): Promise<FinancialClassification[]>;
+  /** Cria ou substitui a classificação vigente de um lançamento — histórico vai para audit_logs. */
+  classifyEntity(input: ClassifyEntityInput): Promise<FinancialClassification>;
+  listClassificationRules(): Promise<ClassificationRule[]>;
+  createClassificationRule(input: CreateClassificationRuleInput): Promise<ClassificationRule>;
+  deleteClassificationRule(id: string): Promise<void>;
+  listAllocationRules(): Promise<AllocationRule[]>;
+  /** Lança erro se a soma dos percentuais dos shares não for exatamente 100. */
+  createAllocationRule(input: CreateAllocationRuleInput): Promise<AllocationRule>;
+  listAccountingPeriods(): Promise<AccountingPeriod[]>;
+  getAccountingPeriod(competenceMonth: string): Promise<AccountingPeriod | null>;
+  closeAccountingPeriod(input: CloseAccountingPeriodInput): Promise<AccountingPeriod>;
+  reopenAccountingPeriod(input: ReopenAccountingPeriodInput): Promise<AccountingPeriod>;
 }

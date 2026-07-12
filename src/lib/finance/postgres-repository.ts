@@ -2,15 +2,20 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
+  accountingPeriods as accountingPeriodsTable,
   accountsPayable as accountsPayableTable,
   accountsReceivable as accountsReceivableTable,
   accountTransfers as accountTransfersTable,
+  allocationRuleShares as allocationRuleSharesTable,
+  allocationRules as allocationRulesTable,
   auditLogs as auditLogsTable,
   cashMovements as cashMovementsTable,
+  classificationRules as classificationRulesTable,
   contractBenefits as contractBenefitsTable,
   contractValuePeriods as contractValuePeriodsTable,
   contracts as contractsTable,
   customers as customersTable,
+  financialClassifications as financialClassificationsTable,
   financialAccounts as financialAccountsTable,
   partners as partnersTable,
   payments as paymentsTable,
@@ -21,28 +26,41 @@ import {
 } from "@/db/schema";
 import type { FinanceRepository } from "@/lib/finance/repository";
 import type {
+  AccountingPeriod,
+  AccountingPeriodStatus,
   AccountsPayable,
   AccountsPayableStatus,
   AccountsReceivable,
   AccountsReceivableStatus,
   AccountTransfer,
   AccountTransferType,
+  AllocationRule,
   AuditLogEntry,
   CashMovement,
   CashMovementNature,
   CashMovementType,
+  ClassificationMatchType,
+  ClassificationOrigin,
+  ClassificationRule,
+  ClassifyEntityInput,
+  CloseAccountingPeriodInput,
   Contract,
   ContractStatus,
   ContractType,
   CostCenter,
   CreateAccountsPayableInput,
   CreateAccountsReceivableInput,
+  CreateAllocationRuleInput,
   CreateCashMovementInput,
+  CreateClassificationRuleInput,
+  DreLine,
   FinancePaymentMethod,
   FinancialAccountBalance,
   FinancialAccountType,
   FinancialCategory,
   FinancialCategoryType,
+  FinancialClassification,
+  FinancialNature,
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
@@ -52,6 +70,7 @@ import type {
   RecordPayablePaymentInput,
   RecordReceivablePaymentInput,
   RecurringBillTemplate,
+  ReopenAccountingPeriodInput,
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
@@ -1246,4 +1265,357 @@ export class PostgresFinanceRepository implements FinanceRepository {
       .where(and(eq(auditLogsTable.entityType, entityType), eq(auditLogsTable.entityId, entityId)));
     return rows.map(toAuditLogEntry);
   }
+
+  // --- Contabilidade Gerencial ---
+
+  async listFinancialClassifications(): Promise<FinancialClassification[]> {
+    const rows = await this.db().select().from(financialClassificationsTable).where(eq(financialClassificationsTable.active, true));
+    return rows.map(toFinancialClassification);
+  }
+
+  async classifyEntity(input: ClassifyEntityInput): Promise<FinancialClassification> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const column = classificationColumnFor(input.sourceKind);
+      const [existing] = await tx.select().from(financialClassificationsTable).where(eq(column, input.sourceId)).limit(1);
+
+      const values = {
+        accountsPayableId: input.sourceKind === "accounts_payable" ? input.sourceId : null,
+        accountsReceivableId: input.sourceKind === "accounts_receivable" ? input.sourceId : null,
+        cashMovementId: input.sourceKind === "cash_movement" ? input.sourceId : null,
+        accountTransferId: input.sourceKind === "account_transfer" ? input.sourceId : null,
+        dreLine: input.dreLine,
+        nature: input.nature,
+        includeInDre: input.includeInDre ?? true,
+        origin: "manual" as ClassificationOrigin,
+        reviewNeeded: input.reviewNeeded ?? false,
+        classifiedBy: input.classifiedBy ?? null,
+        source: "manual",
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+      };
+
+      const row = existing
+        ? (await tx.update(financialClassificationsTable).set(values).where(eq(financialClassificationsTable.id, existing.id)).returning())[0]
+        : (await tx.insert(financialClassificationsTable).values(values).returning())[0];
+
+      await tx.insert(auditLogsTable).values({
+        action: existing ? "update" : "create",
+        entityType: "financial_classification",
+        entityId: row.id,
+        beforeState: existing ?? null,
+        afterState: row,
+        source: "manual",
+      });
+
+      if (input.createRule) {
+        await tx
+          .insert(classificationRulesTable)
+          .values({
+            matchType: input.createRule.matchType,
+            supplierId: input.createRule.supplierId ?? null,
+            partnerId: input.createRule.partnerId ?? null,
+            categoryId: input.createRule.categoryId ?? null,
+            keyword: input.createRule.keyword ?? null,
+            dreLine: input.dreLine,
+            nature: input.nature,
+            includeInDre: input.includeInDre ?? true,
+            reviewNeeded: input.reviewNeeded ?? false,
+            source: "manual",
+          })
+          .onConflictDoNothing();
+      }
+
+      return toFinancialClassification(row);
+    });
+  }
+
+  async listClassificationRules(): Promise<ClassificationRule[]> {
+    const db = this.db();
+    const rows = await db.select().from(classificationRulesTable).where(eq(classificationRulesTable.active, true));
+    const results: ClassificationRule[] = [];
+    for (const row of rows) results.push(await this.toClassificationRule(row));
+    return results;
+  }
+
+  private async toClassificationRule(row: typeof classificationRulesTable.$inferSelect): Promise<ClassificationRule> {
+    const db = this.db();
+    let supplierName: string | null = null;
+    if (row.supplierId) {
+      const [s] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, row.supplierId)).limit(1);
+      supplierName = s?.name ?? null;
+    }
+    let partnerName: string | null = null;
+    if (row.partnerId) {
+      const [p] = await db.select().from(partnersTable).where(eq(partnersTable.id, row.partnerId)).limit(1);
+      partnerName = p?.name ?? null;
+    }
+    let categoryName: string | null = null;
+    if (row.categoryId) {
+      const [c] = await db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.id, row.categoryId)).limit(1);
+      categoryName = c?.name ?? null;
+    }
+    let suggestedCostCenterName: string | null = null;
+    if (row.suggestedCostCenterId) {
+      const [cc] = await db.select().from(costCentersTable).where(eq(costCentersTable.id, row.suggestedCostCenterId)).limit(1);
+      suggestedCostCenterName = cc?.name ?? null;
+    }
+    return {
+      id: row.id,
+      matchType: row.matchType as ClassificationMatchType,
+      supplierId: row.supplierId,
+      supplierName,
+      partnerId: row.partnerId,
+      partnerName,
+      categoryId: row.categoryId,
+      categoryName,
+      keyword: row.keyword,
+      dreLine: row.dreLine as DreLine,
+      nature: row.nature as FinancialNature,
+      suggestedCostCenterId: row.suggestedCostCenterId,
+      suggestedCostCenterName,
+      includeInDre: row.includeInDre,
+      reviewNeeded: row.reviewNeeded,
+      enabled: row.enabled,
+      notes: row.notes,
+    };
+  }
+
+  async createClassificationRule(input: CreateClassificationRuleInput): Promise<ClassificationRule> {
+    const [row] = await this.db()
+      .insert(classificationRulesTable)
+      .values({
+        matchType: input.matchType,
+        supplierId: input.supplierId ?? null,
+        partnerId: input.partnerId ?? null,
+        categoryId: input.categoryId ?? null,
+        keyword: input.keyword ?? null,
+        dreLine: input.dreLine,
+        nature: input.nature,
+        suggestedCostCenterId: input.suggestedCostCenterId ?? null,
+        includeInDre: input.includeInDre ?? true,
+        reviewNeeded: input.reviewNeeded ?? false,
+        enabled: input.enabled ?? true,
+        source: "manual",
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    await this.db().insert(auditLogsTable).values({
+      action: "create",
+      entityType: "classification_rule",
+      entityId: row.id,
+      beforeState: null,
+      afterState: row,
+      source: "manual",
+    });
+
+    return this.toClassificationRule(row);
+  }
+
+  async deleteClassificationRule(id: string): Promise<void> {
+    const db = this.db();
+    await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(classificationRulesTable).where(eq(classificationRulesTable.id, id)).limit(1);
+      if (!before) throw new Error(`Regra de classificação não encontrada: ${id}`);
+      await tx.update(classificationRulesTable).set({ active: false, enabled: false, updatedAt: new Date() }).where(eq(classificationRulesTable.id, id));
+      await tx.insert(auditLogsTable).values({
+        action: "delete",
+        entityType: "classification_rule",
+        entityId: id,
+        beforeState: before,
+        afterState: null,
+        source: "manual",
+      });
+    });
+  }
+
+  async listAllocationRules(): Promise<AllocationRule[]> {
+    const db = this.db();
+    const rules = await db.select().from(allocationRulesTable).where(eq(allocationRulesTable.active, true));
+    const results: AllocationRule[] = [];
+    for (const rule of rules) {
+      const shares = await db.select().from(allocationRuleSharesTable).where(eq(allocationRuleSharesTable.allocationRuleId, rule.id));
+      const sharesWithNames = [];
+      for (const share of shares) {
+        const [cc] = await db.select().from(costCentersTable).where(eq(costCentersTable.id, share.costCenterId)).limit(1);
+        sharesWithNames.push({ costCenterId: share.costCenterId, costCenterName: cc?.name ?? "Não informado", percentage: Number(share.percentage) });
+      }
+      results.push({
+        id: rule.id,
+        name: rule.name,
+        description: rule.description,
+        effectiveFrom: rule.effectiveFrom,
+        effectiveUntil: rule.effectiveUntil,
+        shares: sharesWithNames,
+        notes: rule.notes,
+      });
+    }
+    return results;
+  }
+
+  async createAllocationRule(input: CreateAllocationRuleInput): Promise<AllocationRule> {
+    const total = Math.round(input.shares.reduce((sum, s) => sum + s.percentage, 0) * 100) / 100;
+    if (total !== 100) {
+      throw new Error(`A soma dos percentuais do rateio deve ser exatamente 100% (atual: ${total}%).`);
+    }
+
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [rule] = await tx
+        .insert(allocationRulesTable)
+        .values({
+          name: input.name,
+          description: input.description ?? null,
+          effectiveFrom: input.effectiveFrom,
+          effectiveUntil: input.effectiveUntil ?? null,
+          source: "manual",
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      const shares = [];
+      for (const share of input.shares) {
+        const [shareRow] = await tx
+          .insert(allocationRuleSharesTable)
+          .values({ allocationRuleId: rule.id, costCenterId: share.costCenterId, percentage: String(share.percentage) })
+          .returning();
+        const [cc] = await tx.select().from(costCentersTable).where(eq(costCentersTable.id, share.costCenterId)).limit(1);
+        shares.push({ costCenterId: shareRow.costCenterId, costCenterName: cc?.name ?? "Não informado", percentage: Number(shareRow.percentage) });
+      }
+
+      await tx.insert(auditLogsTable).values({
+        action: "create",
+        entityType: "allocation_rule",
+        entityId: rule.id,
+        beforeState: null,
+        afterState: { ...rule, shares },
+        source: "manual",
+      });
+
+      return { id: rule.id, name: rule.name, description: rule.description, effectiveFrom: rule.effectiveFrom, effectiveUntil: rule.effectiveUntil, shares, notes: rule.notes };
+    });
+  }
+
+  private toAccountingPeriod(row: typeof accountingPeriodsTable.$inferSelect): AccountingPeriod {
+    return {
+      id: row.id,
+      competenceMonth: row.competenceMonth,
+      status: row.status as AccountingPeriodStatus,
+      closedBy: row.closedBy,
+      closedAt: row.closedAt ? row.closedAt.toISOString() : null,
+      reopenedBy: row.reopenedBy,
+      reopenedAt: row.reopenedAt ? row.reopenedAt.toISOString() : null,
+      reopenJustification: row.reopenJustification,
+      notes: row.notes,
+    };
+  }
+
+  async listAccountingPeriods(): Promise<AccountingPeriod[]> {
+    const rows = await this.db().select().from(accountingPeriodsTable).where(eq(accountingPeriodsTable.active, true));
+    return rows.map((r) => this.toAccountingPeriod(r));
+  }
+
+  async getAccountingPeriod(competenceMonth: string): Promise<AccountingPeriod | null> {
+    const rows = await this.db().select().from(accountingPeriodsTable).where(eq(accountingPeriodsTable.competenceMonth, competenceMonth)).limit(1);
+    return rows[0] ? this.toAccountingPeriod(rows[0]) : null;
+  }
+
+  async closeAccountingPeriod(input: CloseAccountingPeriodInput): Promise<AccountingPeriod> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(accountingPeriodsTable).where(eq(accountingPeriodsTable.competenceMonth, input.competenceMonth)).limit(1);
+      if (existing?.status === "fechado") throw new Error(`Competência ${input.competenceMonth} já está fechada.`);
+
+      const values = {
+        competenceMonth: input.competenceMonth,
+        status: "fechado" as const,
+        closedBy: input.closedBy,
+        closedAt: new Date(),
+        source: "manual",
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+      };
+
+      const row = existing
+        ? (await tx.update(accountingPeriodsTable).set(values).where(eq(accountingPeriodsTable.id, existing.id)).returning())[0]
+        : (await tx.insert(accountingPeriodsTable).values(values).returning())[0];
+
+      await tx.insert(auditLogsTable).values({
+        action: "close",
+        entityType: "accounting_period",
+        entityId: row.id,
+        beforeState: existing ?? null,
+        afterState: row,
+        source: "manual",
+      });
+
+      return this.toAccountingPeriod(row);
+    });
+  }
+
+  async reopenAccountingPeriod(input: ReopenAccountingPeriodInput): Promise<AccountingPeriod> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(accountingPeriodsTable).where(eq(accountingPeriodsTable.competenceMonth, input.competenceMonth)).limit(1);
+      if (!existing) throw new Error(`Competência ${input.competenceMonth} nunca foi fechada.`);
+      if (existing.status !== "fechado") throw new Error(`Competência ${input.competenceMonth} não está fechada.`);
+      if (!input.reopenJustification.trim()) throw new Error("Justificativa obrigatória para reabrir uma competência.");
+
+      const [row] = await tx
+        .update(accountingPeriodsTable)
+        .set({
+          status: "reaberto",
+          reopenedBy: input.reopenedBy,
+          reopenedAt: new Date(),
+          reopenJustification: input.reopenJustification,
+          updatedAt: new Date(),
+        })
+        .where(eq(accountingPeriodsTable.id, existing.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "reopen",
+        entityType: "accounting_period",
+        entityId: row.id,
+        beforeState: existing,
+        afterState: row,
+        source: "manual",
+      });
+
+      return this.toAccountingPeriod(row);
+    });
+  }
+}
+
+function classificationColumnFor(sourceKind: ClassifyEntityInput["sourceKind"]) {
+  switch (sourceKind) {
+    case "accounts_payable":
+      return financialClassificationsTable.accountsPayableId;
+    case "accounts_receivable":
+      return financialClassificationsTable.accountsReceivableId;
+    case "cash_movement":
+      return financialClassificationsTable.cashMovementId;
+    case "account_transfer":
+      return financialClassificationsTable.accountTransferId;
+  }
+}
+
+function toFinancialClassification(row: typeof financialClassificationsTable.$inferSelect): FinancialClassification {
+  return {
+    id: row.id,
+    accountsPayableId: row.accountsPayableId,
+    accountsReceivableId: row.accountsReceivableId,
+    cashMovementId: row.cashMovementId,
+    accountTransferId: row.accountTransferId,
+    dreLine: row.dreLine as DreLine,
+    nature: row.nature as FinancialNature,
+    includeInDre: row.includeInDre,
+    origin: row.origin as ClassificationOrigin,
+    reviewNeeded: row.reviewNeeded,
+    classifiedBy: row.classifiedBy,
+    notes: row.notes,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
