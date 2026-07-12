@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAccountsReceivableStatus, computeOutstanding, resolveContractValue } from "@/lib/finance/status";
+import { computeAccountsReceivableStatus, computeNetAmount, computeOutstanding, resolveContractValue } from "@/lib/finance/status";
 import type { ContractValuePeriod } from "@/lib/finance/types";
 
 describe("computeOutstanding", () => {
@@ -55,6 +55,24 @@ describe("computeAccountsReceivableStatus", () => {
 
   it("sem pagamento e dentro do prazo permanece open", () => {
     expect(computeAccountsReceivableStatus({ ...base, status: "open" }, "2026-07-01")).toBe("open");
+  });
+
+  it("mantém reversed sem recalcular — é uma decisão manual, mesmo com saldo em aberto novamente", () => {
+    expect(computeAccountsReceivableStatus({ ...base, status: "reversed" }, "2026-08-01")).toBe("reversed");
+  });
+});
+
+describe("computeNetAmount — valor líquido após taxa (ex.: taxa Stone)", () => {
+  it("subtrai a taxa do valor recebido", () => {
+    expect(computeNetAmount(1200, 36)).toBe(1164);
+  });
+
+  it("sem taxa informada (null), retorna o próprio valor recebido — nunca inventa uma taxa", () => {
+    expect(computeNetAmount(1200, null)).toBe(1200);
+  });
+
+  it("nunca retorna valor líquido negativo, mesmo com taxa maior que o valor recebido", () => {
+    expect(computeNetAmount(50, 80)).toBe(0);
   });
 });
 
