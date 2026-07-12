@@ -39,9 +39,19 @@ const expenseCategories = [
   "Sistemas e assinaturas",
   "Transporte e logística",
   "Outras despesas",
+  // Adicionadas na execução do módulo Contas a Pagar (10/07/2026) — necessárias para
+  // classificar com precisão as contas recorrentes reais informadas pelo proprietário.
+  "Telefonia",
+  "Empréstimos e financiamentos",
+  "Reembolso a sócios/colaboradores",
+  "Retirada de lucro/distribuição a sócios",
 ];
 
-const costCenterNames = ["Estacionamento", "Lavação", "Administrativo", "Marketing", "Estrutura", "Tecnologia"];
+// "Estacionamento" e "Administrativo" já existiam (reaproveitados — ver docs/finance-module.md).
+// "Estética Automotiva" é novo: mais específico que "Lavação" e cobre lavações, polimentos,
+// vitrificações, higienizações, revitalizações e o Grupo IESA (cliente corporativo, não
+// mensalista do estacionamento).
+const costCenterNames = ["Estacionamento", "Lavação", "Administrativo", "Marketing", "Estrutura", "Tecnologia", "Estética Automotiva"];
 
 function slugify(prefix: string, name: string): string {
   const normalized = name
