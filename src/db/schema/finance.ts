@@ -1,4 +1,4 @@
-import { boolean, date, integer, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, numeric, pgEnum, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 import { customers } from "./crm";
 
@@ -157,14 +157,25 @@ export const accountsReceivable = pgTable("accounts_receivable", {
   ...timestamps,
 });
 
+/**
+ * Baixa/pagamento efetivo. Serve tanto a accounts_receivable (recebimento) quanto a
+ * accounts_payable (pagamento) — exatamente um dos dois deve ser preenchido por linha. Reused
+ * em vez de criar uma tabela `accounts_payable_payments` separada.
+ */
 export const payments = pgTable("payments", {
   id: id(),
   accountsReceivableId: uuid("accounts_receivable_id").references(() => accountsReceivable.id),
+  accountsPayableId: uuid("accounts_payable_id").references(() => accountsPayable.id),
+  /** Conta/caixa de onde saiu (pagamento) ou para onde entrou (recebimento) o dinheiro. */
+  financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   paidAt: date("paid_at"),
   /** "desconhecido" é um valor válido e esperado — nunca inventar a forma de pagamento. */
   method: paymentMethodEnum("method").notNull().default("desconhecido"),
   invoiceIssued: boolean("invoice_issued").notNull().default(false),
+  /** Estorno: quando true, esta baixa foi revertida e não deve mais contar no saldo. */
+  reversed: boolean("reversed").notNull().default(false),
+  reversedAt: timestamp("reversed_at", { withTimezone: true }),
   active: active(),
   source: source(),
   /** Slug estável (ex.: "iesa-pagamento-2026-07-10"), único, para seed idempotente. */
@@ -214,15 +225,42 @@ export const costCenters = pgTable("cost_centers", {
   ...timestamps,
 });
 
+/** Contas bancárias/de pagamento e caixas reais da empresa (Parte 2 do módulo Contas a Pagar). */
+export const financialAccountTypeEnum = pgEnum("financial_account_type", [
+  "conta_pagamento",
+  "conta_bancaria",
+  "dinheiro",
+]);
+
+export const financialAccounts = pgTable("financial_accounts", {
+  id: id(),
+  name: text("name").notNull(),
+  type: financialAccountTypeEnum("type").notNull(),
+  /**
+   * Fundo fixo desejado (só relevante para contas do tipo "dinheiro", ex.: caixa físico R$
+   * 100,00) — também usado como limiar de alerta de saldo baixo. Nunca representa o saldo
+   * atual: o saldo é sempre calculado a partir de cash_movements/account_transfers reais
+   * vinculados a esta conta (ver src/lib/finance/status.ts, computeAccountBalance).
+   */
+  fixedFundAmount: numeric("fixed_fund_amount", { precision: 12, scale: 2 }),
+  active: active(),
+  source: source(),
+  /** Slug estável (ex.: "conta-stone"), único, para seed idempotente. */
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
 export const cashMovementTypeEnum = pgEnum("cash_movement_type", ["entrada", "saida"]);
 
 /**
  * Movimento de caixa real (dinheiro que efetivamente entrou/saiu numa data), distinto de
- * `accounts_receivable` (o que é devido) e de `financialCategories`/receita operacional (quando
- * o serviço foi prestado). Um recebimento de conta a receber gera uma linha aqui, apontando de
- * volta para a conta via `accountsReceivableId` — é assim que o caso da IESA (recebido em
- * 10/07/2026, competência de junho) fica correto: aparece como caixa no dia 10/07, mas a conta
- * a receber mantém a competência de junho.
+ * `accounts_receivable`/`accounts_payable` (o que é devido) e de `financialCategories`/receita
+ * operacional (quando o serviço foi prestado). Um recebimento de conta a receber ou o pagamento
+ * de uma conta a pagar gera uma linha aqui — é assim que o caso da IESA (recebido em 10/07/2026,
+ * competência de junho) fica correto: aparece como caixa no dia 10/07, mas a conta a receber
+ * mantém a competência de junho. Transferências entre contas (`account_transfers`) NÃO passam
+ * por aqui — nunca entram como entrada/saída de receita/despesa.
  */
 export const cashMovements = pgTable("cash_movements", {
   id: id(),
@@ -233,6 +271,35 @@ export const cashMovements = pgTable("cash_movements", {
   accountsReceivableId: uuid("accounts_receivable_id").references(() => accountsReceivable.id),
   categoryId: uuid("category_id").references(() => financialCategories.id),
   costCenterId: uuid("cost_center_id").references(() => costCenters.id),
+  /** Conta/caixa onde o dinheiro efetivamente entrou/saiu. Null para movimentos legados sem conta informada. */
+  financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
+  /** Baixa (payments) que gerou este movimento, quando aplicável — permite estornar com precisão. */
+  paymentId: uuid("payment_id").references((): AnyPgColumn => payments.id),
+  active: active(),
+  source: source(),
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+export const accountTransferTypeEnum = pgEnum("account_transfer_type", ["transferencia", "reposicao_caixa"]);
+
+/**
+ * Transferências entre contas (Stone ↔ Ailos ↔ Caixa) e reposições de fundo de caixa. Nunca
+ * entram como receita ou despesa — por isso ficam numa tabela própria, fora de cash_movements/
+ * accounts_payable/accounts_receivable, e o cálculo de saldo de cada conta soma estas linhas
+ * separadamente (ver computeAccountBalance).
+ */
+export const accountTransfers = pgTable("account_transfers", {
+  id: id(),
+  type: accountTransferTypeEnum("type").notNull(),
+  /** Null = aporte externo (dinheiro entrando no sistema de contas pela primeira vez). */
+  fromAccountId: uuid("from_account_id").references(() => financialAccounts.id),
+  /** Null = saída do sistema de contas (ex.: retirada). */
+  toAccountId: uuid("to_account_id").references(() => financialAccounts.id),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  date: date("date").notNull(),
+  description: text("description").notNull(),
   active: active(),
   source: source(),
   externalId: text("external_id").unique(),
@@ -261,6 +328,111 @@ export const reconciliationRecords = pgTable("reconciliation_records", {
   active: active(),
   source: source(),
   externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/** Fornecedores (Parte 4 do módulo Contas a Pagar). Nunca inventar CNPJ/telefone/e-mail/endereço. */
+export const suppliers = pgTable("suppliers", {
+  id: id(),
+  name: text("name").notNull(),
+  /** Pessoa de contato, quando informada (ex.: representante de um fornecedor PJ/PF). */
+  contactName: text("contact_name"),
+  /** CNPJ ou CPF, só quando informado explicitamente — nunca inventado. */
+  taxId: text("tax_id"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  active: active(),
+  source: source(),
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Modelo de recorrência (Parte 5). Não gera accounts_payable automaticamente — é só a regra
+ * (fornecedor, valor-base, categoria, centro de custo, vencimento, periodicidade). Gerar a
+ * cobrança de um mês específico é uma ação explícita (ver
+ * src/lib/finance/service.ts, generateAccountsPayableFromTemplate), nunca automática silenciosa.
+ */
+export const recurringBillTemplates = pgTable("recurring_bill_templates", {
+  id: id(),
+  description: text("description").notNull(),
+  supplierId: uuid("supplier_id").references(() => suppliers.id),
+  categoryId: uuid("category_id").references(() => financialCategories.id),
+  costCenterId: uuid("cost_center_id").references(() => costCenters.id),
+  financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
+  /** Null quando o valor é variável por competência (ex.: água, energia) — nunca repetir o último valor como fixo. */
+  amount: numeric("amount", { precision: 12, scale: 2 }),
+  variableAmount: boolean("variable_amount").notNull().default(false),
+  /** Dia do vencimento. Null quando não informado (ex.: água/energia, sem dia fixo definido). */
+  dueDay: integer("due_day"),
+  periodicity: text("periodicity").notNull().default("mensal"),
+  /** Credor/valor ainda não confirmado pelo proprietário — nunca inventado, sinalizado aqui. */
+  pendingData: boolean("pending_data").notNull().default(false),
+  active: active(),
+  source: source(),
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * rascunho: criada mas ainda não confirmada.
+ * pendente: em aberto, dentro do prazo.
+ * parcialmente_paga: recebeu alguma baixa, mas outstandingAmount > 0.
+ * paga: outstandingAmount = 0.
+ * vencida: em aberto (ou parcial) e dueDate já passou — sempre calculada, nunca gravada "presa".
+ * cancelada: cancelada, não entra em nenhum total.
+ */
+export const accountsPayableStatusEnum = pgEnum("accounts_payable_status", [
+  "rascunho",
+  "pendente",
+  "parcialmente_paga",
+  "paga",
+  "vencida",
+  "cancelada",
+]);
+
+/**
+ * Entidade central do módulo Contas a Pagar. Espelha a estrutura de accounts_receivable
+ * (mesmo padrão de saldo/status), mas com vocabulário em português conforme especificado para
+ * este módulo, e campos próprios (fornecedor, parcelamento, recorrência, dados pendentes).
+ */
+export const accountsPayable = pgTable("accounts_payable", {
+  id: id(),
+  description: text("description").notNull(),
+  supplierId: uuid("supplier_id").references(() => suppliers.id),
+  categoryId: uuid("category_id")
+    .notNull()
+    .references(() => financialCategories.id),
+  costCenterId: uuid("cost_center_id").references(() => costCenters.id),
+  /** Conta/caixa de onde o pagamento sai (ou saiu). Null enquanto não decidido. */
+  financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
+  competenceDate: date("competence_date").notNull(),
+  issueDate: date("issue_date"),
+  dueDate: date("due_date").notNull(),
+  originalAmount: numeric("original_amount", { precision: 12, scale: 2 }).notNull(),
+  paidAmount: numeric("paid_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  /** Mantido em sincronia com originalAmount - paidAmount pela camada de aplicação. */
+  outstandingAmount: numeric("outstanding_amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMethod: paymentMethodEnum("payment_method").notNull().default("desconhecido"),
+  documentNumber: text("document_number"),
+  status: accountsPayableStatusEnum("status").notNull().default("pendente"),
+  /** Sinaliza cadastro com informação real faltando (ex.: credor não informado) — nunca inventada. */
+  pendingData: boolean("pending_data").notNull().default(false),
+  recurringBillTemplateId: uuid("recurring_bill_template_id").references(() => recurringBillTemplates.id),
+  /** Agrupa parcelas da mesma compra/obrigação. Null quando não é uma compra parcelada. */
+  installmentGroupId: uuid("installment_group_id"),
+  installmentNumber: integer("installment_number"),
+  installmentTotal: integer("installment_total"),
+  /** Preparado para anexos futuros (ex.: nota fiscal digitalizada) — upload não implementado ainda. */
+  attachmentRef: text("attachment_ref"),
+  active: active(),
+  source: source(),
+  /** Slug estável (ex.: "aluguel-2026-07"), único, para geração idempotente a partir de recorrência. */
+  externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
 });

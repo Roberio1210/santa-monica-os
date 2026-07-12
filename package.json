@@ -12,7 +12,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:inventory": "tsx src/db/seed/inventory.ts",
     "db:seed:contracts": "tsx src/db/seed/contracts.ts",
-    "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts"
+    "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts",
+    "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",
