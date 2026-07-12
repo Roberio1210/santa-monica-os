@@ -287,3 +287,59 @@ export function sumOutstandingDueWithin(items: (AccountsPayableView | AccountsRe
 export function findAccountByName(accounts: FinancialAccountBalance[], nameIncludes: string): FinancialAccountBalance | null {
   return accounts.find((a) => a.name.toLowerCase().includes(nameIncludes.toLowerCase())) ?? null;
 }
+
+function yesterdayIso(asOfDate: string): string {
+  const date = new Date(`${asOfDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Resultado de caixa de ontem, calculado a partir do Livro Caixa já buscado (nenhuma consulta
+ * nova) — mesma fórmula de computeCashFlowDashboard (entradas - saídas de cash_movements,
+ * transferências sempre excluídas), só que para a data anterior.
+ */
+export function computeYesterdayResult(ledger: { kind: string; date: string; amount: number }[], asOfDate: string): number {
+  const yesterday = yesterdayIso(asOfDate);
+  const total = ledger.filter((e) => e.kind === "movimento" && e.date === yesterday).reduce((sum, e) => sum + e.amount, 0);
+  return Math.round(total * 100) / 100;
+}
+
+export interface MovementTimelineEntry {
+  time: string;
+  label: string;
+  detail: string;
+  amount: number | null;
+}
+
+/**
+ * Linha do tempo de hoje a partir das ordens do JumpPark já buscadas (nenhuma consulta nova) —
+ * entrada (horário real de entrada) e, quando já finalizada, o evento de saída/pagamento
+ * (horário real de saída). Nunca inventa um horário: pedidos sem entryTime/exitTime ficam de
+ * fora da linha do tempo.
+ */
+export function buildMovementTimeline(orders: OperationOrder[]): MovementTimelineEntry[] {
+  const entries: MovementTimelineEntry[] = [];
+
+  for (const order of orders) {
+    if (order.entryTime) {
+      entries.push({
+        time: order.entryTime,
+        label: "Entrada",
+        detail: `${order.vehicleModel}${order.clientName ? ` — ${order.clientName}` : ""}`,
+        amount: null,
+      });
+    }
+    if (order.exitTime) {
+      const serviceNames = order.services.map((s) => s.description).join(", ");
+      entries.push({
+        time: order.exitTime,
+        label: order.hasServices ? "Pagamento recebido" : "Saída",
+        detail: serviceNames || `${order.vehicleModel} — ${order.paymentMethod}`,
+        amount: order.totalAmount,
+      });
+    }
+  }
+
+  return entries.sort((a, b) => a.time.localeCompare(b.time));
+}
