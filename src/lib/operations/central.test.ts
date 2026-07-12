@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { computeConsolidatedAlerts, computeSituation, findFirstNegativeProjection, sumOutstandingDueOn, sumOutstandingDueWithin, type CentralOverview } from "@/lib/operations/central";
+import {
+  buildMovementTimeline,
+  computeConsolidatedAlerts,
+  computeSituation,
+  computeYesterdayResult,
+  findFirstNegativeProjection,
+  sumOutstandingDueOn,
+  sumOutstandingDueWithin,
+  type CentralOverview,
+} from "@/lib/operations/central";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowProjectionPoint } from "@/lib/finance/types";
+import type { OperationOrder } from "@/lib/integrations/jumppark";
 
 function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview {
   return {
@@ -223,5 +233,68 @@ describe("makeAR/makeAP fixtures", () => {
   it("garantem que os testes acima usam tipos reais do domínio financeiro", () => {
     expect(makeAP({}).status).toBe("pendente");
     expect(makeAR({}).status).toBe("open");
+  });
+});
+
+describe("computeYesterdayResult", () => {
+  it("soma entradas e saídas do Livro Caixa só da data anterior, ignorando transferências", () => {
+    const ledger = [
+      { kind: "movimento", date: "2026-07-14", amount: 300 },
+      { kind: "movimento", date: "2026-07-14", amount: -100 },
+      { kind: "transferencia", date: "2026-07-14", amount: 500 },
+      { kind: "movimento", date: "2026-07-15", amount: 999 },
+    ];
+    expect(computeYesterdayResult(ledger, "2026-07-15")).toBe(200);
+  });
+
+  it("retorna 0 quando não há movimento no dia anterior — nunca inventa um valor", () => {
+    expect(computeYesterdayResult([], "2026-07-15")).toBe(0);
+  });
+});
+
+function makeOrder(overrides: Partial<OperationOrder>): OperationOrder {
+  return {
+    id: "order-1",
+    code: "OS-1",
+    entryTime: "08:02",
+    exitTime: null,
+    plateMasked: "AB***12",
+    vehicleModel: "Gol",
+    clientName: "Cliente Teste",
+    clientPhoneMasked: "*******99",
+    services: [],
+    hasServices: false,
+    parkingAmount: 20,
+    servicesAmount: 0,
+    totalAmount: 20,
+    paymentMethod: "Pix",
+    paymentMethodCategory: "pix",
+    situation: "Finalizado",
+    ...overrides,
+  };
+}
+
+describe("buildMovementTimeline", () => {
+  it("inclui entrada e saída com horário real, ordenadas cronologicamente", () => {
+    const orders = [
+      makeOrder({ id: "o1", entryTime: "09:10", exitTime: "10:00", totalAmount: 50, hasServices: true, services: [{ description: "Lavagem Gold", amount: 50 }] }),
+      makeOrder({ id: "o2", entryTime: "08:02", exitTime: null }),
+    ];
+    const timeline = buildMovementTimeline(orders);
+    expect(timeline.map((e) => e.time)).toEqual(["08:02", "09:10", "10:00"]);
+    expect(timeline[0].label).toBe("Entrada");
+  });
+
+  it("nunca inventa horário — pedido sem entryTime/exitTime fica fora da linha do tempo", () => {
+    const orders = [makeOrder({ entryTime: null, exitTime: null })];
+    expect(buildMovementTimeline(orders)).toHaveLength(0);
+  });
+
+  it("evento de saída com serviços vira 'Pagamento recebido' com o valor real", () => {
+    const orders = [makeOrder({ exitTime: "10:00", hasServices: true, totalAmount: 75, services: [{ description: "Enceramento", amount: 75 }] })];
+    const timeline = buildMovementTimeline(orders);
+    const exitEntry = timeline.find((e) => e.time === "10:00")!;
+    expect(exitEntry.label).toBe("Pagamento recebido");
+    expect(exitEntry.amount).toBe(75);
   });
 });
