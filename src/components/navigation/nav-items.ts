@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Receipt,
   FileMinus,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const navItems: NavItem[] = [
   { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/financeiro", label: "Financeiro", icon: Wallet },
+  { href: "/financeiro/fluxo-de-caixa", label: "Fluxo de Caixa", icon: BookOpen },
   { href: "/financeiro/contas-a-receber", label: "Contas a Receber", icon: Receipt },
   { href: "/financeiro/contas-a-pagar", label: "Contas a Pagar", icon: FileMinus },
   { href: "/marketing", label: "Marketing", icon: Megaphone },
