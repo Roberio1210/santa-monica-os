@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { StorageModeBadge } from "@/components/shared/storage-mode-badge";
 import { AccountsReceivableView } from "@/components/finance/accounts-receivable-view";
-import { fetchAccountsReceivableOverview } from "@/lib/finance/service";
+import { computeAccountsReceivableDashboard, computeReceivableAlerts, fetchAccountsReceivableOverview } from "@/lib/finance/service";
 import { getStorageMode } from "@/lib/storage/mode";
 
 // Evita que a lista de contas a receber fique congelada no HTML estático gerado em build —
@@ -15,6 +15,8 @@ function todayIso(): string {
 export default async function ContasAReceberPage() {
   const asOfDate = todayIso();
   const { items, summary } = await fetchAccountsReceivableOverview(asOfDate);
+  const dashboard = computeAccountsReceivableDashboard(items, asOfDate);
+  const alerts = computeReceivableAlerts(items, asOfDate);
   const storageMode = getStorageMode();
 
   return (
@@ -25,7 +27,7 @@ export default async function ContasAReceberPage() {
         actions={<StorageModeBadge mode={storageMode} />}
       />
 
-      <AccountsReceivableView items={items} summary={summary} asOfDate={asOfDate} />
+      <AccountsReceivableView items={items} summary={summary} dashboard={dashboard} alerts={alerts} asOfDate={asOfDate} />
     </div>
   );
 }
