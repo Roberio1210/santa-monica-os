@@ -1,42 +1,46 @@
 import { PageHeader } from "@/components/shared/page-header";
-import { DemoDataBadge } from "@/components/shared/demo-data-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ZezinhoChat } from "@/components/agents/zezinho-chat";
-import { mockRecommendations } from "@/data/mock/agents";
-import { agentProfiles } from "@/data/mock/agents";
+import { Badge } from "@/components/ui/badge";
+import { ZezinhoConversation } from "@/components/zezinho/zezinho-conversation";
+import { generateDailySummary, ZEZINHO_QUESTIONS } from "@/lib/zezinho/service";
 
-export default function ZezinhoPage() {
+export const dynamic = "force-dynamic";
+
+export default async function ZezinhoPage() {
+  const summary = await generateDailySummary();
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Zézinho IA"
-        description="Gerente Geral — interface de conversa demonstrativa."
-        actions={<DemoDataBadge />}
+        description="Versão gerencial baseada nos dados do sistema — sem integração com provedor de IA externo nesta etapa."
+        actions={<Badge variant="outline">Somente leitura</Badge>}
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ZezinhoChat />
+        <div className="lg:col-span-2 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumo do dia</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <p className="text-sm leading-relaxed text-foreground">{summary}</p>
+            </CardContent>
+          </Card>
+
+          <ZezinhoConversation questions={ZEZINHO_QUESTIONS} />
         </div>
 
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Recomendações recentes</CardTitle>
+              <CardTitle>Sobre o Zézinho</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 pt-0">
-              {mockRecommendations.slice(0, 4).map((rec) => {
-                const agent = agentProfiles.find((a) => a.id === rec.agentId);
-                return (
-                  <div key={rec.id}>
-                    <p className="text-sm font-medium text-foreground">
-                      {rec.title}
-                      {agent ? <span className="ml-1 text-xs font-normal text-foreground-subtle">— {agent.name}</span> : null}
-                    </p>
-                    <p className="text-xs text-foreground-muted">{rec.description}</p>
-                  </div>
-                );
-              })}
+            <CardContent className="space-y-2 pt-0 text-sm text-foreground-muted">
+              <p>Responde só com consultas determinísticas sobre os dados reais do Santa Monica OS — nunca inventa números ou conclusões.</p>
+              <p>Não executa ações: não paga contas, não recebe, não altera nem exclui registros.</p>
+              <p>Quando não há dado suficiente, avisa &ldquo;Ainda não tenho dados suficientes&rdquo; em vez de supor uma resposta.</p>
+              <p className="text-xs text-foreground-subtle">Arquitetura preparada para um provedor de IA futuro — nenhum SDK de IA foi integrado nesta etapa.</p>
             </CardContent>
           </Card>
         </div>

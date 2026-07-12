@@ -95,6 +95,34 @@ export interface ZezinhoQuestion {
   label: string;
 }
 
+/**
+ * Roteador simples e explícito para texto livre — casa palavras-chave com uma das intenções
+ * pré-definidas. Nunca interpreta linguagem natural livremente; quando nada combina, cai no
+ * resumo do dia como resposta padrão mais útil.
+ */
+const KEYWORD_INTENTS: { keywords: string[]; questionId: string }[] = [
+  { keywords: ["vencid"], questionId: "contas_vencidas" },
+  { keywords: ["semana", "proxim", "próxim"], questionId: "contas_semana" },
+  { keywords: ["negativ"], questionId: "caixa_negativo" },
+  { keywords: ["receber"], questionId: "a_receber" },
+  { keywords: ["entrou", "entrada"], questionId: "entrou_caixa_hoje" },
+  { keywords: ["saiu", "saída", "saida"], questionId: "saiu_caixa_hoje" },
+  { keywords: ["fatur"], questionId: "faturamento_hoje" },
+  { keywords: ["estetica", "estética"], questionId: "estetica_mes" },
+  { keywords: ["estacionamento"], questionId: "estacionamento_mes" },
+  { keywords: ["classifica"], questionId: "sem_classificacao" },
+  { keywords: ["resultado", "dre", "lucro"], questionId: "resultado_mes" },
+  { keywords: ["alerta"], questionId: "alertas_importantes" },
+];
+
+export function matchIntent(freeText: string): string {
+  const normalized = freeText.toLowerCase();
+  for (const entry of KEYWORD_INTENTS) {
+    if (entry.keywords.some((k) => normalized.includes(k))) return entry.questionId;
+  }
+  return "como_esta_o_dia";
+}
+
 export const ZEZINHO_QUESTIONS: ZezinhoQuestion[] = [
   { id: "como_esta_o_dia", label: "Como está o dia hoje?" },
   { id: "faturamento_hoje", label: "Quanto faturamos hoje?" },
