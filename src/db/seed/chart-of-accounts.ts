@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { accountsReceivable, cashMovements, costCenters, financialCategories } from "@/db/schema";
@@ -156,6 +156,30 @@ async function main() {
       .onConflictDoNothing({ target: cashMovements.externalId });
 
     console.log("Movimento de caixa da IESA (R$ 900,00 em 10/07/2026) aplicado (idempotente).");
+
+    // Backfill do módulo Contas a Receber (12/07/2026): classifica a própria conta a receber
+    // (não só o movimento de caixa) com centro de custo Estética Automotiva e categoria Lavação
+    // — coerente com a nota já registrada em contracts.ts (IESA usa serviços da Estética
+    // Automotiva, não é mensalista do Estacionamento). Só atualiza quando ainda está nulo, para
+    // nunca sobrescrever uma classificação feita manualmente na UI.
+    const [receitaLavacao] = await db
+      .select({ id: financialCategories.id })
+      .from(financialCategories)
+      .where(eq(financialCategories.externalId, "receita-lavacao"))
+      .limit(1);
+    const [ccEsteticaAutomotiva] = await db
+      .select({ id: costCenters.id })
+      .from(costCenters)
+      .where(eq(costCenters.externalId, "cc-estetica-automotiva"))
+      .limit(1);
+
+    if (receitaLavacao && ccEsteticaAutomotiva) {
+      await db
+        .update(accountsReceivable)
+        .set({ categoryId: receitaLavacao.id, costCenterId: ccEsteticaAutomotiva.id })
+        .where(and(eq(accountsReceivable.id, iesaReceivable.id), isNull(accountsReceivable.categoryId)));
+      console.log("Classificação (centro de custo/categoria) da conta a receber da IESA aplicada (idempotente).");
+    }
   }
 
   await client.end();

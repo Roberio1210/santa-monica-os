@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -230,7 +230,7 @@ async function main() {
       type: "contrato_mensal",
       source: "seed:contratos-reais",
       externalId: "don-juan-fast-burger",
-      notes: null,
+      notes: "Pagamento realizado em nome de Elana Casanova (informado pelo proprietário no módulo Contas a Receber, 12/07/2026).",
     })
     .onConflictDoNothing({ target: partners.externalId })
     .returning({ id: partners.id });
@@ -283,6 +283,30 @@ async function main() {
       },
     ])
     .onConflictDoNothing({ target: contractValuePeriods.externalId });
+
+  // --- WECHARGE — cliente corporativo do Estacionamento ---
+  // Informado pelo proprietário no módulo Contas a Receber (12/07/2026). Sem regra de
+  // cobrança/vigência confirmada ainda (nem valor, nem periodicidade) — por isso só o partner é
+  // criado aqui, sem contrato. Tipo "outro" porque não se sabe se é parceria pós-paga ou
+  // mensalidade. Cada conta a receber lançada para este cliente informa o centro de custo
+  // Estacionamento diretamente (ver /financeiro/contas-a-receber).
+  await db
+    .insert(partners)
+    .values({
+      name: "WeCharge",
+      type: "outro",
+      source: "seed:contas-a-receber",
+      externalId: "wecharge",
+      notes: "Cliente corporativo do Estacionamento. Regra de cobrança/vigência ainda não confirmada pelo proprietário.",
+    })
+    .onConflictDoNothing({ target: partners.externalId });
+
+  // Backfill idempotente: quando o partner Don Juan já existia (seed anterior, sem esta nota),
+  // grava o dado real informado agora. Não sobrescreve nenhuma nota já preenchida manualmente.
+  await db
+    .update(partners)
+    .set({ notes: "Pagamento realizado em nome de Elana Casanova (informado pelo proprietário no módulo Contas a Receber, 12/07/2026)." })
+    .where(and(eq(partners.externalId, "don-juan-fast-burger"), isNull(partners.notes)));
 
   console.log("Seed de contratos/contas a receber aplicado (ou já existente — idempotente).");
   await client.end();

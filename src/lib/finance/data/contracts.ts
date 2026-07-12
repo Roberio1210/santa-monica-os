@@ -5,6 +5,7 @@ export const initialPartners: Partner[] = [
   { id: "iesa-nissan", name: "Grupo IESA/Nissan", type: "parceria_pos_paga" },
   { id: "funeraria", name: "Funerária", type: "contrato_mensal" },
   { id: "don-juan-fast-burger", name: "Don Juan Fast Burger (Jean)", type: "contrato_mensal" },
+  { id: "wecharge", name: "WeCharge", type: "outro" },
 ];
 
 export const initialContracts: Contract[] = [
