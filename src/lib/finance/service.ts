@@ -1,7 +1,7 @@
 import "server-only";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
-import { computeDreReport, resolveClassification, resolveCashMovementNatureClassification, resolveDreCostCenterGroup } from "@/lib/finance/dre";
+import { computeDreReport, resolveClassification, resolveCashMovementNatureClassification } from "@/lib/finance/dre";
 import type {
   AccountingPeriod,
   AccountsPayableView,

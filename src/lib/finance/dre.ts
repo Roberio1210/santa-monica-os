@@ -1,7 +1,6 @@
 import type {
   AccountsPayable,
   AccountsReceivable,
-  AccountTransfer,
   AccountTransferType,
   CashMovement,
   CashMovementNature,
