@@ -4,6 +4,13 @@ import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/s
 import type {
   AccountsPayableView,
   AccountsReceivableView,
+  AccountTransfer,
+  CashFlowAccountBalance,
+  CashFlowAlert,
+  CashFlowDashboard,
+  CashFlowProjectionPoint,
+  CashFlowProjectionWindow,
+  CashLedgerEntry,
   CashMovement,
   Contract,
   CostCenter,
@@ -394,4 +401,308 @@ export async function fetchExpenseCategories(): Promise<FinancialCategory[]> {
 
 export async function fetchCostCenters(): Promise<CostCenter[]> {
   return getFinanceRepository().listCostCenters();
+}
+
+// --- Fluxo de Caixa / Livro Caixa ---
+
+/**
+ * Livro Caixa: junta cash_movements ("movimento") e account_transfers ("transferencia") numa
+ * única lista ordenada cronologicamente — nenhuma tabela nova, só uma visão combinada. Toda
+ * entrada e toda saída real passa por uma dessas duas tabelas, então nada fica de fora.
+ */
+export function computeCashLedger(movements: CashMovement[], transfers: AccountTransfer[]): CashLedgerEntry[] {
+  const fromMovements: CashLedgerEntry[] = movements.map((m) => ({
+    id: m.id,
+    kind: "movimento",
+    date: m.date,
+    label: m.nature ?? m.type,
+    amount: m.type === "saida" ? -m.amount : m.amount,
+    description: m.description,
+    financialAccountId: m.financialAccountId,
+    financialAccountName: m.financialAccountName,
+    toAccountId: null,
+    toAccountName: null,
+    categoryName: m.categoryName,
+    costCenterName: m.costCenterName,
+    partyName: m.partyName,
+    responsibleName: m.responsibleName,
+    documentRef: m.documentRef,
+    competenceDate: m.competenceDate,
+    balanceBefore: m.balanceBefore,
+    balanceAfter: m.balanceAfter,
+    notes: m.notes,
+  }));
+
+  const fromTransfers: CashLedgerEntry[] = transfers.map((t) => ({
+    id: t.id,
+    kind: "transferencia",
+    date: t.date,
+    label: t.type,
+    amount: t.amount,
+    description: t.description,
+    financialAccountId: t.fromAccountId,
+    financialAccountName: t.fromAccountName,
+    toAccountId: t.toAccountId,
+    toAccountName: t.toAccountName,
+    categoryName: null,
+    costCenterName: null,
+    partyName: null,
+    responsibleName: t.responsibleName,
+    documentRef: t.documentRef,
+    competenceDate: null,
+    balanceBefore: null,
+    balanceAfter: null,
+    notes: t.notes,
+  }));
+
+  return [...fromMovements, ...fromTransfers].sort((a, b) => (a.date === b.date ? a.id.localeCompare(b.id) : a.date.localeCompare(b.date)));
+}
+
+export async function fetchCashLedger(): Promise<CashLedgerEntry[]> {
+  const repo = getFinanceRepository();
+  const [movements, transfers] = await Promise.all([repo.listCashMovements(), repo.listAccountTransfers()]);
+  return computeCashLedger(movements, transfers);
+}
+
+const CASH_FLOW_TOP_N = 5;
+
+/**
+ * Painel do Fluxo de Caixa — saldos, resultado do período e maiores despesas/receitas, tudo
+ * calculado a partir de cash_movements/account_transfers/accounts_receivable/accounts_payable
+ * reais. "Receitas previstas"/"despesas previstas" são o saldo em aberto de Contas a Receber/
+ * Pagar (o que ainda deve entrar/sair), não os movimentos já ocorridos.
+ */
+export function computeCashFlowDashboard(
+  accounts: FinancialAccountBalance[],
+  movements: CashMovement[],
+  arItems: AccountsReceivableView[],
+  apItems: AccountsPayableView[],
+  asOfDate: string,
+): CashFlowDashboard {
+  const saldoGeral = Math.round(accounts.reduce((sum, a) => sum + a.currentBalance, 0) * 100) / 100;
+  const saldoPorConta: CashFlowAccountBalance[] = accounts.map((a) => ({
+    financialAccountId: a.id,
+    name: a.name,
+    currentBalance: a.currentBalance,
+    informedBalance: a.informedBalance,
+    belowThreshold: a.belowThreshold,
+  }));
+
+  const todayMovements = movements.filter((m) => m.date === asOfDate);
+  const entradasHoje = todayMovements.filter((m) => m.type === "entrada").reduce((sum, m) => sum + m.amount, 0);
+  const saidasHoje = todayMovements.filter((m) => m.type === "saida").reduce((sum, m) => sum + m.amount, 0);
+  const resultadoDia = Math.round((entradasHoje - saidasHoje) * 100) / 100;
+
+  const weekStart = addDays(asOfDate, -6);
+  const weekMovements = movements.filter((m) => m.date >= weekStart && m.date <= asOfDate);
+  const resultadoSemana =
+    Math.round(
+      (weekMovements.filter((m) => m.type === "entrada").reduce((sum, m) => sum + m.amount, 0) -
+        weekMovements.filter((m) => m.type === "saida").reduce((sum, m) => sum + m.amount, 0)) *
+        100,
+    ) / 100;
+
+  const monthMovements = movements.filter((m) => isSameMonth(m.date, asOfDate));
+  const resultadoMes =
+    Math.round(
+      (monthMovements.filter((m) => m.type === "entrada").reduce((sum, m) => sum + m.amount, 0) -
+        monthMovements.filter((m) => m.type === "saida").reduce((sum, m) => sum + m.amount, 0)) *
+        100,
+    ) / 100;
+
+  const receitasPrevistas = Math.round(
+    arItems
+      .filter((i) => i.computedStatus !== "cancelled" && i.computedStatus !== "draft" && i.outstandingAmount > 0)
+      .reduce((sum, i) => sum + i.outstandingAmount, 0) * 100,
+  ) / 100;
+  const despesasPrevistas = Math.round(
+    apItems
+      .filter((i) => i.computedStatus !== "cancelada" && i.computedStatus !== "rascunho" && i.outstandingAmount > 0)
+      .reduce((sum, i) => sum + i.outstandingAmount, 0) * 100,
+  ) / 100;
+
+  const maioresDespesas = movements
+    .filter((m) => m.type === "saida")
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, CASH_FLOW_TOP_N)
+    .map((m) => ({ description: m.description, amount: m.amount, date: m.date }));
+  const maioresReceitas = movements
+    .filter((m) => m.type === "entrada")
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, CASH_FLOW_TOP_N)
+    .map((m) => ({ description: m.description, amount: m.amount, date: m.date }));
+
+  const entradasPorCentroCusto = groupSumByAmount(
+    movements.filter((m) => m.type === "entrada"),
+    (m) => m.costCenterName ?? "Não informado",
+  ).map(([costCenterName, amount]) => ({ costCenterName, amount }));
+  const saidasPorCentroCusto = groupSumByAmount(
+    movements.filter((m) => m.type === "saida"),
+    (m) => m.costCenterName ?? "Não informado",
+  ).map(([costCenterName, amount]) => ({ costCenterName, amount }));
+
+  return {
+    saldoGeral,
+    saldoPorConta,
+    entradasHoje,
+    saidasHoje,
+    resultadoDia,
+    resultadoSemana,
+    resultadoMes,
+    receitasPrevistas,
+    despesasPrevistas,
+    maioresDespesas,
+    maioresReceitas,
+    entradasPorCentroCusto,
+    saidasPorCentroCusto,
+  };
+}
+
+function groupSumByAmount<T extends { amount: number }>(items: T[], keyFn: (item: T) => string): [string, number][] {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    const key = keyFn(item);
+    map.set(key, Math.round(((map.get(key) ?? 0) + item.amount) * 100) / 100);
+  }
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+const PROJECTION_WINDOWS: { window: CashFlowProjectionWindow; days: number }[] = [
+  { window: "hoje", days: 0 },
+  { window: "amanha", days: 1 },
+  { window: "7_dias", days: 7 },
+  { window: "15_dias", days: 15 },
+  { window: "30_dias", days: 30 },
+  { window: "90_dias", days: 90 },
+];
+
+/**
+ * Projeção de saldo por janela, considerando o saldo atual real + contas a receber/pagar já
+ * lançadas (inclui parcelamentos, já que cada parcela é uma linha própria com seu vencimento).
+ * Recorrências ainda não materializadas em accounts_payable não entram — nunca inventamos um
+ * valor/data futuro para um lançamento que ainda não existe (ver generateAccountsPayableFromTemplate,
+ * ação explícita e não automática).
+ */
+export function computeCashFlowProjection(
+  saldoGeral: number,
+  arItems: AccountsReceivableView[],
+  apItems: AccountsPayableView[],
+  asOfDate: string,
+): CashFlowProjectionPoint[] {
+  const openAr = arItems.filter((i) => i.computedStatus !== "cancelled" && i.computedStatus !== "draft" && i.outstandingAmount > 0);
+  const openAp = apItems.filter((i) => i.computedStatus !== "cancelada" && i.computedStatus !== "rascunho" && i.outstandingAmount > 0);
+
+  return PROJECTION_WINDOWS.map(({ window, days }) => {
+    const limit = addDays(asOfDate, days);
+    const contasAReceber = Math.round(
+      openAr.filter((i) => i.dueDate <= limit).reduce((sum, i) => sum + i.outstandingAmount, 0) * 100,
+    ) / 100;
+    const contasAPagar = Math.round(
+      openAp.filter((i) => i.dueDate <= limit).reduce((sum, i) => sum + i.outstandingAmount, 0) * 100,
+    ) / 100;
+    const saldoProjetado = Math.round((saldoGeral + contasAReceber - contasAPagar) * 100) / 100;
+    return { window, contasAReceber, contasAPagar, saldoProjetado };
+  });
+}
+
+const ACCOUNT_INACTIVITY_ALERT_DAYS = 30;
+
+/**
+ * Calculado sob demanda — nunca persiste nada, mesmo padrão de computePayableAlerts/
+ * computeReceivableAlerts. "conta_zerando" só dispara para contas com fundo fixo definido (ex.:
+ * Caixa físico) — nunca inventamos um limiar para Stone/Ailos, que não têm fundo fixo.
+ */
+export function computeCashFlowAlerts(
+  accounts: FinancialAccountBalance[],
+  movements: CashMovement[],
+  transfers: AccountTransfer[],
+  projection: CashFlowProjectionPoint[],
+  asOfDate: string,
+): CashFlowAlert[] {
+  const alerts: CashFlowAlert[] = [];
+
+  for (const account of accounts) {
+    if (account.currentBalance < 0) {
+      alerts.push({
+        level: "saldo_negativo",
+        financialAccountId: account.id,
+        financialAccountName: account.name,
+        message: `Saldo negativo em ${account.name}.`,
+        amount: account.currentBalance,
+      });
+    } else if (account.belowThreshold) {
+      alerts.push({
+        level: "conta_zerando",
+        financialAccountId: account.id,
+        financialAccountName: account.name,
+        message: `${account.name} está abaixo do fundo fixo esperado.`,
+        amount: account.currentBalance,
+      });
+    }
+
+    if (account.informedBalance !== null && Math.abs(account.informedBalance - account.currentBalance) > 0.01) {
+      alerts.push({
+        level: "diferenca_saldo_informado",
+        financialAccountId: account.id,
+        financialAccountName: account.name,
+        message: `Saldo calculado (${account.currentBalance}) difere do saldo informado (${account.informedBalance}) em ${account.name}.`,
+        amount: Math.round((account.informedBalance - account.currentBalance) * 100) / 100,
+      });
+    }
+
+    const lastMovementDate = movements
+      .filter((m) => m.financialAccountId === account.id)
+      .concat(transfers.filter((t) => t.fromAccountId === account.id || t.toAccountId === account.id).map((t) => ({ date: t.date }) as CashMovement))
+      .map((m) => m.date)
+      .sort()
+      .at(-1);
+    if (!lastMovementDate || diffInDays(asOfDate, lastMovementDate) > ACCOUNT_INACTIVITY_ALERT_DAYS) {
+      alerts.push({
+        level: "conta_sem_movimentacao",
+        financialAccountId: account.id,
+        financialAccountName: account.name,
+        message: lastMovementDate
+          ? `${account.name} não tem movimentação há mais de ${ACCOUNT_INACTIVITY_ALERT_DAYS} dias.`
+          : `${account.name} nunca teve nenhuma movimentação registrada.`,
+        amount: null,
+      });
+    }
+  }
+
+  const negativeFuture = projection.find((p) => p.saldoProjetado < 0);
+  if (negativeFuture) {
+    alerts.push({
+      level: "fluxo_negativo_futuro",
+      financialAccountId: null,
+      financialAccountName: null,
+      message: `Fluxo de caixa projetado fica negativo na janela "${negativeFuture.window}" (saldo projetado: ${negativeFuture.saldoProjetado}).`,
+      amount: negativeFuture.saldoProjetado,
+    });
+  }
+
+  return alerts;
+}
+
+export async function fetchCashFlowOverview(asOfDate: string = new Date().toISOString().slice(0, 10)): Promise<{
+  dashboard: CashFlowDashboard;
+  projection: CashFlowProjectionPoint[];
+  alerts: CashFlowAlert[];
+  ledger: CashLedgerEntry[];
+  accounts: FinancialAccountBalance[];
+}> {
+  const repo = getFinanceRepository();
+  const [accounts, movements, transfers, arOverview, apOverview] = await Promise.all([
+    repo.listFinancialAccounts(),
+    repo.listCashMovements(),
+    repo.listAccountTransfers(),
+    fetchAccountsReceivableOverview(asOfDate),
+    fetchAccountsPayableOverview(asOfDate),
+  ]);
+
+  const dashboard = computeCashFlowDashboard(accounts, movements, arOverview.items, apOverview.items, asOfDate);
+  const projection = computeCashFlowProjection(dashboard.saldoGeral, arOverview.items, apOverview.items, asOfDate);
+  const alerts = computeCashFlowAlerts(accounts, movements, transfers, projection, asOfDate);
+  const ledger = computeCashLedger(movements, transfers);
+
+  return { dashboard, projection, alerts, ledger, accounts };
 }
