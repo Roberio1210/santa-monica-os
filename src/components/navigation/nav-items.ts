@@ -18,6 +18,7 @@ import {
   FileBarChart,
   Tags,
   Lock,
+  BellRing,
   type LucideIcon,
 } from "lucide-react";
 
@@ -28,7 +29,7 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Visão Geral", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Central de Operações", icon: LayoutDashboard },
   { href: "/operacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
   { href: "/estacionamento", label: "Estacionamento", icon: ParkingSquare },
@@ -41,6 +42,7 @@ export const navItems: NavItem[] = [
   { href: "/financeiro/dre", label: "DRE Gerencial", icon: FileBarChart },
   { href: "/financeiro/classificacao", label: "Classificação Financeira", icon: Tags },
   { href: "/financeiro/fechamento", label: "Fechamento", icon: Lock },
+  { href: "/alertas", label: "Alertas", icon: BellRing },
   { href: "/marketing", label: "Marketing", icon: Megaphone },
   { href: "/estoque", label: "Estoque", icon: Boxes },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
