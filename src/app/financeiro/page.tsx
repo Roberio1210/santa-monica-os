@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils/format";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
-import { fetchAccountsReceivableOverview, fetchCashMovements, fetchContracts } from "@/lib/finance/service";
+import { fetchAccountsPayableOverview, fetchAccountsReceivableOverview, fetchCashMovements, fetchContracts } from "@/lib/finance/service";
 import { resolveContractValue } from "@/lib/finance/status";
 
 // Evita que dados do JumpPark e das contas a receber fiquem congelados no HTML estático.
@@ -31,6 +31,7 @@ export default async function FinanceiroPage() {
   const asOfDate = todayIso();
   const jumpPark = await getJumpParkOverview();
   const { summary: receivableSummary } = await fetchAccountsReceivableOverview(asOfDate);
+  const { summary: payableSummary } = await fetchAccountsPayableOverview(asOfDate);
   const cashMovements = await fetchCashMovements();
   const contracts = await fetchContracts();
 
@@ -136,10 +137,21 @@ export default async function FinanceiroPage() {
           </CardHeader>
           <CardContent className="pt-0 text-sm text-foreground-muted">
             <p>{receivableSummary.count} conta(s) cadastrada(s) · {receivableSummary.upcomingCount} vencendo nos próximos 7 dias.</p>
-            <p className="mt-2 text-xs text-foreground-subtle">
-              Contas a Pagar ainda não foi implementado nesta fase — nenhuma despesa foi lançada (ver
-              docs/product-backlog.md).
-            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle>Contas a Pagar</CardTitle>
+            <Link href="/financeiro/contas-a-pagar" className="flex items-center gap-1 text-xs text-accent hover:underline">
+              Ver todas <ArrowRight className="h-3 w-3" />
+            </Link>
+          </CardHeader>
+          <CardContent className="pt-0 text-sm text-foreground-muted">
+            <p>{payableSummary.count} conta(s) cadastrada(s) · {formatCurrency(payableSummary.totalPending)} pendente.</p>
+            {payableSummary.totalOverdue > 0 ? (
+              <p className="mt-1 text-xs text-critical">{formatCurrency(payableSummary.totalOverdue)} vencido(s).</p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
