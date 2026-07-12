@@ -1,30 +1,47 @@
 # Handoff para a próxima sessão — Santa Monica OS
 
-Escrito em 10/07/2026, ao final da execução que migrou o banco de dados para o Neon Postgres em
-produção (Vercel). Este documento substitui a versão anterior — a partir de agora, **Estoque e
-Financeiro gravam e leem dados reais do Postgres**, não mais de memória.
+Escrito em 10/07/2026. Última execução: **módulo Contas a Pagar completo** (CRUD real, protegido
+pelo gate de acesso atual), fechando a fundação financeira sobre o Neon Postgres já conectado.
+**Estoque e Financeiro (Contas a Receber e Contas a Pagar) gravam e leem dados reais do
+Postgres**, não mais de memória.
+
+## Contas a Pagar (novo nesta execução)
+
+- Schema incremental: `suppliers`, `financial_accounts`, `account_transfers`,
+  `recurring_bill_templates`, `accounts_payable` (+ `cash_movements.financial_account_id`,
+  `cash_movements.payment_id`, `payments.accounts_payable_id`) — migrations `0002` e `0003`,
+  aplicadas e confirmadas no Neon. **30 tabelas no total.**
+- Fundação semeada e confirmada: 11 fornecedores, 3 contas financeiras (Stone, Ailos/CredCrea,
+  Caixa físico com fundo fixo R$ 100,00), 10 modelos de recorrência (8 fixos + água/energia
+  variáveis, 2 com credor pendente). **Zero `accounts_payable` fabricadas** — a lista começa
+  vazia, populada só pelo proprietário via UI.
+- Tela `/financeiro/contas-a-pagar` (lista + filtros + resumo), `/novo`, `/[id]` (detalhe,
+  pagamento total/parcial, estorno, cancelar, excluir condicional), `/[id]/editar` — todas
+  protegidas apenas pelo gate de acesso atual (Basic Auth); aprovação por papel será aplicada
+  quando o sistema de usuários existir (mensagem já visível na própria tela de detalhe).
+- 36 novos testes (59 no total) cobrindo criação, edição, parcelamento, pagamento parcial/total,
+  estorno, bloqueio de pagamento acima do saldo, cancelamento, exclusão condicional,
+  transferências sem impacto em receita/despesa, reembolso a sócio sem duplicar a despesa, e
+  recorrência sem duplicidade (`generateAccountsPayableFromTemplate`, idempotente).
+- Teste funcional completo contra o Neon (create → edit → pagamento parcial → restart → pagamento
+  total → estorno → exclusão) confirmado em processos Node isolados, sem resíduo.
 
 ## Estado exato do projeto
 
 - Repositório: `santa-monica-os` (GitHub: `Roberio1210/santa-monica-os`), branch `main`.
 - Publicado na Vercel com deploy automático a cada push em `main`.
 - **Banco de dados: Neon Postgres, conectado e migrado.** `DATABASE_URL`/`POSTGRES_*` já
-  configuradas na Vercel pelo proprietário antes desta execução.
-- 25 tabelas criadas (migrations `0000_initial_schema` + `0001_last_tomorrow_man`, ambas
-  aplicadas). Ver seção "O que foi corrigido nesta execução" — a migration 0001 corrige um bug
-  real encontrado só quando o seed rodou contra um banco de verdade.
-- Seeds aplicados e confirmados por consulta direta ao banco (não apenas pelo exit code do
-  script): 48 itens de estoque, 3 partners, 3 contracts, 2 contract_value_periods, 1
-  contract_benefit, 2 services, 1 accounts_receivable (IESA, `paid`, R$ 900,00), 1 payment, 1
-  invoice, 25 financial_categories, 6 cost_centers, 1 cash_movement (IESA, R$ 900,00 em
-  10/07/2026).
-- Build, lint, typecheck e os 23 testes automatizados passam limpos **com `DATABASE_URL`
-  configurada** (testes usam fixtures isoladas via `StaticFinanceRepository`, não tocam o banco
-  real — continuam válidos independente de haver conexão).
-- Teste funcional de persistência executado e confirmado: create → edit → "restart" (processo
-  Node novo, conexão nova) → delete → novo "restart" → confirmação — tudo via Neon real, usando a
-  arquitetura já existente (schema Drizzle, `applyMovementDelta`). Nenhum dado de teste ficou
-  residual; o estoque foi restaurado ao valor original.
+  configuradas na Vercel pelo proprietário.
+- **30 tabelas criadas** (migrations `0000` a `0003`, todas aplicadas).
+- Seeds aplicados e confirmados por consulta direta ao banco: 48 itens de estoque, 3 partners, 3
+  contracts, 1 accounts_receivable (IESA, `paid`, R$ 900,00), 1 cash_movement, 29
+  financial_categories, 7 cost_centers, 11 suppliers, 3 financial_accounts, 10
+  recurring_bill_templates, 0 accounts_payable (aguardando cadastro real pelo proprietário).
+- Build, lint, typecheck e os 59 testes automatizados passam limpos **com e sem `DATABASE_URL`**
+  (testes usam fixtures isoladas via `StaticFinanceRepository`, nunca tocam o banco real).
+- Teste funcional de persistência executado e confirmado para Estoque e Contas a Pagar: create →
+  edit → "restart" (processo Node novo, conexão nova) → pagamento/exclusão → novo "restart" →
+  confirmação — tudo via Neon real. Nenhum dado de teste ficou residual.
 
 ## O que funciona (real, em produção)
 
@@ -138,12 +155,15 @@ Todos os scripts continuam idempotentes — seguro rodar de novo a qualquer mome
 
 ## Pendências que exigem decisão do proprietário (não técnicas)
 
-1. **Ativar o gate temporário (`APP_ACCESS_*`) na Vercel** — agora que há dado real persistente,
-   esta é a pendência de maior prioridade.
-2. Priorizar autenticação completa (sessão + papéis) para poder habilitar `recordPayment`/
-   `recordMovement` na UI — arquitetura e testes já provam que funcionam no banco real.
-3. Confirmação dos 3 contratos PJ assinados, para então autorizar cadastro real de RH.
-4. Se/quando confirmar novos recebimentos da Funerária ou Don Juan, criar as respectivas
+1. **Ativar o gate temporário (`APP_ACCESS_*`) na Vercel** — agora que há dado real persistente e
+   uma tela de escrita real (Contas a Pagar), esta é a pendência de maior prioridade.
+2. Informar os credores dos 2 acordos pendentes (cartão/cheque especial e empréstimo) —
+   `recurring_bill_templates.pending_data = true`, fornecedor ainda nulo.
+3. Cadastrar as contas a pagar reais de julho/2026 pela UI (`/financeiro/contas-a-pagar/novo`) —
+   nenhuma foi lançada automaticamente, de propósito.
+4. Priorizar autenticação completa (sessão + papéis) — arquitetura e testes já provam que as
+   ações de escrita (Contas a Pagar e Receber) funcionam no banco real.
+5. Confirmação dos 3 contratos PJ assinados, para então autorizar cadastro real de RH.
+6. Se/quando confirmar novos recebimentos da Funerária ou Don Juan, criar as respectivas
    `accounts_receivable` (hoje só a IESA tem registro).
-5. Prioridade entre Contas a Pagar, CRM real e RH (Fases 3, 4 e 5 do backlog).
-6. Qual integração da Fase 9 (Stone, WhatsApp, câmeras, marketing) ativar primeiro.
+7. Qual integração da Fase 9 (Stone, WhatsApp, câmeras, marketing) ativar primeiro.
