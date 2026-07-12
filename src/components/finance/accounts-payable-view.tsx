@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils/cn";
 import type { AccountsPayableStatus, AccountsPayableView as AccountsPayableViewItem } from "@/lib/finance/types";
 import type { AccountsPayableSummary } from "@/lib/finance/service";
 
-type QuickFilter = "none" | "pendente" | "vencida" | "paga_no_mes" | "7_dias" | "30_dias" | "vence_hoje" | "vence_amanha";
+export type QuickFilter = "none" | "pendente" | "vencida" | "paga_no_mes" | "7_dias" | "30_dias" | "vence_hoje" | "vence_amanha";
 
 function addDaysIso(dateIso: string, days: number): string {
   const date = new Date(`${dateIso}T00:00:00.000Z`);
@@ -50,9 +50,11 @@ interface AccountsPayableViewProps {
   items: AccountsPayableViewItem[];
   summary: AccountsPayableSummary;
   asOfDate: string;
+  /** Aplica um filtro rápido inicial vindo de query string (ex.: card da Central de Operações). */
+  initialQuickFilter?: QuickFilter;
 }
 
-export function AccountsPayableListView({ items, summary, asOfDate }: AccountsPayableViewProps) {
+export function AccountsPayableListView({ items, summary, asOfDate, initialQuickFilter }: AccountsPayableViewProps) {
   const [statusFilter, setStatusFilter] = useState<"all" | AccountsPayableStatus>("all");
   const [supplierFilter, setSupplierFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -60,7 +62,7 @@ export function AccountsPayableListView({ items, summary, asOfDate }: AccountsPa
   const [dueFrom, setDueFrom] = useState("");
   const [dueTo, setDueTo] = useState("");
   const [search, setSearch] = useState("");
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>("none");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialQuickFilter ?? "none");
 
   function toggleQuickFilter(next: QuickFilter) {
     setQuickFilter((current) => (current === next ? "none" : next));

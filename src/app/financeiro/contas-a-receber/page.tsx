@@ -12,7 +12,8 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function ContasAReceberPage() {
+export default async function ContasAReceberPage({ searchParams }: { searchParams: Promise<{ dueFrom?: string; dueTo?: string }> }) {
+  const { dueFrom, dueTo } = await searchParams;
   const asOfDate = todayIso();
   const { items, summary } = await fetchAccountsReceivableOverview(asOfDate);
   const dashboard = computeAccountsReceivableDashboard(items, asOfDate);
@@ -27,7 +28,15 @@ export default async function ContasAReceberPage() {
         actions={<StorageModeBadge mode={storageMode} />}
       />
 
-      <AccountsReceivableView items={items} summary={summary} dashboard={dashboard} alerts={alerts} asOfDate={asOfDate} />
+      <AccountsReceivableView
+        items={items}
+        summary={summary}
+        dashboard={dashboard}
+        alerts={alerts}
+        asOfDate={asOfDate}
+        initialDueFrom={dueFrom}
+        initialDueTo={dueTo}
+      />
     </div>
   );
 }

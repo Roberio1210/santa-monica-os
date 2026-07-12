@@ -59,16 +59,19 @@ interface AccountsReceivableViewProps {
   dashboard: AccountsReceivableDashboard;
   alerts: ReceivableAlert[];
   asOfDate: string;
+  /** Intervalo de vencimento inicial vindo de query string (ex.: card da Central de Operações). */
+  initialDueFrom?: string;
+  initialDueTo?: string;
 }
 
-export function AccountsReceivableView({ items, summary, dashboard, alerts, asOfDate }: AccountsReceivableViewProps) {
+export function AccountsReceivableView({ items, summary, dashboard, alerts, asOfDate, initialDueFrom, initialDueTo }: AccountsReceivableViewProps) {
   const [statusFilter, setStatusFilter] = useState<"all" | AccountsReceivableStatus>("all");
   const [partyFilter, setPartyFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [costCenterFilter, setCostCenterFilter] = useState<string>("all");
   const [onlyOverdue, setOnlyOverdue] = useState(false);
-  const [dueFrom, setDueFrom] = useState("");
-  const [dueTo, setDueTo] = useState("");
+  const [dueFrom, setDueFrom] = useState(initialDueFrom ?? "");
+  const [dueTo, setDueTo] = useState(initialDueTo ?? "");
   const [search, setSearch] = useState("");
 
   const partyOptions = useMemo(() => {

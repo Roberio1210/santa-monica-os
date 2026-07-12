@@ -11,7 +11,8 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function FluxoDeCaixaPage() {
+export default async function FluxoDeCaixaPage({ searchParams }: { searchParams: Promise<{ tipo?: string; data?: string }> }) {
+  const { tipo, data } = await searchParams;
   const asOfDate = todayIso();
   const [overview, revenueCategories, expenseCategories, costCenters, partners, suppliers] = await Promise.all([
     fetchCashFlowOverview(asOfDate),
@@ -23,6 +24,7 @@ export default async function FluxoDeCaixaPage() {
   ]);
   const categories = [...revenueCategories, ...expenseCategories];
   const storageMode = getStorageMode();
+  const initialTypeFilter = tipo === "entrada" || tipo === "saida" ? tipo : undefined;
 
   return (
     <div className="space-y-6">
@@ -43,6 +45,9 @@ export default async function FluxoDeCaixaPage() {
         partners={partners}
         suppliers={suppliers}
         asOfDate={asOfDate}
+        initialTypeFilter={initialTypeFilter}
+        initialDateFrom={data}
+        initialDateTo={data}
       />
     </div>
   );

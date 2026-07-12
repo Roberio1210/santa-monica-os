@@ -70,16 +70,35 @@ interface CashFlowViewProps {
   partners: Partner[];
   suppliers: Supplier[];
   asOfDate: string;
+  /** Filtros iniciais vindos de query string (ex.: card da Central de Operações). */
+  initialTypeFilter?: "entrada" | "saida";
+  initialDateFrom?: string;
+  initialDateTo?: string;
 }
 
-export function CashFlowView({ dashboard, projection, alerts, ledger, accounts, categories, costCenters, partners, suppliers, asOfDate }: CashFlowViewProps) {
+export function CashFlowView({
+  dashboard,
+  projection,
+  alerts,
+  ledger,
+  accounts,
+  categories,
+  costCenters,
+  partners,
+  suppliers,
+  asOfDate,
+  initialTypeFilter,
+  initialDateFrom,
+  initialDateTo,
+}: CashFlowViewProps) {
   const [accountFilter, setAccountFilter] = useState("all");
   const [costCenterFilter, setCostCenterFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [partyFilter, setPartyFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState<"all" | "movimento" | "transferencia">("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "entrada" | "saida">(initialTypeFilter ?? "all");
+  const [dateFrom, setDateFrom] = useState(initialDateFrom ?? "");
+  const [dateTo, setDateTo] = useState(initialDateTo ?? "");
 
   const accountOptions = useMemo(() => Array.from(new Set(ledger.map((e) => e.financialAccountName).filter(Boolean))) as string[], [ledger]);
   const costCenterOptions = useMemo(() => Array.from(new Set(ledger.map((e) => e.costCenterName).filter(Boolean))) as string[], [ledger]);
@@ -89,6 +108,8 @@ export function CashFlowView({ dashboard, projection, alerts, ledger, accounts, 
   const filtered = useMemo(() => {
     return ledger.filter((entry) => {
       if (kindFilter !== "all" && entry.kind !== kindFilter) return false;
+      if (typeFilter === "entrada" && entry.amount < 0) return false;
+      if (typeFilter === "saida" && entry.amount >= 0) return false;
       if (accountFilter !== "all" && entry.financialAccountName !== accountFilter && entry.toAccountName !== accountFilter) return false;
       if (costCenterFilter !== "all" && entry.costCenterName !== costCenterFilter) return false;
       if (categoryFilter !== "all" && entry.categoryName !== categoryFilter) return false;
@@ -97,7 +118,7 @@ export function CashFlowView({ dashboard, projection, alerts, ledger, accounts, 
       if (dateTo && entry.date > dateTo) return false;
       return true;
     });
-  }, [ledger, kindFilter, accountFilter, costCenterFilter, categoryFilter, partyFilter, dateFrom, dateTo]);
+  }, [ledger, kindFilter, typeFilter, accountFilter, costCenterFilter, categoryFilter, partyFilter, dateFrom, dateTo]);
 
   return (
     <div className="space-y-6">
@@ -309,6 +330,11 @@ export function CashFlowView({ dashboard, projection, alerts, ledger, accounts, 
             <option value="all">Todos os tipos</option>
             <option value="movimento">Movimentos</option>
             <option value="transferencia">Transferências</option>
+          </select>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as "all" | "entrada" | "saida")} className={fieldClasses} aria-label="Filtrar por entrada ou saída">
+            <option value="all">Entradas e saídas</option>
+            <option value="entrada">Só entradas</option>
+            <option value="saida">Só saídas</option>
           </select>
           <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} className={fieldClasses}>
             <option value="all">Todas as contas</option>

@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { StorageModeBadge } from "@/components/shared/storage-mode-badge";
-import { AccountsPayableListView } from "@/components/finance/accounts-payable-view";
+import { AccountsPayableListView, type QuickFilter } from "@/components/finance/accounts-payable-view";
 import { fetchAccountsPayableOverview } from "@/lib/finance/service";
 import { getStorageMode } from "@/lib/storage/mode";
 
@@ -12,10 +12,14 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function ContasAPagarPage() {
+const VALID_QUICK_FILTERS: QuickFilter[] = ["pendente", "vencida", "paga_no_mes", "7_dias", "30_dias", "vence_hoje", "vence_amanha"];
+
+export default async function ContasAPagarPage({ searchParams }: { searchParams: Promise<{ quick?: string }> }) {
+  const { quick } = await searchParams;
   const asOfDate = todayIso();
   const { items, summary } = await fetchAccountsPayableOverview(asOfDate);
   const storageMode = getStorageMode();
+  const initialQuickFilter = VALID_QUICK_FILTERS.find((f) => f === quick);
 
   return (
     <div className="space-y-6">
@@ -25,7 +29,7 @@ export default async function ContasAPagarPage() {
         actions={<StorageModeBadge mode={storageMode} />}
       />
 
-      <AccountsPayableListView items={items} summary={summary} asOfDate={asOfDate} />
+      <AccountsPayableListView items={items} summary={summary} asOfDate={asOfDate} initialQuickFilter={initialQuickFilter} />
     </div>
   );
 }
