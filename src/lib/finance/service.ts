@@ -1,7 +1,9 @@
 import "server-only";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
+import { computeDreReport, resolveClassification, resolveCashMovementNatureClassification, resolveDreCostCenterGroup } from "@/lib/finance/dre";
 import type {
+  AccountingPeriod,
   AccountsPayableView,
   AccountsReceivableView,
   AccountTransfer,
@@ -12,11 +14,17 @@ import type {
   CashFlowProjectionWindow,
   CashLedgerEntry,
   CashMovement,
+  ClassificationQueueItem,
+  ClassificationRule,
   Contract,
   CostCenter,
+  DreCostCenterGroup,
+  DreRegime,
+  DreReport,
   FinancePaymentMethod,
   FinancialAccountBalance,
   FinancialCategory,
+  FinancialClassification,
   Partner,
   RecurringBillTemplate,
   Supplier,
@@ -705,4 +713,200 @@ export async function fetchCashFlowOverview(asOfDate: string = new Date().toISOS
   const ledger = computeCashLedger(movements, transfers);
 
   return { dashboard, projection, alerts, ledger, accounts };
+}
+
+// --- Contabilidade Gerencial / DRE ---
+// DRE gerencial para apoio à administração. Não substitui escrituração contábil, demonstrações
+// oficiais ou obrigações preparadas pela contabilidade.
+
+interface DreSourceData {
+  accountsPayable: Awaited<ReturnType<ReturnType<typeof getFinanceRepository>["listAccountsPayable"]>>;
+  accountsReceivable: Awaited<ReturnType<ReturnType<typeof getFinanceRepository>["listAccountsReceivable"]>>;
+  cashMovements: CashMovement[];
+  classifications: FinancialClassification[];
+  rules: ClassificationRule[];
+}
+
+async function fetchDreSourceData(): Promise<DreSourceData> {
+  const repo = getFinanceRepository();
+  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules] = await Promise.all([
+    repo.listAccountsPayable(),
+    repo.listAccountsReceivable(),
+    repo.listCashMovements(),
+    repo.listFinancialClassifications(),
+    repo.listClassificationRules(),
+  ]);
+  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules };
+}
+
+export async function fetchDreReport(
+  regime: DreRegime,
+  competenceFrom: string,
+  competenceTo: string,
+  costCenterGroup: DreCostCenterGroup | "consolidado" = "consolidado",
+): Promise<DreReport> {
+  const data = await fetchDreSourceData();
+  return computeDreReport({ regime, competenceFrom, competenceTo, costCenterGroup, ...data });
+}
+
+/** Chama a DRE 3 vezes (uma por centro de custo) — reaproveita computeDreReport, nenhuma lógica nova. */
+export async function fetchDreByCostCenterGroups(
+  regime: DreRegime,
+  competenceFrom: string,
+  competenceTo: string,
+): Promise<Record<DreCostCenterGroup, DreReport>> {
+  const data = await fetchDreSourceData();
+  const groups: DreCostCenterGroup[] = ["estetica_automotiva", "estacionamento", "administrativo_geral"];
+  const entries = groups.map((group) => [group, computeDreReport({ regime, competenceFrom, competenceTo, costCenterGroup: group, ...data })] as const);
+  return Object.fromEntries(entries) as Record<DreCostCenterGroup, DreReport>;
+}
+
+export interface DreComparison {
+  current: DreReport;
+  previous: DreReport;
+}
+
+export async function fetchDreComparison(
+  regime: DreRegime,
+  currentFrom: string,
+  currentTo: string,
+  previousFrom: string,
+  previousTo: string,
+  costCenterGroup: DreCostCenterGroup | "consolidado" = "consolidado",
+): Promise<DreComparison> {
+  const data = await fetchDreSourceData();
+  return {
+    current: computeDreReport({ regime, competenceFrom: currentFrom, competenceTo: currentTo, costCenterGroup, ...data }),
+    previous: computeDreReport({ regime, competenceFrom: previousFrom, competenceTo: previousTo, costCenterGroup, ...data }),
+  };
+}
+
+/**
+ * Fila de pendências do módulo de classificação — lançamentos sem classificação, com revisão
+ * necessária, despesas compartilhadas (Administrativo/Geral) sem rateio configurado, fornecedor/
+ * cliente sem regra. Calculada sob demanda a partir dos lançamentos reais, nunca persistida.
+ */
+export async function fetchClassificationQueue(): Promise<ClassificationQueueItem[]> {
+  const [data, allocationRules] = await Promise.all([fetchDreSourceData(), getFinanceRepository().listAllocationRules()]);
+  const hasAllocation = allocationRules.length > 0;
+
+  const explicitByKey = new Map<string, FinancialClassification>();
+  for (const c of data.classifications) {
+    if (c.accountsPayableId) explicitByKey.set(`accounts_payable:${c.accountsPayableId}`, c);
+    if (c.accountsReceivableId) explicitByKey.set(`accounts_receivable:${c.accountsReceivableId}`, c);
+    if (c.cashMovementId) explicitByKey.set(`cash_movement:${c.cashMovementId}`, c);
+  }
+
+  const items: ClassificationQueueItem[] = [];
+
+  for (const ap of data.accountsPayable) {
+    if (ap.status === "cancelada") continue;
+    const explicit = explicitByKey.get(`accounts_payable:${ap.id}`);
+    const resolved = resolveClassification({ categoryName: ap.categoryName, supplierId: ap.supplierId, partnerId: null, description: ap.description }, explicit, data.rules);
+    const base = { sourceKind: "accounts_payable" as const, sourceId: ap.id, date: ap.competenceDate, description: ap.description, partyName: ap.supplierName, categoryName: ap.categoryName, costCenterName: ap.costCenterName, amount: ap.originalAmount };
+    if (resolved.origin === "pendente") items.push({ ...base, reason: ap.supplierId ? "sem_classificacao" : "fornecedor_sem_regra" });
+    else if (resolved.reviewNeeded) items.push({ ...base, reason: "revisao_necessaria" });
+    else if (ap.costCenterName === "Administrativo" && !hasAllocation) items.push({ ...base, reason: "despesa_compartilhada_sem_rateio" });
+  }
+
+  for (const ar of data.accountsReceivable) {
+    if (ar.status === "cancelled") continue;
+    const explicit = explicitByKey.get(`accounts_receivable:${ar.id}`);
+    const resolved = resolveClassification({ categoryName: ar.categoryName, supplierId: null, partnerId: ar.partnerId, description: ar.description }, explicit, data.rules);
+    const base = { sourceKind: "accounts_receivable" as const, sourceId: ar.id, date: ar.competenceDate, description: ar.description, partyName: ar.partyName, categoryName: ar.categoryName, costCenterName: ar.costCenterName, amount: ar.expectedAmount };
+    if (resolved.origin === "pendente") items.push({ ...base, reason: ar.partnerId ? "sem_classificacao" : "cliente_sem_regra" });
+    else if (resolved.reviewNeeded) items.push({ ...base, reason: "revisao_necessaria" });
+  }
+
+  for (const cm of data.cashMovements) {
+    if (cm.accountsPayableId || cm.accountsReceivableId) continue; // já cobertos via a conta a pagar/receber de origem
+    const explicit = explicitByKey.get(`cash_movement:${cm.id}`);
+    const resolved = cm.nature && !explicit
+      ? resolveCashMovementNatureClassification(cm.nature)
+      : resolveClassification({ categoryName: cm.categoryName, supplierId: cm.supplierId, partnerId: cm.partnerId, description: cm.description }, explicit, data.rules);
+    const base = { sourceKind: "cash_movement" as const, sourceId: cm.id, date: cm.date, description: cm.description, partyName: cm.partyName, categoryName: cm.categoryName, costCenterName: cm.costCenterName, amount: cm.amount };
+    if (resolved.origin === "pendente") items.push({ ...base, reason: "sem_classificacao" });
+    else if (resolved.reviewNeeded) items.push({ ...base, reason: "revisao_necessaria" });
+  }
+
+  return items.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function fetchClassificationRules(): Promise<ClassificationRule[]> {
+  return getFinanceRepository().listClassificationRules();
+}
+
+export async function fetchAccountingPeriods(): Promise<AccountingPeriod[]> {
+  return getFinanceRepository().listAccountingPeriods();
+}
+
+export interface AccountingPeriodOverview {
+  period: AccountingPeriod | null;
+  competenceMonth: string;
+  pendingClassifications: number;
+  overdueAccountsPayable: number;
+  openAccountsReceivable: number;
+  unbilledAllocations: boolean;
+}
+
+/** Painel de fechamento — nunca fecha nada sozinho, só reúne os números para a decisão humana. */
+export async function fetchAccountingPeriodOverview(competenceMonth: string, asOfDate: string = new Date().toISOString().slice(0, 10)): Promise<AccountingPeriodOverview> {
+  const [period, queue, apOverview, arOverview, allocationRules] = await Promise.all([
+    getFinanceRepository().getAccountingPeriod(competenceMonth),
+    fetchClassificationQueue(),
+    fetchAccountsPayableOverview(asOfDate),
+    fetchAccountsReceivableOverview(asOfDate),
+    getFinanceRepository().listAllocationRules(),
+  ]);
+
+  const inMonth = (dateIso: string) => dateIso.slice(0, 7) === competenceMonth;
+
+  return {
+    period,
+    competenceMonth,
+    pendingClassifications: queue.filter((i) => inMonth(i.date)).length,
+    overdueAccountsPayable: apOverview.items.filter((i) => inMonth(i.competenceDate) && i.computedStatus === "vencida").length,
+    openAccountsReceivable: arOverview.items.filter((i) => inMonth(i.competenceDate) && (i.computedStatus === "open" || i.computedStatus === "partially_paid" || i.computedStatus === "overdue")).length,
+    unbilledAllocations: allocationRules.length === 0,
+  };
+}
+
+export type AccountingAlertLevel = "margem_negativa" | "resultado_operacional_negativo" | "centro_custo_negativo" | "despesa_compartilhada_sem_rateio" | "competencia_proxima_fechamento" | "aumento_despesa_relevante";
+
+export interface AccountingAlert {
+  level: AccountingAlertLevel;
+  message: string;
+  amount: number | null;
+}
+
+const DESPESA_INCREASE_THRESHOLD_PERCENT = 30;
+
+/** Calculado sob demanda a partir da própria DRE — nunca persiste nada. */
+export function computeAccountingAlerts(current: DreReport, previous: DreReport | null, byCostCenter: Record<DreCostCenterGroup, DreReport> | null): AccountingAlert[] {
+  const alerts: AccountingAlert[] = [];
+
+  if (current.margemContribuicaoPercentual !== null && current.margemContribuicaoPercentual < 0) {
+    alerts.push({ level: "margem_negativa", message: "Margem de contribuição negativa no período.", amount: current.margemContribuicao });
+  }
+  if (current.resultadoOperacional < 0) {
+    alerts.push({ level: "resultado_operacional_negativo", message: "Resultado operacional negativo no período.", amount: current.resultadoOperacional });
+  }
+  if (current.naoClassificados.some((i) => i.costCenterName === "Administrativo")) {
+    alerts.push({ level: "despesa_compartilhada_sem_rateio", message: "Há despesas em Administrativo/Geral sem rateio configurado.", amount: null });
+  }
+  if (byCostCenter) {
+    for (const [group, report] of Object.entries(byCostCenter) as [DreCostCenterGroup, DreReport][]) {
+      if (report.resultadoOperacional < 0) {
+        alerts.push({ level: "centro_custo_negativo", message: `Centro de custo "${group}" com resultado operacional negativo.`, amount: report.resultadoOperacional });
+      }
+    }
+  }
+  if (previous && previous.despesasOperacionais.amount > 0) {
+    const variation = ((current.despesasOperacionais.amount - previous.despesasOperacionais.amount) / previous.despesasOperacionais.amount) * 100;
+    if (variation >= DESPESA_INCREASE_THRESHOLD_PERCENT) {
+      alerts.push({ level: "aumento_despesa_relevante", message: `Despesas operacionais subiram ${Math.round(variation)}% em relação ao período anterior.`, amount: current.despesasOperacionais.amount });
+    }
+  }
+
+  return alerts;
 }
