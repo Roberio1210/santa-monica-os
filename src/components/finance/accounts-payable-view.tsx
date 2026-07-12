@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, CheckCircle2, DollarSign, Plus, Receipt } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, DollarSign, ListChecks, Plus, Receipt } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,18 @@ import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import type { AccountsPayableStatus, AccountsPayableView as AccountsPayableViewItem } from "@/lib/finance/types";
 import type { AccountsPayableSummary } from "@/lib/finance/service";
+
+type QuickFilter = "none" | "pendente" | "vencida" | "paga_no_mes" | "7_dias" | "30_dias" | "vence_hoje" | "vence_amanha";
+
+function addDaysIso(dateIso: string, days: number): string {
+  const date = new Date(`${dateIso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function isSameMonth(dateIso: string, referenceIso: string): boolean {
+  return dateIso.slice(0, 7) === referenceIso.slice(0, 7);
+}
 
 const statusLabels: Record<AccountsPayableStatus, string> = {
   rascunho: "Rascunho",
@@ -48,6 +60,11 @@ export function AccountsPayableListView({ items, summary, asOfDate }: AccountsPa
   const [dueFrom, setDueFrom] = useState("");
   const [dueTo, setDueTo] = useState("");
   const [search, setSearch] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("none");
+
+  function toggleQuickFilter(next: QuickFilter) {
+    setQuickFilter((current) => (current === next ? "none" : next));
+  }
 
   const supplierOptions = useMemo(() => {
     const set = new Set<string>();
@@ -69,6 +86,10 @@ export function AccountsPayableListView({ items, summary, asOfDate }: AccountsPa
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
+    const tomorrow = addDaysIso(asOfDate, 1);
+    const in7Days = addDaysIso(asOfDate, 7);
+    const in30Days = addDaysIso(asOfDate, 30);
+
     return items.filter((item) => {
       if (statusFilter !== "all" && item.computedStatus !== statusFilter) return false;
       if (supplierFilter !== "all" && item.supplierName !== supplierFilter) return false;
@@ -80,21 +101,109 @@ export function AccountsPayableListView({ items, summary, asOfDate }: AccountsPa
         const haystack = [item.description, item.supplierName ?? "", item.documentNumber ?? ""].join(" ").toLowerCase();
         if (!haystack.includes(query)) return false;
       }
+
+      switch (quickFilter) {
+        case "vencida":
+          if (item.computedStatus !== "vencida") return false;
+          break;
+        case "vence_hoje":
+          if (item.dueDate !== asOfDate) return false;
+          break;
+        case "vence_amanha":
+          if (item.dueDate !== tomorrow) return false;
+          break;
+        case "7_dias":
+          if (!(item.dueDate >= asOfDate && item.dueDate <= in7Days && (item.computedStatus === "pendente" || item.computedStatus === "parcialmente_paga"))) return false;
+          break;
+        case "30_dias":
+          if (!(item.dueDate >= asOfDate && item.dueDate <= in30Days && (item.computedStatus === "pendente" || item.computedStatus === "parcialmente_paga"))) return false;
+          break;
+        case "pendente":
+          if (!(item.computedStatus === "pendente" || item.computedStatus === "parcialmente_paga" || item.computedStatus === "vencida")) return false;
+          break;
+        case "paga_no_mes":
+          if (!(item.paidAmount > 0 && isSameMonth(item.updatedAt.slice(0, 10), asOfDate))) return false;
+          break;
+        case "none":
+        default:
+          break;
+      }
+
       return true;
     });
-  }, [items, statusFilter, supplierFilter, categoryFilter, costCenterFilter, dueFrom, dueTo, search]);
+  }, [items, statusFilter, supplierFilter, categoryFilter, costCenterFilter, dueFrom, dueTo, search, quickFilter, asOfDate]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatCard label="Total pendente" value={formatCurrency(summary.totalPending)} icon={DollarSign} />
-        <StatCard label="Total vencido" value={formatCurrency(summary.totalOverdue)} icon={AlertTriangle} />
-        <StatCard label="Pago no mês" value={formatCurrency(summary.totalPaidThisMonth)} icon={CheckCircle2} />
-        <StatCard label="Vencendo em 7 dias" value={String(summary.upcoming7Count)} icon={CalendarClock} />
-        <StatCard label="Vencendo em 30 dias" value={String(summary.upcoming30Count)} icon={Receipt} />
+        <StatCard
+          label="Total pendente"
+          value={formatCurrency(summary.totalPending)}
+          icon={DollarSign}
+          onClick={() => toggleQuickFilter("pendente")}
+          active={quickFilter === "pendente"}
+        />
+        <StatCard
+          label="Total vencido"
+          value={formatCurrency(summary.totalOverdue)}
+          icon={AlertTriangle}
+          onClick={() => toggleQuickFilter("vencida")}
+          active={quickFilter === "vencida"}
+        />
+        <StatCard
+          label="Pago no mês"
+          value={formatCurrency(summary.totalPaidThisMonth)}
+          icon={CheckCircle2}
+          onClick={() => toggleQuickFilter("paga_no_mes")}
+          active={quickFilter === "paga_no_mes"}
+        />
+        <StatCard
+          label="Vencendo em 7 dias"
+          value={String(summary.upcoming7Count)}
+          icon={CalendarClock}
+          onClick={() => toggleQuickFilter("7_dias")}
+          active={quickFilter === "7_dias"}
+        />
+        <StatCard
+          label="Vencendo em 30 dias"
+          value={String(summary.upcoming30Count)}
+          icon={Receipt}
+          onClick={() => toggleQuickFilter("30_dias")}
+          active={quickFilter === "30_dias"}
+        />
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant={quickFilter === "vencida" ? "default" : "outline"}
+          onClick={() => toggleQuickFilter("vencida")}
+        >
+          Vencidas
+        </Button>
+        <Button variant={quickFilter === "vence_hoje" ? "default" : "outline"} onClick={() => toggleQuickFilter("vence_hoje")}>
+          Vencem hoje
+        </Button>
+        <Button variant={quickFilter === "vence_amanha" ? "default" : "outline"} onClick={() => toggleQuickFilter("vence_amanha")}>
+          Vencem amanhã
+        </Button>
+        <Button variant={quickFilter === "7_dias" ? "default" : "outline"} onClick={() => toggleQuickFilter("7_dias")}>
+          Próximos 7 dias
+        </Button>
+        <Button variant={quickFilter === "30_dias" ? "default" : "outline"} onClick={() => toggleQuickFilter("30_dias")}>
+          Próximos 30 dias
+        </Button>
+        <Button variant={quickFilter === "paga_no_mes" ? "default" : "outline"} onClick={() => toggleQuickFilter("paga_no_mes")}>
+          Pagas no mês
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button asChild variant="outline">
+          <Link href="/financeiro/contas-a-pagar/gerar-recorrentes">
+            <ListChecks className="h-4 w-4" />
+            Gerar contas recorrentes
+          </Link>
+        </Button>
         <Button asChild>
           <Link href="/financeiro/contas-a-pagar/novo">
             <Plus className="h-4 w-4" />

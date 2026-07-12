@@ -10,6 +10,10 @@ interface StatCardProps {
   icon?: LucideIcon;
   trend?: Trend;
   hint?: string;
+  /** Quando informado, o card vira clicável (ex.: aplicar um filtro rápido correspondente). */
+  onClick?: () => void;
+  /** Realça o card quando o filtro que ele representa está ativo. */
+  active?: boolean;
 }
 
 const trendStyles = {
@@ -18,11 +22,17 @@ const trendStyles = {
   flat: { icon: Minus, className: "text-foreground-subtle" },
 };
 
-export function StatCard({ label, value, icon: Icon, trend, hint }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, trend, hint, onClick, active }: StatCardProps) {
   const TrendIcon = trend ? trendStyles[trend.direction].icon : null;
 
   return (
-    <Card>
+    <Card
+      onClick={onClick}
+      className={cn(
+        onClick && "cursor-pointer transition-colors hover:border-accent/50 hover:bg-background-elevated",
+        active && "border-accent ring-1 ring-accent/40",
+      )}
+    >
       <CardContent className="pt-4">
         <div className="flex items-start justify-between">
           <p className="text-xs font-medium text-foreground-muted">{label}</p>

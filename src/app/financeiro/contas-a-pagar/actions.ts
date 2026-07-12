@@ -4,10 +4,25 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { PayableOverpaymentError } from "@/lib/finance/status";
+import { fetchRecurringGenerationStatus, generateAccountsPayableFromTemplate } from "@/lib/finance/service";
 import type { CreateAccountsPayableInput, FinancePaymentMethod, UpdateAccountsPayableInput } from "@/lib/finance/types";
 
 export interface FormActionState {
   error: string | null;
+}
+
+export interface GenerateRecurringResultItem {
+  templateId: string;
+  description: string;
+  status: "criada" | "ja_existia" | "erro";
+  accountsPayableId?: string;
+  message?: string;
+}
+
+export interface GenerateRecurringState {
+  error: string | null;
+  success: string | null;
+  results: GenerateRecurringResultItem[];
 }
 
 const PAYMENT_METHODS: FinancePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "transferencia", "outro", "desconhecido"];
@@ -191,4 +206,63 @@ export async function deleteAccountsPayableAction(formData: FormData): Promise<v
 
   revalidatePath("/financeiro/contas-a-pagar");
   redirect("/financeiro/contas-a-pagar");
+}
+
+/**
+ * Gera contas a pagar reais a partir dos modelos de recorrência selecionados — só cria o que foi
+ * explicitamente confirmado nesta submissão (nunca todas as recorrências da competência de uma
+ * vez). Idempotente: confere de novo antes de criar (mesmo lock que generateAccountsPayableFromTemplate).
+ */
+export async function generateRecurringAccountsPayableAction(_prevState: GenerateRecurringState, formData: FormData): Promise<GenerateRecurringState> {
+  const competenceMonth = String(formData.get("competenceMonth") ?? "");
+  if (!/^\d{4}-\d{2}$/.test(competenceMonth)) return { error: "Competência inválida.", success: null, results: [] };
+
+  const responsibleName = parseOptionalString(formData.get("responsibleName"));
+  const templateIds = formData.getAll("templateIds").map(String);
+  if (templateIds.length === 0) return { error: "Selecione ao menos uma recorrência para gerar.", success: null, results: [] };
+
+  const competenceDate = `${competenceMonth}-01`;
+  const statusBefore = await fetchRecurringGenerationStatus(competenceMonth);
+  const results: GenerateRecurringResultItem[] = [];
+
+  for (const templateId of templateIds) {
+    const statusItem = statusBefore.find((s) => s.template.id === templateId);
+    const description = statusItem?.template.description ?? templateId;
+
+    if (statusItem?.alreadyGenerated) {
+      results.push({ templateId, description, status: "ja_existia", accountsPayableId: statusItem.existingAccountsPayableId ?? undefined });
+      continue;
+    }
+
+    const amountRaw = parseOptionalString(formData.get(`amount_${templateId}`));
+    const amountOverride = amountRaw ? Number(amountRaw.replace(",", ".")) : undefined;
+    if (statusItem?.template.variableAmount && (amountOverride === undefined || !Number.isFinite(amountOverride) || amountOverride <= 0)) {
+      results.push({ templateId, description, status: "erro", message: "Valor necessário — modelo de valor variável." });
+      continue;
+    }
+
+    try {
+      const created = await generateAccountsPayableFromTemplate(templateId, competenceDate, {
+        amountOverride,
+        documentNumber: parseOptionalString(formData.get(`documentNumber_${templateId}`)),
+        issueDate: parseOptionalString(formData.get(`issueDate_${templateId}`)),
+        notes: parseOptionalString(formData.get(`notes_${templateId}`)),
+        responsibleName,
+      });
+      results.push({ templateId, description, status: "criada", accountsPayableId: created?.id });
+    } catch (err) {
+      results.push({ templateId, description, status: "erro", message: err instanceof Error ? err.message : "Falha ao gerar." });
+    }
+  }
+
+  revalidatePath("/financeiro/contas-a-pagar");
+  revalidatePath("/financeiro/contas-a-pagar/gerar-recorrentes");
+
+  const createdCount = results.filter((r) => r.status === "criada").length;
+  const errorCount = results.filter((r) => r.status === "erro").length;
+  return {
+    error: null,
+    success: `${createdCount} conta(s) gerada(s).${errorCount > 0 ? ` ${errorCount} com erro.` : ""}`,
+    results,
+  };
 }
