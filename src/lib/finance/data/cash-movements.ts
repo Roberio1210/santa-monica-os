@@ -14,6 +14,9 @@ export const initialCashMovements: CashMovement[] = [
     accountsReceivableId: "iesa-recebivel-2026-06",
     categoryId: "receita-parcerias-pos-pagas",
     costCenterId: "cc-lavacao",
+    /** Conta que recebeu não foi informada pelo proprietário — nunca inventada. */
+    financialAccountId: null,
+    paymentId: null,
     source: "seed:contratos-reais",
     externalId: "iesa-pagamento-2026-07-10",
     notes: "Entrada de caixa em 10/07/2026 — não deve ser somada como faturamento operacional gerado nesse dia.",

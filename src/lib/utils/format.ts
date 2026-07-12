@@ -9,3 +9,10 @@ export function formatPercent(value: number, fractionDigits = 0): string {
 export function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(value);
 }
+
+/** Converte uma data ISO (YYYY-MM-DD) para o formato brasileiro (DD/MM/AAAA). */
+export function formatDateBR(dateIso: string | null): string {
+  if (!dateIso) return "Não informado";
+  const [year, month, day] = dateIso.slice(0, 10).split("-");
+  return `${day}/${month}/${year}`;
+}
