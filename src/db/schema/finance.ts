@@ -268,6 +268,13 @@ export const financialAccounts = pgTable("financial_accounts", {
    * vinculados a esta conta (ver src/lib/finance/status.ts, computeAccountBalance).
    */
   fixedFundAmount: numeric("fixed_fund_amount", { precision: 12, scale: 2 }),
+  /**
+   * Saldo conferido manualmente pelo usuário (ex.: olhando o extrato/app do banco) — nunca
+   * calculado. Usado só para o alerta "diferença entre saldo calculado e saldo informado"
+   * (módulo Fluxo de Caixa). Null enquanto nenhuma conferência manual foi feita.
+   */
+  informedBalance: numeric("informed_balance", { precision: 12, scale: 2 }),
+  informedBalanceAt: timestamp("informed_balance_at", { withTimezone: true }),
   active: active(),
   source: source(),
   /** Slug estável (ex.: "conta-stone"), único, para seed idempotente. */
@@ -277,6 +284,24 @@ export const financialAccounts = pgTable("financial_accounts", {
 });
 
 export const cashMovementTypeEnum = pgEnum("cash_movement_type", ["entrada", "saida"]);
+
+/**
+ * Classificação opcional da natureza do movimento — só para lançamentos manuais (módulo Fluxo
+ * de Caixa) que não vêm de uma conta a pagar/receber (essas já são "despesa"/"receita" pela
+ * própria categoria). Nunca obrigatória e nunca inferida automaticamente para movimentos já
+ * existentes (fica null). "receita"/"despesa" aqui cobrem lançamentos manuais sem accounts_
+ * payable/accounts_receivable vinculado; taxa bancária/tarifa/juros/ajuste/estorno cobrem os
+ * demais casos pedidos.
+ */
+export const cashMovementNatureEnum = pgEnum("cash_movement_nature", [
+  "receita",
+  "despesa",
+  "ajuste",
+  "estorno",
+  "taxa_bancaria",
+  "tarifa",
+  "juros",
+]);
 
 /**
  * Movimento de caixa real (dinheiro que efetivamente entrou/saiu numa data), distinto de
@@ -291,15 +316,36 @@ export const cashMovements = pgTable("cash_movements", {
   id: id(),
   date: date("date").notNull(),
   type: cashMovementTypeEnum("type").notNull(),
+  /** Classificação opcional — só para lançamentos manuais (ver cashMovementNatureEnum acima). */
+  nature: cashMovementNatureEnum("nature"),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   description: text("description").notNull(),
   accountsReceivableId: uuid("accounts_receivable_id").references(() => accountsReceivable.id),
+  /** Adicionado para simetria com accountsReceivableId — rastreabilidade de contas a pagar quitadas. */
+  accountsPayableId: uuid("accounts_payable_id").references((): AnyPgColumn => accountsPayable.id),
   categoryId: uuid("category_id").references(() => financialCategories.id),
   costCenterId: uuid("cost_center_id").references(() => costCenters.id),
   /** Conta/caixa onde o dinheiro efetivamente entrou/saiu. Null para movimentos legados sem conta informada. */
   financialAccountId: uuid("financial_account_id").references(() => financialAccounts.id),
   /** Baixa (payments) que gerou este movimento, quando aplicável — permite estornar com precisão. */
   paymentId: uuid("payment_id").references((): AnyPgColumn => payments.id),
+  /** Preenchidos só em lançamentos manuais sem conta a pagar/receber vinculada. */
+  partnerId: uuid("partner_id").references(() => partners.id),
+  customerId: uuid("customer_id").references(() => customers.id),
+  supplierId: uuid("supplier_id").references((): AnyPgColumn => suppliers.id),
+  /** Texto livre — sem sessão de usuário real ainda (mesmo padrão de inventory_movements.responsible). */
+  responsibleName: text("responsible_name"),
+  documentRef: text("document_ref"),
+  /** Competência do lançamento manual, quando diferente da data do movimento. */
+  competenceDate: date("competence_date"),
+  /**
+   * Saldo da conta (financialAccountId) imediatamente antes/depois deste movimento — fotografia
+   * histórica gravada no momento do lançamento, para o Livro Caixa. Nunca recalculada
+   * retroativamente; o saldo "atual" de uma conta continua sempre calculado ao vivo por
+   * computeAccountBalance (nunca lido destas colunas).
+   */
+  balanceBefore: numeric("balance_before", { precision: 12, scale: 2 }),
+  balanceAfter: numeric("balance_after", { precision: 12, scale: 2 }),
   active: active(),
   source: source(),
   externalId: text("external_id").unique(),
@@ -307,13 +353,24 @@ export const cashMovements = pgTable("cash_movements", {
   ...timestamps,
 });
 
-export const accountTransferTypeEnum = pgEnum("account_transfer_type", ["transferencia", "reposicao_caixa"]);
+/**
+ * "aporte_socios" (fromAccountId null — dinheiro externo entrando) e "retirada" (toAccountId
+ * null — dinheiro saindo do sistema de contas) reaproveitam o mesmo padrão from/to nullable já
+ * usado por transferência/reposição — adicionados ao enum existente via ALTER TYPE ADD VALUE,
+ * sem remover nenhum valor em uso (módulo Fluxo de Caixa, 12/07/2026).
+ */
+export const accountTransferTypeEnum = pgEnum("account_transfer_type", [
+  "transferencia",
+  "reposicao_caixa",
+  "aporte_socios",
+  "retirada",
+]);
 
 /**
- * Transferências entre contas (Stone ↔ Ailos ↔ Caixa) e reposições de fundo de caixa. Nunca
- * entram como receita ou despesa — por isso ficam numa tabela própria, fora de cash_movements/
- * accounts_payable/accounts_receivable, e o cálculo de saldo de cada conta soma estas linhas
- * separadamente (ver computeAccountBalance).
+ * Transferências entre contas (Stone ↔ Ailos ↔ Caixa), reposições de fundo de caixa, aportes de
+ * sócios e retiradas. Nunca entram como receita ou despesa — por isso ficam numa tabela própria,
+ * fora de cash_movements/accounts_payable/accounts_receivable, e o cálculo de saldo de cada
+ * conta soma estas linhas separadamente (ver computeAccountBalance).
  */
 export const accountTransfers = pgTable("account_transfers", {
   id: id(),
@@ -325,6 +382,9 @@ export const accountTransfers = pgTable("account_transfers", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   date: date("date").notNull(),
   description: text("description").notNull(),
+  /** Texto livre — sem sessão de usuário real ainda (mesmo padrão de inventory_movements.responsible). */
+  responsibleName: text("responsible_name"),
+  documentRef: text("document_ref"),
   active: active(),
   source: source(),
   externalId: text("external_id").unique(),

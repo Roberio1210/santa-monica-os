@@ -43,6 +43,13 @@
       "when": 1783825781273,
       "tag": "0005_payments_fee_net",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783863103822,
+      "tag": "0006_cash_flow_ledger",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,8 @@ export const auditLogs = pgTable("audit_logs", {
   entityId: uuid("entity_id"),
   beforeState: jsonb("before_state"),
   afterState: jsonb("after_state"),
+  /** Preparado para quando houver contexto real de requisição (sessão de usuário) — hoje sempre null, nunca inventado. */
+  ipAddress: text("ip_address"),
   source: source(),
   notes: notes(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
