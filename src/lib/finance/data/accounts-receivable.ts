@@ -9,6 +9,10 @@ import type { AccountsReceivable } from "@/lib/finance/types";
  * 10/07/2026, da parceria IESA/Nissan, referente à competência de junho/2026. Nenhum outro valor
  * foi inventado — Funerária e Don Juan têm contrato/vigência modelados (ver contracts.ts), mas
  * nenhuma conta a receber própria, porque nenhum recebimento específico foi confirmado.
+ *
+ * costCenterId/categoryId foram preenchidos no módulo Contas a Receber (12/07/2026) usando
+ * informação já documentada nas próprias notes deste registro (IESA faz lavações na Estética
+ * Automotiva) — não é um dado novo, só a classificação do que já era conhecido.
  */
 export const initialAccountsReceivable: AccountsReceivable[] = [
   {
@@ -17,6 +21,12 @@ export const initialAccountsReceivable: AccountsReceivable[] = [
     partnerId: "iesa-nissan",
     contractId: "contrato-iesa-nissan-lavacao",
     partyName: "Grupo IESA/Nissan",
+    costCenterId: "cc-estetica-automotiva",
+    costCenterName: "Estética Automotiva",
+    categoryId: "receita-lavacao",
+    categoryName: "Lavação",
+    financialAccountId: null,
+    financialAccountName: null,
     description: "Parceria IESA/Nissan — lavações de junho/2026",
     competenceDate: "2026-06-01",
     issueDate: null,
@@ -29,6 +39,13 @@ export const initialAccountsReceivable: AccountsReceivable[] = [
     invoiceNumber: null,
     invoiceIssued: true,
     receivedAt: "2026-07-10",
+    installmentGroupId: null,
+    installmentNumber: null,
+    installmentTotal: null,
+    feeAmount: null,
+    netAmount: null,
+    responsibleName: null,
+    approverName: null,
     source: "seed:contratos-reais",
     externalId: "iesa-recebivel-2026-06",
     notes:

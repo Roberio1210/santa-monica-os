@@ -35,55 +35,48 @@ import type {
   ContractType,
   CostCenter,
   CreateAccountsPayableInput,
+  CreateAccountsReceivableInput,
   FinancePaymentMethod,
   FinancialAccountBalance,
   FinancialAccountType,
   FinancialCategory,
   FinancialCategoryType,
+  Partner,
   PayableSettlement,
+  ReceivableSettlement,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
+  RecordReceivablePaymentInput,
   RecurringBillTemplate,
   Supplier,
   UpdateAccountsPayableInput,
+  UpdateAccountsReceivableInput,
 } from "@/lib/finance/types";
 import {
   computeAccountBalance,
   computeAccountsPayableStatus,
   computeAccountsReceivableStatus,
   computeInstallments,
+  computeNetAmount,
   computeOutstanding,
   PayableOverpaymentError,
+  ReceivableOverpaymentError,
 } from "@/lib/finance/status";
 
-function toAccountsReceivable(
-  row: typeof accountsReceivableTable.$inferSelect,
-  partyName: string,
-): AccountsReceivable {
+function toPaymentReceivableSettlement(row: typeof paymentsTable.$inferSelect): ReceivableSettlement {
   return {
     id: row.id,
-    customerId: row.customerId,
-    partnerId: row.partnerId,
-    contractId: row.contractId,
-    partyName,
-    description: row.description,
-    competenceDate: row.competenceDate,
-    issueDate: row.issueDate,
-    dueDate: row.dueDate,
-    expectedAmount: Number(row.expectedAmount),
-    receivedAmount: Number(row.receivedAmount),
-    outstandingAmount: Number(row.outstandingAmount),
-    status: row.status as AccountsReceivableStatus,
-    paymentMethod: row.paymentMethod as FinancePaymentMethod,
-    invoiceNumber: row.invoiceNumber,
-    invoiceIssued: row.invoiceIssued,
-    receivedAt: row.receivedAt,
-    source: row.source,
-    externalId: row.externalId,
+    accountsReceivableId: row.accountsReceivableId as string,
+    amount: Number(row.amount),
+    paidAt: row.paidAt,
+    method: row.method as FinancePaymentMethod,
+    financialAccountId: row.financialAccountId,
+    feeAmount: row.feeAmount !== null ? Number(row.feeAmount) : null,
+    netAmount: row.netAmount !== null ? Number(row.netAmount) : null,
+    reversed: row.reversed,
+    reversedAt: row.reversedAt ? row.reversedAt.toISOString() : null,
     notes: row.notes,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -174,25 +167,76 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return db;
   }
 
-  async listAccountsReceivable(): Promise<AccountsReceivable[]> {
+  private async toAccountsReceivable(row: typeof accountsReceivableTable.$inferSelect): Promise<AccountsReceivable> {
     const db = this.db();
-    const rows = await db.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.active, true));
+    const partyName = await this.resolvePartyName(row.customerId, row.partnerId);
 
-    const results: AccountsReceivable[] = [];
-    for (const row of rows) {
-      const partyName = await this.resolvePartyName(row.customerId, row.partnerId);
-      results.push(toAccountsReceivable(row, partyName));
+    let costCenterName: string | null = null;
+    if (row.costCenterId) {
+      const [cc] = await db.select().from(costCentersTable).where(eq(costCentersTable.id, row.costCenterId)).limit(1);
+      costCenterName = cc?.name ?? null;
     }
+    let categoryName: string | null = null;
+    if (row.categoryId) {
+      const [cat] = await db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.id, row.categoryId)).limit(1);
+      categoryName = cat?.name ?? null;
+    }
+    let financialAccountName: string | null = null;
+    if (row.financialAccountId) {
+      const [fa] = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, row.financialAccountId)).limit(1);
+      financialAccountName = fa?.name ?? null;
+    }
+
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      partnerId: row.partnerId,
+      contractId: row.contractId,
+      partyName,
+      costCenterId: row.costCenterId,
+      costCenterName,
+      categoryId: row.categoryId,
+      categoryName,
+      financialAccountId: row.financialAccountId,
+      financialAccountName,
+      description: row.description,
+      competenceDate: row.competenceDate,
+      issueDate: row.issueDate,
+      dueDate: row.dueDate,
+      expectedAmount: Number(row.expectedAmount),
+      receivedAmount: Number(row.receivedAmount),
+      outstandingAmount: Number(row.outstandingAmount),
+      status: row.status as AccountsReceivableStatus,
+      paymentMethod: row.paymentMethod as FinancePaymentMethod,
+      invoiceNumber: row.invoiceNumber,
+      invoiceIssued: row.invoiceIssued,
+      receivedAt: row.receivedAt,
+      installmentGroupId: row.installmentGroupId,
+      installmentNumber: row.installmentNumber,
+      installmentTotal: row.installmentTotal,
+      feeAmount: row.feeAmount !== null ? Number(row.feeAmount) : null,
+      netAmount: row.netAmount !== null ? Number(row.netAmount) : null,
+      responsibleName: row.responsibleName,
+      approverName: row.approverName,
+      source: row.source,
+      externalId: row.externalId,
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async listAccountsReceivable(): Promise<AccountsReceivable[]> {
+    const rows = await this.db().select().from(accountsReceivableTable).where(eq(accountsReceivableTable.active, true));
+    const results: AccountsReceivable[] = [];
+    for (const row of rows) results.push(await this.toAccountsReceivable(row));
     return results;
   }
 
   async getAccountsReceivable(id: string): Promise<AccountsReceivable | null> {
-    const db = this.db();
-    const rows = await db.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, id)).limit(1);
-    const row = rows[0];
-    if (!row) return null;
-    const partyName = await this.resolvePartyName(row.customerId, row.partnerId);
-    return toAccountsReceivable(row, partyName);
+    const rows = await this.db().select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, id)).limit(1);
+    if (!rows[0]) return null;
+    return this.toAccountsReceivable(rows[0]);
   }
 
   async recordPayment(input: RecordPaymentInput): Promise<AccountsReceivable> {
@@ -225,8 +269,291 @@ export class PostgresFinanceRepository implements FinanceRepository {
         .where(eq(accountsReceivableTable.id, input.accountsReceivableId))
         .returning();
 
-      const partyName = await this.resolvePartyName(updated.customerId, updated.partnerId);
-      return toAccountsReceivable(updated, partyName);
+      return this.toAccountsReceivable(updated);
+    });
+  }
+
+  async createAccountsReceivable(input: CreateAccountsReceivableInput): Promise<AccountsReceivable[]> {
+    const db = this.db();
+    const installmentTotal = input.installmentTotal && input.installmentTotal > 1 ? input.installmentTotal : 1;
+    const installments = computeInstallments(input.expectedAmount, installmentTotal, input.dueDate);
+    const installmentGroupId = installmentTotal > 1 ? crypto.randomUUID() : null;
+
+    return db.transaction(async (tx) => {
+      const created: AccountsReceivable[] = [];
+      for (const installment of installments) {
+        const [row] = await tx
+          .insert(accountsReceivableTable)
+          .values({
+            customerId: input.customerId ?? null,
+            partnerId: input.partnerId ?? null,
+            contractId: input.contractId ?? null,
+            costCenterId: input.costCenterId ?? null,
+            categoryId: input.categoryId ?? null,
+            financialAccountId: input.financialAccountId ?? null,
+            description: installmentTotal > 1 ? `${input.description} (${installment.number}/${installmentTotal})` : input.description,
+            competenceDate: input.competenceDate,
+            issueDate: input.issueDate ?? null,
+            dueDate: installment.dueDate,
+            expectedAmount: String(installment.amount),
+            receivedAmount: "0",
+            outstandingAmount: String(installment.amount),
+            status: input.status ?? "open",
+            paymentMethod: input.paymentMethod ?? "desconhecido",
+            invoiceNumber: input.invoiceNumber ?? null,
+            invoiceIssued: input.invoiceIssued ?? false,
+            installmentGroupId,
+            installmentNumber: installmentTotal > 1 ? installment.number : null,
+            installmentTotal: installmentTotal > 1 ? installmentTotal : null,
+            responsibleName: input.responsibleName ?? null,
+            approverName: input.approverName ?? null,
+            source: "manual",
+            notes: input.notes ?? null,
+          })
+          .returning();
+
+        await tx.insert(auditLogsTable).values({
+          action: "create",
+          entityType: "accounts_receivable",
+          entityId: row.id,
+          beforeState: null,
+          afterState: row,
+          source: "manual",
+        });
+
+        created.push(await this.toAccountsReceivable(row));
+      }
+      return created;
+    });
+  }
+
+  async updateAccountsReceivable(input: UpdateAccountsReceivableInput): Promise<AccountsReceivable> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [before] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, input.id)).limit(1);
+      if (!before) throw new Error(`Conta a receber não encontrada: ${input.id}`);
+
+      const newExpectedAmount = input.expectedAmount !== undefined ? input.expectedAmount : Number(before.expectedAmount);
+      const outstandingAmount = computeOutstanding(newExpectedAmount, Number(before.receivedAmount));
+
+      const [updated] = await tx
+        .update(accountsReceivableTable)
+        .set({
+          ...(input.description !== undefined && { description: input.description }),
+          ...(input.customerId !== undefined && { customerId: input.customerId }),
+          ...(input.partnerId !== undefined && { partnerId: input.partnerId }),
+          ...(input.contractId !== undefined && { contractId: input.contractId }),
+          ...(input.costCenterId !== undefined && { costCenterId: input.costCenterId }),
+          ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
+          ...(input.financialAccountId !== undefined && { financialAccountId: input.financialAccountId }),
+          ...(input.competenceDate !== undefined && { competenceDate: input.competenceDate }),
+          ...(input.issueDate !== undefined && { issueDate: input.issueDate }),
+          ...(input.dueDate !== undefined && { dueDate: input.dueDate }),
+          ...(input.expectedAmount !== undefined && { expectedAmount: String(input.expectedAmount), outstandingAmount: String(outstandingAmount) }),
+          ...(input.paymentMethod !== undefined && { paymentMethod: input.paymentMethod }),
+          ...(input.invoiceNumber !== undefined && { invoiceNumber: input.invoiceNumber }),
+          ...(input.invoiceIssued !== undefined && { invoiceIssued: input.invoiceIssued }),
+          ...(input.notes !== undefined && { notes: input.notes }),
+          ...(input.responsibleName !== undefined && { responsibleName: input.responsibleName }),
+          ...(input.approverName !== undefined && { approverName: input.approverName }),
+          updatedAt: new Date(),
+        })
+        .where(eq(accountsReceivableTable.id, input.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "update",
+        entityType: "accounts_receivable",
+        entityId: updated.id,
+        beforeState: before,
+        afterState: updated,
+        source: "manual",
+      });
+
+      return this.toAccountsReceivable(updated);
+    });
+  }
+
+  async recordReceivablePayment(input: RecordReceivablePaymentInput): Promise<AccountsReceivable> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [before] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, input.accountsReceivableId)).limit(1);
+      if (!before) throw new Error(`Conta a receber não encontrada: ${input.accountsReceivableId}`);
+
+      const outstandingAmount = Number(before.outstandingAmount);
+      if (input.amount > outstandingAmount && !input.allowOverpayment) {
+        throw new ReceivableOverpaymentError(outstandingAmount, input.amount);
+      }
+
+      const feeAmount = input.feeAmount ?? null;
+      const netAmount = computeNetAmount(input.amount, feeAmount);
+
+      const [payment] = await tx
+        .insert(paymentsTable)
+        .values({
+          accountsReceivableId: before.id,
+          financialAccountId: input.financialAccountId ?? null,
+          amount: String(input.amount),
+          paidAt: input.paidAt,
+          method: input.method,
+          feeAmount: feeAmount !== null ? String(feeAmount) : null,
+          netAmount: String(netAmount),
+          source: "manual",
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      // Movimento de caixa real, para que o saldo da conta reflita o recebimento e fique
+      // preparado para conciliação bancária futura — só quando a conta foi informada.
+      if (input.financialAccountId) {
+        await tx.insert(cashMovementsTable).values({
+          date: input.paidAt,
+          type: "entrada",
+          amount: String(input.amount),
+          description: `Recebimento: ${before.description}`,
+          accountsReceivableId: before.id,
+          categoryId: before.categoryId,
+          costCenterId: before.costCenterId,
+          financialAccountId: input.financialAccountId,
+          paymentId: payment.id,
+          source: "manual",
+        });
+      }
+
+      const receivedAmount = Math.round((Number(before.receivedAmount) + input.amount) * 100) / 100;
+      const newOutstanding = computeOutstanding(Number(before.expectedAmount), receivedAmount);
+      const status = computeAccountsReceivableStatus(
+        { status: before.status as AccountsReceivableStatus, outstandingAmount: newOutstanding, receivedAmount, dueDate: before.dueDate },
+        input.paidAt,
+      );
+      const totalFee = feeAmount !== null ? Math.round(((before.feeAmount !== null ? Number(before.feeAmount) : 0) + feeAmount) * 100) / 100 : (before.feeAmount !== null ? Number(before.feeAmount) : null);
+      const totalNet = Math.round(((before.netAmount !== null ? Number(before.netAmount) : 0) + netAmount) * 100) / 100;
+
+      const [updated] = await tx
+        .update(accountsReceivableTable)
+        .set({
+          receivedAmount: String(receivedAmount),
+          outstandingAmount: String(newOutstanding),
+          paymentMethod: input.method,
+          receivedAt: input.paidAt,
+          feeAmount: totalFee !== null ? String(totalFee) : null,
+          netAmount: String(totalNet),
+          ...(input.financialAccountId !== undefined && { financialAccountId: input.financialAccountId }),
+          status,
+          updatedAt: new Date(),
+        })
+        .where(eq(accountsReceivableTable.id, before.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "receive",
+        entityType: "accounts_receivable",
+        entityId: updated.id,
+        beforeState: before,
+        afterState: updated,
+        source: "manual",
+      });
+
+      return this.toAccountsReceivable(updated);
+    });
+  }
+
+  async listReceivableSettlements(accountsReceivableId: string): Promise<ReceivableSettlement[]> {
+    const rows = await this.db().select().from(paymentsTable).where(eq(paymentsTable.accountsReceivableId, accountsReceivableId));
+    return rows.map(toPaymentReceivableSettlement);
+  }
+
+  async reverseReceivableSettlement(settlementId: string): Promise<AccountsReceivable> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [settlement] = await tx.select().from(paymentsTable).where(eq(paymentsTable.id, settlementId)).limit(1);
+      if (!settlement) throw new Error(`Recebimento não encontrado: ${settlementId}`);
+      if (settlement.reversed) throw new Error("Este recebimento já foi estornado.");
+      if (!settlement.accountsReceivableId) throw new Error("Este recebimento não pertence a uma conta a receber.");
+
+      const [before] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, settlement.accountsReceivableId)).limit(1);
+      if (!before) throw new Error(`Conta a receber não encontrada: ${settlement.accountsReceivableId}`);
+
+      await tx.update(paymentsTable).set({ reversed: true, reversedAt: new Date() }).where(eq(paymentsTable.id, settlementId));
+      await tx.update(cashMovementsTable).set({ active: false }).where(eq(cashMovementsTable.paymentId, settlementId));
+
+      const receivedAmount = Math.round((Number(before.receivedAmount) - Number(settlement.amount)) * 100) / 100;
+      const outstandingAmount = computeOutstanding(Number(before.expectedAmount), receivedAmount);
+      const settlementNet = settlement.netAmount !== null ? Number(settlement.netAmount) : null;
+      const newNet = settlementNet !== null ? Math.round(((before.netAmount !== null ? Number(before.netAmount) : 0) - settlementNet) * 100) / 100 : (before.netAmount !== null ? Number(before.netAmount) : null);
+
+      const [updated] = await tx
+        .update(accountsReceivableTable)
+        .set({
+          receivedAmount: String(receivedAmount),
+          outstandingAmount: String(outstandingAmount),
+          netAmount: newNet !== null ? String(newNet) : null,
+          /** "reversed" é status manual e distinto de voltar a "open"/"partially_paid". */
+          status: "reversed",
+          updatedAt: new Date(),
+        })
+        .where(eq(accountsReceivableTable.id, before.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "reverse_payment",
+        entityType: "accounts_receivable",
+        entityId: updated.id,
+        beforeState: before,
+        afterState: updated,
+        source: "manual",
+      });
+
+      return this.toAccountsReceivable(updated);
+    });
+  }
+
+  async cancelAccountsReceivable(id: string): Promise<AccountsReceivable> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [before] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, id)).limit(1);
+      if (!before) throw new Error(`Conta a receber não encontrada: ${id}`);
+
+      const [updated] = await tx
+        .update(accountsReceivableTable)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(eq(accountsReceivableTable.id, id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "cancel",
+        entityType: "accounts_receivable",
+        entityId: updated.id,
+        beforeState: before,
+        afterState: updated,
+        source: "manual",
+      });
+
+      return this.toAccountsReceivable(updated);
+    });
+  }
+
+  async deleteAccountsReceivable(id: string): Promise<void> {
+    const db = this.db();
+    await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, id)).limit(1);
+      if (!before) throw new Error(`Conta a receber não encontrada: ${id}`);
+
+      const settlements = await tx.select().from(paymentsTable).where(eq(paymentsTable.accountsReceivableId, id));
+      if (settlements.length > 0) {
+        throw new Error("Exclusão definitiva só é permitida quando não houver recebimentos registrados. Use cancelar.");
+      }
+
+      await tx.delete(accountsReceivableTable).where(eq(accountsReceivableTable.id, id));
+
+      await tx.insert(auditLogsTable).values({
+        action: "delete",
+        entityType: "accounts_receivable",
+        entityId: id,
+        beforeState: before,
+        afterState: null,
+        source: "manual",
+      });
     });
   }
 
@@ -280,6 +607,11 @@ export class PostgresFinanceRepository implements FinanceRepository {
       });
     }
     return results;
+  }
+
+  async listPartners(): Promise<Partner[]> {
+    const rows = await this.db().select().from(partnersTable).where(eq(partnersTable.active, true));
+    return rows.map((r) => ({ id: r.id, name: r.name, type: r.type as Partner["type"] }));
   }
 
   private async resolvePartyName(customerId: string | null, partnerId: string | null): Promise<string> {

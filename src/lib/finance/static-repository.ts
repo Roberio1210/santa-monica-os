@@ -9,21 +9,26 @@ import type {
   Contract,
   CostCenter,
   CreateAccountsPayableInput,
+  CreateAccountsReceivableInput,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  Partner,
   PayableSettlement,
+  ReceivableSettlement,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
+  RecordReceivablePaymentInput,
   RecurringBillTemplate,
   Supplier,
   UpdateAccountsPayableInput,
+  UpdateAccountsReceivableInput,
 } from "@/lib/finance/types";
 import { initialAccountsReceivable } from "@/lib/finance/data/accounts-receivable";
 import { initialCashMovements } from "@/lib/finance/data/cash-movements";
-import { initialContracts } from "@/lib/finance/data/contracts";
+import { initialContracts, initialPartners } from "@/lib/finance/data/contracts";
 import { initialSuppliers } from "@/lib/finance/data/suppliers";
 import { initialFinancialAccounts } from "@/lib/finance/data/financial-accounts";
 import { initialAccountTransfers } from "@/lib/finance/data/account-transfers";
@@ -35,9 +40,11 @@ import {
   computeAccountBalance,
   computeAccountsPayableStatus,
   computeInstallments,
+  computeNetAmount,
   computeOutstanding,
   computeAccountsReceivableStatus,
   PayableOverpaymentError,
+  ReceivableOverpaymentError,
 } from "@/lib/finance/status";
 
 /**
@@ -73,6 +80,7 @@ export class StaticFinanceRepository implements FinanceRepository {
   private recurringBillTemplates: RecurringBillTemplate[];
   private accountsPayable: AccountsPayable[];
   private payableSettlements: PayableSettlement[] = [];
+  private receivableSettlements: ReceivableSettlement[] = [];
   private auditLog: AuditLogEntry[] = [];
 
   /** Aceita dados iniciais alternativos — usado pelos testes para preparar cenários específicos. */
@@ -110,12 +118,213 @@ export class StaticFinanceRepository implements FinanceRepository {
     return { ...item };
   }
 
+  async createAccountsReceivable(input: CreateAccountsReceivableInput): Promise<AccountsReceivable[]> {
+    const now = new Date().toISOString();
+    const category = input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId) : undefined;
+    const costCenter = input.costCenterId ? initialCostCenters.find((c) => c.id === input.costCenterId) : undefined;
+    const financialAccount = input.financialAccountId
+      ? this.financialAccounts.find((a) => a.id === input.financialAccountId)
+      : undefined;
+    const partyName = (input.partnerId ? initialPartners.find((p) => p.id === input.partnerId)?.name : undefined) ?? "Não informado";
+
+    const installmentTotal = input.installmentTotal && input.installmentTotal > 1 ? input.installmentTotal : 1;
+    const installmentGroupId = installmentTotal > 1 ? generateId("parcelamento-receita") : null;
+    const installments = computeInstallments(input.expectedAmount, installmentTotal, input.dueDate);
+
+    const created: AccountsReceivable[] = installments.map((installment) => {
+      const row: AccountsReceivable = {
+        id: generateId("conta-a-receber"),
+        customerId: input.customerId ?? null,
+        partnerId: input.partnerId ?? null,
+        contractId: input.contractId ?? null,
+        partyName,
+        costCenterId: costCenter?.id ?? null,
+        costCenterName: costCenter?.name ?? null,
+        categoryId: category?.id ?? null,
+        categoryName: category?.name ?? null,
+        financialAccountId: input.financialAccountId ?? null,
+        financialAccountName: financialAccount?.name ?? null,
+        description: installmentTotal > 1 ? `${input.description} (${installment.number}/${installmentTotal})` : input.description,
+        competenceDate: input.competenceDate,
+        issueDate: input.issueDate ?? null,
+        dueDate: installment.dueDate,
+        expectedAmount: installment.amount,
+        receivedAmount: 0,
+        outstandingAmount: installment.amount,
+        status: input.status ?? "open",
+        paymentMethod: input.paymentMethod ?? "desconhecido",
+        invoiceNumber: input.invoiceNumber ?? null,
+        invoiceIssued: input.invoiceIssued ?? false,
+        receivedAt: null,
+        installmentGroupId,
+        installmentNumber: installmentTotal > 1 ? installment.number : null,
+        installmentTotal: installmentTotal > 1 ? installmentTotal : null,
+        feeAmount: null,
+        netAmount: null,
+        responsibleName: input.responsibleName ?? null,
+        approverName: input.approverName ?? null,
+        source: "manual",
+        externalId: null,
+        notes: input.notes ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.accountsReceivable.push(row);
+      this.appendAudit("create", "accounts_receivable", row.id, null, row);
+      return { ...row };
+    });
+
+    return created;
+  }
+
+  async updateAccountsReceivable(input: UpdateAccountsReceivableInput): Promise<AccountsReceivable> {
+    const item = this.accountsReceivable.find((i) => i.id === input.id);
+    if (!item) throw new Error(`Conta a receber não encontrada: ${input.id}`);
+    const before = { ...item };
+
+    if (input.description !== undefined) item.description = input.description;
+    if (input.customerId !== undefined) item.customerId = input.customerId;
+    if (input.partnerId !== undefined) item.partnerId = input.partnerId;
+    if (input.contractId !== undefined) item.contractId = input.contractId;
+    if (input.costCenterId !== undefined) {
+      item.costCenterId = input.costCenterId;
+      item.costCenterName = input.costCenterId ? initialCostCenters.find((c) => c.id === input.costCenterId)?.name ?? null : null;
+    }
+    if (input.categoryId !== undefined) {
+      item.categoryId = input.categoryId;
+      item.categoryName = input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId)?.name ?? null : null;
+    }
+    if (input.financialAccountId !== undefined) {
+      item.financialAccountId = input.financialAccountId;
+      item.financialAccountName = input.financialAccountId
+        ? this.financialAccounts.find((a) => a.id === input.financialAccountId)?.name ?? null
+        : null;
+    }
+    if (input.competenceDate !== undefined) item.competenceDate = input.competenceDate;
+    if (input.issueDate !== undefined) item.issueDate = input.issueDate;
+    if (input.dueDate !== undefined) item.dueDate = input.dueDate;
+    if (input.expectedAmount !== undefined) {
+      item.expectedAmount = input.expectedAmount;
+      item.outstandingAmount = computeOutstanding(input.expectedAmount, item.receivedAmount);
+    }
+    if (input.paymentMethod !== undefined) item.paymentMethod = input.paymentMethod;
+    if (input.invoiceNumber !== undefined) item.invoiceNumber = input.invoiceNumber;
+    if (input.invoiceIssued !== undefined) item.invoiceIssued = input.invoiceIssued;
+    if (input.notes !== undefined) item.notes = input.notes;
+    if (input.responsibleName !== undefined) item.responsibleName = input.responsibleName;
+    if (input.approverName !== undefined) item.approverName = input.approverName;
+    item.updatedAt = new Date().toISOString();
+
+    this.appendAudit("update", "accounts_receivable", item.id, before, item);
+    return { ...item };
+  }
+
+  async recordReceivablePayment(input: RecordReceivablePaymentInput): Promise<AccountsReceivable> {
+    const item = this.accountsReceivable.find((i) => i.id === input.accountsReceivableId);
+    if (!item) throw new Error(`Conta a receber não encontrada: ${input.accountsReceivableId}`);
+
+    if (input.amount > item.outstandingAmount && !input.allowOverpayment) {
+      throw new ReceivableOverpaymentError(item.outstandingAmount, input.amount);
+    }
+
+    const before = { ...item };
+    const financialAccount = input.financialAccountId
+      ? this.financialAccounts.find((a) => a.id === input.financialAccountId)
+      : undefined;
+    const feeAmount = input.feeAmount ?? null;
+    const netAmount = computeNetAmount(input.amount, feeAmount);
+
+    const settlement: ReceivableSettlement = {
+      id: generateId("recebimento"),
+      accountsReceivableId: item.id,
+      amount: input.amount,
+      paidAt: input.paidAt,
+      method: input.method,
+      financialAccountId: input.financialAccountId ?? null,
+      feeAmount,
+      netAmount,
+      reversed: false,
+      reversedAt: null,
+      notes: input.notes ?? null,
+    };
+    this.receivableSettlements.push(settlement);
+
+    item.receivedAmount = Math.round((item.receivedAmount + input.amount) * 100) / 100;
+    item.outstandingAmount = computeOutstanding(item.expectedAmount, item.receivedAmount);
+    item.paymentMethod = input.method;
+    item.receivedAt = input.paidAt;
+    item.feeAmount = feeAmount !== null ? Math.round(((item.feeAmount ?? 0) + feeAmount) * 100) / 100 : item.feeAmount;
+    item.netAmount = Math.round(((item.netAmount ?? 0) + netAmount) * 100) / 100;
+    if (input.financialAccountId !== undefined) {
+      item.financialAccountId = input.financialAccountId;
+      item.financialAccountName = financialAccount?.name ?? null;
+    }
+    item.status = computeAccountsReceivableStatus(item, input.paidAt);
+    item.updatedAt = new Date().toISOString();
+
+    this.appendAudit("receive", "accounts_receivable", item.id, before, item);
+    return { ...item };
+  }
+
+  async listReceivableSettlements(accountsReceivableId: string): Promise<ReceivableSettlement[]> {
+    return this.receivableSettlements.filter((s) => s.accountsReceivableId === accountsReceivableId).map((s) => ({ ...s }));
+  }
+
+  async reverseReceivableSettlement(settlementId: string): Promise<AccountsReceivable> {
+    const settlement = this.receivableSettlements.find((s) => s.id === settlementId);
+    if (!settlement) throw new Error(`Recebimento não encontrado: ${settlementId}`);
+    if (settlement.reversed) throw new Error("Este recebimento já foi estornado.");
+
+    const item = this.accountsReceivable.find((i) => i.id === settlement.accountsReceivableId);
+    if (!item) throw new Error(`Conta a receber não encontrada: ${settlement.accountsReceivableId}`);
+    const before = { ...item };
+
+    settlement.reversed = true;
+    settlement.reversedAt = new Date().toISOString();
+
+    item.receivedAmount = Math.round((item.receivedAmount - settlement.amount) * 100) / 100;
+    item.outstandingAmount = computeOutstanding(item.expectedAmount, item.receivedAmount);
+    item.netAmount =
+      settlement.netAmount !== null ? Math.round(((item.netAmount ?? 0) - settlement.netAmount) * 100) / 100 : item.netAmount;
+    /** "reversed" é status manual e distinto de "open"/"partially_paid" — marca explicitamente que houve estorno. */
+    item.status = "reversed";
+    item.updatedAt = new Date().toISOString();
+
+    this.appendAudit("reverse_payment", "accounts_receivable", item.id, before, item);
+    return { ...item };
+  }
+
+  async cancelAccountsReceivable(id: string): Promise<AccountsReceivable> {
+    const item = this.accountsReceivable.find((i) => i.id === id);
+    if (!item) throw new Error(`Conta a receber não encontrada: ${id}`);
+    const before = { ...item };
+    item.status = "cancelled";
+    item.updatedAt = new Date().toISOString();
+    this.appendAudit("cancel", "accounts_receivable", item.id, before, item);
+    return { ...item };
+  }
+
+  async deleteAccountsReceivable(id: string): Promise<void> {
+    const item = this.accountsReceivable.find((i) => i.id === id);
+    if (!item) throw new Error(`Conta a receber não encontrada: ${id}`);
+    const hasSettlements = this.receivableSettlements.some((s) => s.accountsReceivableId === id);
+    if (hasSettlements) {
+      throw new Error("Exclusão definitiva só é permitida quando não houver recebimentos registrados. Use cancelar.");
+    }
+    this.accountsReceivable = this.accountsReceivable.filter((i) => i.id !== id);
+    this.appendAudit("delete", "accounts_receivable", id, item, null);
+  }
+
   async listCashMovements(): Promise<CashMovement[]> {
     return this.cashMovements.map((item) => ({ ...item }));
   }
 
   async listContracts(): Promise<Contract[]> {
     return this.contracts.map((item) => ({ ...item }));
+  }
+
+  async listPartners(): Promise<Partner[]> {
+    return initialPartners.map((item) => ({ ...item }));
   }
 
   async listSuppliers(): Promise<Supplier[]> {

@@ -7,16 +7,21 @@ import type {
   Contract,
   CostCenter,
   CreateAccountsPayableInput,
+  CreateAccountsReceivableInput,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
+  Partner,
   PayableSettlement,
+  ReceivableSettlement,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
+  RecordReceivablePaymentInput,
   RecurringBillTemplate,
   Supplier,
   UpdateAccountsPayableInput,
+  UpdateAccountsReceivableInput,
 } from "@/lib/finance/types";
 
 /**
@@ -29,12 +34,28 @@ export interface FinanceRepository {
   getAccountsReceivable(id: string): Promise<AccountsReceivable | null>;
   /**
    * Registra um recebimento (total ou parcial) e atualiza receivedAmount/outstandingAmount do
-   * registro correspondente. Não implementado na UI pública nesta fase (ver Parte 8 —
-   * segurança: nenhuma ação de escrita fica exposta sem autenticação).
+   * registro correspondente. Método legado, preservado por compatibilidade — não gera
+   * `payments`/`cash_movements` (ver `recordReceivablePayment` para o fluxo completo com
+   * histórico de baixas, usado pela UI do módulo Contas a Receber).
    */
   recordPayment(input: RecordPaymentInput): Promise<AccountsReceivable>;
   listCashMovements(): Promise<CashMovement[]>;
   listContracts(): Promise<Contract[]>;
+
+  // --- Contas a Receber ---
+  /** Retorna mais de um registro quando installmentTotal > 1 (parcelas vinculadas, ex.: 4x Stone). */
+  createAccountsReceivable(input: CreateAccountsReceivableInput): Promise<AccountsReceivable[]>;
+  updateAccountsReceivable(input: UpdateAccountsReceivableInput): Promise<AccountsReceivable>;
+  /** Lança ReceivableOverpaymentError se amount > saldo e allowOverpayment não for true. */
+  recordReceivablePayment(input: RecordReceivablePaymentInput): Promise<AccountsReceivable>;
+  listReceivableSettlements(accountsReceivableId: string): Promise<ReceivableSettlement[]>;
+  /** Marca a conta como "reversed" (estornado) — status manual, distinto de voltar a "open". */
+  reverseReceivableSettlement(settlementId: string): Promise<AccountsReceivable>;
+  cancelAccountsReceivable(id: string): Promise<AccountsReceivable>;
+  /** Só permitido quando não há nenhuma baixa registrada — senão lança erro (preferir cancelar). */
+  deleteAccountsReceivable(id: string): Promise<void>;
+  /** Todos os clientes/parceiros cadastrados (inclusive os sem contrato, ex.: WeCharge). */
+  listPartners(): Promise<Partner[]>;
 
   // --- Fundação (fornecedores, contas financeiras, recorrências, plano de contas) ---
   listSuppliers(): Promise<Supplier[]>;

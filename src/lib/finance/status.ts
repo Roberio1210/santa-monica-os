@@ -15,22 +15,40 @@ export function computeOutstanding(expectedAmount: number, receivedAmount: numbe
 }
 
 /**
- * `draft` e `cancelled` são decisões manuais — nunca recalculadas automaticamente. Os demais
- * status (`open`, `partially_paid`, `paid`, `overdue`) são derivados de outstandingAmount e
- * dueDate em relação a `asOfDate`, para que a tela sempre reflita a realidade mesmo que o
- * status gravado esteja desatualizado.
+ * `draft`, `cancelled` e `reversed` são decisões manuais — nunca recalculadas automaticamente.
+ * Os demais status (`open`, `partially_paid`, `paid`, `overdue`) são derivados de
+ * outstandingAmount e dueDate em relação a `asOfDate`, para que a tela sempre reflita a
+ * realidade mesmo que o status gravado esteja desatualizado.
  */
 export function computeAccountsReceivableStatus(
   item: Pick<AccountsReceivable, "status" | "outstandingAmount" | "receivedAmount" | "dueDate">,
   asOfDate: string,
 ): AccountsReceivableStatus {
-  if (item.status === "draft" || item.status === "cancelled") return item.status;
+  if (item.status === "draft" || item.status === "cancelled" || item.status === "reversed") return item.status;
 
   const isOverdue = item.dueDate < asOfDate;
 
   if (item.outstandingAmount <= 0) return "paid";
   if (item.receivedAmount > 0) return isOverdue ? "overdue" : "partially_paid";
   return isOverdue ? "overdue" : "open";
+}
+
+/**
+ * Lançada quando um recebimento excede o saldo em aberto e `allowOverpayment` não foi
+ * explicitamente confirmado — mesmo padrão de PayableOverpaymentError, para o lado receivable.
+ */
+export class ReceivableOverpaymentError extends Error {
+  constructor(outstandingAmount: number, attemptedAmount: number) {
+    super(`Recebimento de ${attemptedAmount} excede o saldo em aberto de ${outstandingAmount}. Confirmação explícita necessária.`);
+    this.name = "ReceivableOverpaymentError";
+  }
+}
+
+/** amount - fee, nunca negativo. Retorna amount quando fee é null (nenhuma taxa informada). */
+export function computeNetAmount(amount: number, feeAmount: number | null): number {
+  if (feeAmount === null) return amount;
+  const net = amount - feeAmount;
+  return Math.round((net > 0 ? net : 0) * 100) / 100;
 }
 
 export function toAccountsReceivableView(item: AccountsReceivable, asOfDate: string): AccountsReceivableView {

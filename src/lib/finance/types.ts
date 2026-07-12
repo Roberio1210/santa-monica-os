@@ -1,8 +1,10 @@
 /**
  * Espelha exatamente src/db/schema/finance.ts (accountsReceivable). Qualquer mudança no schema
  * do banco deve ser replicada aqui e vice-versa.
+ * "reversed" (estornado) é manual, como "draft"/"cancelled" — nunca recalculado automaticamente
+ * (módulo Contas a Receber, adicionado via ALTER TYPE ADD VALUE, sem remover valores existentes).
  */
-export type AccountsReceivableStatus = "draft" | "open" | "partially_paid" | "paid" | "overdue" | "cancelled";
+export type AccountsReceivableStatus = "draft" | "open" | "partially_paid" | "paid" | "overdue" | "cancelled" | "reversed";
 
 export type FinancePaymentMethod =
   | "dinheiro"
@@ -21,6 +23,15 @@ export interface AccountsReceivable {
   contractId: string | null;
   /** Nome do cliente/parceiro para exibição, sem exigir join — preenchido pelo repositório. */
   partyName: string;
+  /** Centro de custo da receita (Estética Automotiva, Estacionamento, Administrativo). */
+  costCenterId: string | null;
+  costCenterName: string | null;
+  /** Categoria de receita (Lavação, Polimento, Faróis, etc.), do plano de contas já existente. */
+  categoryId: string | null;
+  categoryName: string | null;
+  /** Conta onde o valor é esperado/foi recebido (Stone, Ailos). */
+  financialAccountId: string | null;
+  financialAccountName: string | null;
   description: string;
   /** Mês/data de competência — a que período o valor se refere. Nunca a data de recebimento. */
   competenceDate: string;
@@ -30,12 +41,23 @@ export interface AccountsReceivable {
   receivedAmount: number;
   /** Sempre expectedAmount - receivedAmount, mantido em sincronia por status.ts. */
   outstandingAmount: number;
-  /** Status armazenado (fonte da verdade para draft/cancelled — os demais podem ser recalculados). */
+  /** Status armazenado (fonte da verdade para draft/cancelled/reversed — os demais podem ser recalculados). */
   status: AccountsReceivableStatus;
   paymentMethod: FinancePaymentMethod;
   invoiceNumber: string | null;
   invoiceIssued: boolean;
   receivedAt: string | null;
+  /** Agrupa parcelas da mesma receita (ex.: 4x Stone). Null quando não é parcelado. */
+  installmentGroupId: string | null;
+  installmentNumber: number | null;
+  installmentTotal: number | null;
+  /** Taxa cobrada no recebimento (ex.: taxa Stone). Null até haver baixa com taxa informada. */
+  feeAmount: number | null;
+  /** receivedAmount - feeAmount acumulado das baixas. Null até haver recebimento. */
+  netAmount: number | null;
+  /** Texto livre — sem sessão de usuário real ainda (mesmo padrão de inventory_movements.responsible). */
+  responsibleName: string | null;
+  approverName: string | null;
   source: string;
   externalId: string | null;
   notes: string | null;
@@ -55,6 +77,79 @@ export interface RecordPaymentInput {
   paidAt: string;
   method: FinancePaymentMethod;
   notes?: string | null;
+}
+
+export interface CreateAccountsReceivableInput {
+  description: string;
+  customerId?: string | null;
+  partnerId?: string | null;
+  contractId?: string | null;
+  costCenterId?: string | null;
+  categoryId?: string | null;
+  financialAccountId?: string | null;
+  competenceDate: string;
+  issueDate?: string | null;
+  dueDate: string;
+  expectedAmount: number;
+  paymentMethod?: FinancePaymentMethod;
+  invoiceNumber?: string | null;
+  invoiceIssued?: boolean;
+  notes?: string | null;
+  status?: AccountsReceivableStatus;
+  responsibleName?: string | null;
+  approverName?: string | null;
+  /** Quando > 1, gera N parcelas de expectedAmount/installmentTotal, vencendo em meses seguintes. */
+  installmentTotal?: number;
+}
+
+export interface UpdateAccountsReceivableInput {
+  id: string;
+  description?: string;
+  customerId?: string | null;
+  partnerId?: string | null;
+  contractId?: string | null;
+  costCenterId?: string | null;
+  categoryId?: string | null;
+  financialAccountId?: string | null;
+  competenceDate?: string;
+  issueDate?: string | null;
+  dueDate?: string;
+  expectedAmount?: number;
+  paymentMethod?: FinancePaymentMethod;
+  invoiceNumber?: string | null;
+  invoiceIssued?: boolean;
+  notes?: string | null;
+  responsibleName?: string | null;
+  approverName?: string | null;
+}
+
+export interface ReceivableSettlement {
+  id: string;
+  accountsReceivableId: string;
+  amount: number;
+  paidAt: string | null;
+  method: FinancePaymentMethod;
+  financialAccountId: string | null;
+  /** Taxa descontada nesta baixa específica (ex.: taxa Stone). Null quando não informada. */
+  feeAmount: number | null;
+  /** amount - feeAmount desta baixa. Igual a amount quando feeAmount é null. */
+  netAmount: number | null;
+  reversed: boolean;
+  reversedAt: string | null;
+  notes: string | null;
+}
+
+export interface RecordReceivablePaymentInput {
+  accountsReceivableId: string;
+  amount: number;
+  paidAt: string;
+  method: FinancePaymentMethod;
+  financialAccountId?: string | null;
+  /** Taxa cobrada nesta baixa (ex.: taxa Stone). Nunca inventada — só quando realmente informada. */
+  feeAmount?: number | null;
+  notes?: string | null;
+  /** Sem isto, receber mais que outstandingAmount lança ReceivableOverpaymentError. */
+  allowOverpayment?: boolean;
 }
 
 export type CashMovementType = "entrada" | "saida";
