@@ -50,6 +50,13 @@
       "when": 1783863103822,
       "tag": "0006_cash_flow_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783865768725,
+      "tag": "0007_managerial_accounting",
+      "breakpoints": true
     }
   ]
 }
