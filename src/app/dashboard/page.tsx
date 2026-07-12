@@ -1,214 +1,63 @@
-import { DollarSign, Gauge, ParkingSquare, Target, Ticket, Users, CalendarClock, Bell, Wifi } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { DemoDataBadge } from "@/components/shared/demo-data-badge";
-import { Badge } from "@/components/ui/badge";
-import { StatCard } from "@/components/cards/stat-card";
+import { CentralHeader } from "@/components/operations/central-header";
+import { TodayPanel } from "@/components/operations/today-panel";
+import { AgendaBlock } from "@/components/operations/agenda-block";
+import { FinancialBlock } from "@/components/operations/financial-block";
+import { OperationBlock } from "@/components/operations/operation-block";
+import { ClientsBlock } from "@/components/operations/clients-block";
+import { AlertList } from "@/components/operations/alert-list";
+import { ZezinhoSummaryCard } from "@/components/operations/zezinho-summary-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RevenueChart } from "@/components/charts/revenue-chart";
-import { VehiclesChart } from "@/components/charts/vehicles-chart";
-import { PaymentMethodsChart } from "@/components/charts/payment-methods-chart";
-import { ServicesChart } from "@/components/charts/services-chart";
-import { CustomersChart } from "@/components/charts/customers-chart";
-import { AgendaToday } from "@/components/dashboard/agenda-today";
-import { RadarAlerts } from "@/components/dashboard/radar-alerts";
-import { ZezinhoRecommendations } from "@/components/dashboard/zezinho-recommendations";
-import { SummaryBlock } from "@/components/dashboard/summary-block";
-import { mockFinanceSummary, mockRevenueSeries } from "@/data/mock/finance";
-import { mockWashSummary } from "@/data/mock/wash";
-import { mockParkingSummary } from "@/data/mock/parking";
-import { mockSchedule } from "@/data/mock/schedule";
-import { mockCampaigns, mockMarketingSummary } from "@/data/mock/marketing";
-import { mockAlerts } from "@/data/mock/alerts";
-import { mockRecommendations } from "@/data/mock/agents";
-import { mockCustomers } from "@/data/mock/customers";
-import { vehiclesPerDay, topServices, customersNewVsRecurring } from "@/data/mock/charts";
-import { formatCurrency, formatPercent } from "@/lib/utils/format";
-import { isJumpParkConfigured } from "@/lib/config/env";
-import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
-import { fetchInventoryOverview } from "@/lib/inventory/service";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { computeConsolidatedAlerts, computeSituation, fetchCentralOverview } from "@/lib/operations/central";
+import { getStorageMode } from "@/lib/storage/mode";
 
-// Evita que dados do JumpPark fiquem congelados no HTML estático gerado em build.
+// Consulta dados reais a cada acesso — a Central nunca deve servir HTML estático desatualizado.
 export const dynamic = "force-dynamic";
 
-async function getOverviewMetrics() {
-  if (!isJumpParkConfigured()) return null;
-  try {
-    return await fetchOverviewMetrics();
-  } catch {
-    return null;
-  }
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export default async function DashboardPage() {
-  const { summary: inventorySummary } = await fetchInventoryOverview();
-  const criticalInventory = inventorySummary.lowStockCount;
-  const newCustomers = mockCustomers.filter((c) => c.segments.includes("novo")).length;
-  const recurringCustomers = mockCustomers.filter((c) => c.segments.includes("recorrente")).length;
-  const overview = await getOverviewMetrics();
-  const liveData = overview !== null;
+  const asOfDate = todayIso();
+  const overview = await fetchCentralOverview(asOfDate);
+  const storageMode = getStorageMode();
+  const situation = computeSituation(overview);
+  const alerts = computeConsolidatedAlerts(overview);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Visão Geral"
-        description="Resumo executivo da Sta Monica Estética Automotiva e Estacionamento."
-        actions={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {liveData ? (
-              <Badge variant="positive">
-                <Wifi className="h-3 w-3" />
-                JumpPark conectado
-              </Badge>
-            ) : null}
-            <DemoDataBadge />
-          </div>
-        }
-      />
+      <CentralHeader overview={overview} situation={situation} storageMode={storageMode} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard
-          label="Receita hoje"
-          value={formatCurrency(liveData ? overview.dailyRevenue : mockFinanceSummary.dailyRevenue)}
-          icon={DollarSign}
-          trend={liveData ? undefined : { direction: "up", value: 4.2 }}
-          hint={liveData ? "JumpPark" : "demonstrativo"}
-        />
-        <StatCard
-          label="Receita no mês"
-          value={formatCurrency(liveData ? overview.monthlyRevenue : mockFinanceSummary.monthlyRevenue)}
-          icon={DollarSign}
-          trend={liveData ? undefined : { direction: "up", value: 6.1 }}
-          hint={liveData ? "JumpPark" : "demonstrativo"}
-        />
-        <StatCard label="Meta mensal" value={formatCurrency(mockFinanceSummary.monthlyGoal)} icon={Target} hint={formatPercent(mockFinanceSummary.goalPercent, 1) + " atingido"} />
-        <StatCard label="Ticket médio" value={formatCurrency(mockFinanceSummary.averageTicket)} icon={Ticket} trend={{ direction: "flat", value: 0 }} />
-        <StatCard label="Veículos hoje" value={String(mockWashSummary.vehiclesServed)} icon={Gauge} hint="lavação" />
-        <StatCard
-          label="No estacionamento"
-          value={liveData ? "Informação indisponível" : String(mockParkingSummary.vehiclesPresent)}
-          icon={ParkingSquare}
-          hint={liveData ? "sem endpoint confiável" : "demonstrativo"}
-        />
-        <StatCard label="Clientes novos" value={String(newCustomers)} icon={Users} hint="hoje" />
-        <StatCard label="Clientes recorrentes" value={String(recurringCustomers)} icon={Users} hint="hoje" />
-        <StatCard label="Agenda do dia" value={`${mockSchedule.length} horários`} icon={CalendarClock} />
-        <StatCard
-          label="Taxa de ocupação"
-          value={liveData ? "Informação indisponível" : formatPercent(mockParkingSummary.occupancyPercent)}
-          icon={Gauge}
-          hint={liveData ? "requer total de vagas" : "demonstrativo"}
-        />
-        <StatCard label="Alertas ativos" value={String(mockAlerts.length)} icon={Bell} hint={criticalInventory > 0 ? `${criticalInventory} crítico(s)` : undefined} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Receita diária — Lavação x Estacionamento</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <RevenueChart data={mockRevenueSeries} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Formas de pagamento</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <PaymentMethodsChart data={mockFinanceSummary.paymentBreakdown} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Veículos por dia</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <VehiclesChart data={vehiclesPerDay} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Serviços mais vendidos</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <ServicesChart data={topServices} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Clientes novos x recorrentes</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <CustomersChart data={customersNewVsRecurring} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <AgendaToday entries={mockSchedule} />
+      <TodayPanel overview={overview} alertsCount={alerts.length} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <SummaryBlock
-          title="Lavação"
-          href="/lavacao"
-          rows={[
-            { label: "Concluídos", value: String(mockWashSummary.completed) },
-            { label: "Em execução", value: String(mockWashSummary.inProgress) },
-            { label: "Aguardando", value: String(mockWashSummary.waiting) },
-            { label: "Receita", value: formatCurrency(mockWashSummary.revenue) },
-            { label: "Ticket médio", value: formatCurrency(mockWashSummary.averageTicket) },
-            { label: "Capacidade utilizada", value: formatPercent(mockWashSummary.capacityUsedPercent) },
-          ]}
-        />
-        <SummaryBlock
-          title="Estacionamento"
-          href="/estacionamento"
-          rows={[
-            { label: "Veículos presentes", value: String(mockParkingSummary.vehiclesPresent) },
-            { label: "Entradas hoje", value: String(mockParkingSummary.entriesToday) },
-            { label: "Saídas hoje", value: String(mockParkingSummary.exitsToday) },
-            { label: "Ocupação", value: formatPercent(mockParkingSummary.occupancyPercent) },
-            { label: "Receita", value: formatCurrency(mockParkingSummary.revenue) },
-            { label: "Permanência média", value: `${mockParkingSummary.averageStayMinutes} min` },
-          ]}
-        />
-        <SummaryBlock
-          title="Financeiro"
-          href="/financeiro"
-          rows={[
-            { label: "Faturamento hoje", value: formatCurrency(mockFinanceSummary.dailyRevenue) },
-            { label: "Faturamento no mês", value: formatCurrency(mockFinanceSummary.monthlyRevenue) },
-            { label: "Lavação", value: formatCurrency(mockFinanceSummary.washRevenue) },
-            { label: "Estacionamento", value: formatCurrency(mockFinanceSummary.parkingRevenue) },
-          ]}
-        />
-        <SummaryBlock
-          title="Estoque"
-          href="/estoque"
-          rows={[
-            { label: "Itens cadastrados", value: String(inventorySummary.totalItems) },
-            { label: "Estoque baixo", value: String(inventorySummary.lowStockCount) },
-            { label: "Próximos do fim", value: String(inventorySummary.nearEmptyCount) },
-            { label: "Sem mínimo definido", value: String(inventorySummary.itemsWithoutMinimum) },
-          ]}
-        />
-        <SummaryBlock
-          title="Marketing"
-          href="/marketing"
-          rows={[
-            { label: "Campanhas ativas", value: String(mockCampaigns.filter((c) => c.status === "ativa").length) },
-            { label: "Alcance total", value: mockMarketingSummary.totalReach.toLocaleString("pt-BR") },
-            { label: "Leads", value: String(mockMarketingSummary.totalLeads) },
-            { label: "Custo por lead médio", value: formatCurrency(mockMarketingSummary.averageCostPerLead) },
-          ]}
-        />
+        <AgendaBlock />
+        <FinancialBlock overview={overview} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <RadarAlerts alerts={mockAlerts} />
-        <ZezinhoRecommendations recommendations={mockRecommendations} />
+        <OperationBlock overview={overview} />
+        <ClientsBlock overview={overview} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              Alertas
+              <Button asChild variant="outline">
+                <Link href="/alertas">Ver todos</Link>
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <AlertList alerts={alerts.slice(0, 5)} />
+          </CardContent>
+        </Card>
+
+        <ZezinhoSummaryCard overview={overview} alerts={alerts} />
       </div>
     </div>
   );
