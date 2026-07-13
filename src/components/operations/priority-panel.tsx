@@ -84,7 +84,7 @@ export function PriorityPanel({ overview }: { overview: CentralOverview }) {
           value={receivingTodayCount !== null ? `${receivingTodayCount} · ${formatCurrency(receivingTodayAmount)}` : "Informação indisponível"}
           href={receivingTodayCount !== null ? `/financeiro/contas-a-receber?dueFrom=${today}&dueTo=${today}` : null}
         />
-        <PriorityCard severity="informativo" icon={Car} label="Veículos aguardando entrega" value="Informação indisponível" href={null} />
+        <PriorityCard severity="atencao" icon={Car} label="Veículos aguardando entrega" value="Informação indisponível" href={null} />
         <PriorityCard severity="informativo" icon={CalendarClock} label="Agenda de hoje" value="Não integrada" href="/agenda" ctaLabel="Abrir agenda" />
         <PriorityCard
           severity="positivo"

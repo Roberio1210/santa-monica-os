@@ -105,27 +105,13 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
 export type SituationLevel = "normal" | "atencao" | "critica";
 
 /**
- * Situação geral da empresa — calculada só a partir de condições reais já presentes no
- * overview. Nunca inventa uma condição de atenção/crítica.
+ * Situação geral da empresa — reflete a MAIOR severidade entre os alertas já consolidados
+ * (computeConsolidatedAlerts), nunca a quantidade de alertas. Uma única condição crítica basta
+ * para a situação ser crítica, mesmo que seja o único alerta ativo.
  */
-export function computeSituation(overview: CentralOverview): SituationLevel {
-  const criticalConditions = [
-    overview.accountsPayable.data?.summary.totalOverdue ? overview.accountsPayable.data.summary.totalOverdue > 0 : false,
-    overview.cashFlow.data?.alerts.some((a) => a.level === "saldo_negativo" || a.level === "fluxo_negativo_futuro") ?? false,
-    overview.inventory.data ? overview.inventory.data.nearEmptyCount > 0 : false,
-    Boolean(overview.jumpparkConfigured && overview.jumppark.error),
-    Boolean(overview.cashFlow.error || overview.accountsPayable.error || overview.accountsReceivable.error),
-  ];
-  if (criticalConditions.some(Boolean)) return "critica";
-
-  const attentionConditions = [
-    (overview.classificationPendingCount.data ?? 0) > 0,
-    overview.cashFlow.data?.alerts.some((a) => a.level === "conta_zerando" || a.level === "diferenca_saldo_informado") ?? false,
-    overview.inventory.data ? overview.inventory.data.lowStockCount > 0 : false,
-    overview.accountsReceivable.data?.alerts.some((a) => a.level === "vencida") ?? false,
-  ];
-  if (attentionConditions.some(Boolean)) return "atencao";
-
+export function computeSituation(alerts: ConsolidatedAlert[]): SituationLevel {
+  if (alerts.some((a) => a.severity === "critico")) return "critica";
+  if (alerts.some((a) => a.severity === "atencao")) return "atencao";
   return "normal";
 }
 
@@ -230,7 +216,8 @@ export function computeConsolidatedAlerts(overview: CentralOverview): Consolidat
     ["Contas a Receber", overview.accountsReceivable.error],
   ] as const) {
     if (sectionError) {
-      alerts.push({ severity: "atencao", title: `Falha ao carregar ${label}`, description: sectionError, date: null, module: label, href: "/financeiro" });
+      // Crítico: sem esses dados não é possível avaliar a situação financeira real da empresa.
+      alerts.push({ severity: "critico", title: `Falha ao carregar ${label}`, description: sectionError, date: null, module: label, href: "/financeiro" });
     }
   }
 

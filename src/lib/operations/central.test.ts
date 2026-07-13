@@ -8,6 +8,7 @@ import {
   sumOutstandingDueOn,
   sumOutstandingDueWithin,
   type CentralOverview,
+  type ConsolidatedAlert,
 } from "@/lib/operations/central";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowProjectionPoint } from "@/lib/finance/types";
 import type { OperationOrder } from "@/lib/integrations/jumppark";
@@ -160,31 +161,57 @@ describe("findFirstNegativeProjection", () => {
   });
 });
 
-describe("computeSituation", () => {
-  it("retorna normal quando não há nenhuma condição real de risco", () => {
-    expect(computeSituation(baseOverview())).toBe("normal");
+describe("computeSituation — reflete a maior severidade dos alertas, nunca a quantidade", () => {
+  it("retorna normal quando não há nenhum alerta", () => {
+    expect(computeSituation([])).toBe("normal");
   });
 
-  it("retorna crítica quando há conta a pagar vencida", () => {
+  it("retorna crítica quando existe ao menos um alerta crítico, mesmo entre vários informativos", () => {
+    const alerts: ConsolidatedAlert[] = [
+      { severity: "informativo", title: "a", description: "a", date: null, module: "x", href: "/" },
+      { severity: "informativo", title: "b", description: "b", date: null, module: "x", href: "/" },
+      { severity: "critico", title: "c", description: "c", date: null, module: "x", href: "/" },
+    ];
+    expect(computeSituation(alerts)).toBe("critica");
+  });
+
+  it("retorna atenção quando o pior alerta é atenção (nenhum crítico)", () => {
+    const alerts: ConsolidatedAlert[] = [
+      { severity: "informativo", title: "a", description: "a", date: null, module: "x", href: "/" },
+      { severity: "atencao", title: "b", description: "b", date: null, module: "x", href: "/" },
+    ];
+    expect(computeSituation(alerts)).toBe("atencao");
+  });
+
+  it("uma quantidade grande de alertas informativos nunca eleva a situação — só a severidade importa", () => {
+    const alerts: ConsolidatedAlert[] = Array.from({ length: 20 }, (_, i) => ({
+      severity: "informativo" as const,
+      title: `alerta ${i}`,
+      description: "x",
+      date: null,
+      module: "x",
+      href: "/",
+    }));
+    expect(computeSituation(alerts)).toBe("normal");
+  });
+
+  it("computeConsolidatedAlerts + computeSituation juntos: conta a pagar vencida eleva a situação a crítica", () => {
     const overview = baseOverview({
-      accountsPayable: { data: { items: [], summary: { totalPending: 0, totalOverdue: 500, totalPaidThisMonth: 0, upcoming7Count: 0, upcoming30Count: 0, count: 0 }, alerts: [] }, error: null },
+      accountsPayable: {
+        data: {
+          items: [],
+          summary: { totalPending: 0, totalOverdue: 500, totalPaidThisMonth: 0, upcoming7Count: 0, upcoming30Count: 0, count: 0 },
+          alerts: [{ accountsPayableId: "ap-1", description: "x", dueDate: "2026-07-10", outstandingAmount: 500, level: "vencida" }],
+        },
+        error: null,
+      },
     });
-    expect(computeSituation(overview)).toBe("critica");
+    expect(computeSituation(computeConsolidatedAlerts(overview))).toBe("critica");
   });
 
-  it("retorna crítica quando há falha real de conexão com o JumpPark configurado", () => {
-    const overview = baseOverview({ jumppark: { data: null, error: "Falha de rede" } });
-    expect(computeSituation(overview)).toBe("critica");
-  });
-
-  it("retorna atenção quando há lançamento sem classificação, sem nenhuma condição crítica", () => {
-    const overview = baseOverview({ classificationPendingCount: { data: 3, error: null } });
-    expect(computeSituation(overview)).toBe("atencao");
-  });
-
-  it("nunca inventa uma condição de risco quando os dados não indicam nada", () => {
-    const overview = baseOverview({ jumppark: { data: null, error: null }, jumpparkConfigured: false });
-    expect(computeSituation(overview)).toBe("normal");
+  it("falha ao carregar uma seção inteira (Fluxo de Caixa) é tratada como crítica — sem esses dados não dá para avaliar a situação", () => {
+    const overview = baseOverview({ cashFlow: { data: null, error: "Falha de conexão" } });
+    expect(computeSituation(computeConsolidatedAlerts(overview))).toBe("critica");
   });
 });
 

@@ -27,8 +27,8 @@ export default async function DashboardPage() {
   const asOfDate = todayIso();
   const overview = await fetchCentralOverview(asOfDate);
   const storageMode = getStorageMode();
-  const situation = computeSituation(overview);
   const alerts = computeConsolidatedAlerts(overview);
+  const situation = computeSituation(alerts);
 
   return (
     <div className="space-y-8">

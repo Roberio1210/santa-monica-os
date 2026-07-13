@@ -32,7 +32,7 @@ export function AlertList({ alerts, emptyLabel = "Nenhum alerta ativo no momento
               {alert.severity === "informativo" ? (
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
               ) : (
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-critical" aria-hidden="true" />
+                <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${alert.severity === "critico" ? "text-critical" : "text-warning"}`} aria-hidden="true" />
               )}
               <div>
                 <div className="flex flex-wrap items-center gap-2">
