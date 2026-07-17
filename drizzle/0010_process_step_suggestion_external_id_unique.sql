@@ -1,0 +1,1 @@
+ALTER TABLE "process_step_product_suggestions" ADD CONSTRAINT "process_step_product_suggestions_external_id_unique" UNIQUE("external_id");

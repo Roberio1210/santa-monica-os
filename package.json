@@ -14,6 +14,8 @@
     "db:seed:inventory-normalize-units": "tsx src/db/seed/inventory-normalize-units.ts",
     "db:seed:inventory-ledger-backfill": "tsx src/db/seed/inventory-ledger-backfill.ts",
     "db:seed:inventory-receipts-2026-07": "tsx src/db/seed/inventory-receipts-2026-07.ts",
+    "db:seed:recipe-engine-services": "tsx src/db/seed/recipe-engine-services.ts",
+    "db:seed:recipe-engine-mappings": "tsx src/db/seed/recipe-engine-mappings.ts",
     "db:seed:contracts": "tsx src/db/seed/contracts.ts",
     "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts",
     "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts",

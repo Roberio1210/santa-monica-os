@@ -1,4 +1,4 @@
-import { date, integer, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 
 /**
@@ -52,6 +52,41 @@ export const movementTypeEnum = pgEnum("movement_type", [
 ]);
 
 export const quantityStatusEnum = pgEnum("inventory_quantity_status", ["confirmed", "measurement_pending"]);
+
+/**
+ * FASE B — motor de receitas e calibração. Espelha src/lib/recipes/types.ts.
+ */
+export const vehicleCategoryEnum = pgEnum("vehicle_category", ["hatch", "sedan", "suv", "caminhonete"]);
+
+export const processStepEnum = pgEnum("process_step", [
+  "pre_lavagem",
+  "shampoo",
+  "rodas",
+  "caixas_de_rodas",
+  "aspiracao",
+  "limpeza_interna",
+  "couro",
+  "plasticos_internos",
+  "vidros",
+  "cera",
+  "protecao_externa",
+  "pneus",
+  "motor",
+  "chassi",
+  "polimento_corte",
+  "polimento_refino",
+  "polimento_lustro",
+  "vitrificacao",
+  "higienizacao",
+  "farois",
+  "chuva_acida",
+  "cristalizacao",
+  "revisao_final",
+]);
+
+export const recipeStatusEnum = pgEnum("recipe_status", ["rascunho", "em_calibracao", "aprovada", "suspensa"]);
+
+export const calibrationSampleStatusEnum = pgEnum("calibration_sample_status", ["valida", "excluida"]);
 
 export const inventoryItems = pgTable("inventory_items", {
   id: id(),
@@ -123,9 +158,17 @@ export const services = pgTable("services", {
 });
 
 /**
- * Ficha técnica de consumo (preparada, não usada ainda — ver docs/inventory-module.md,
- * seção "Como evoluir para baixa automática"). Ao concluir uma ordem de serviço, cada regra
- * aqui geraria um inventory_movement do tipo consumo_interno automaticamente.
+ * Receita técnica de consumo — serviço × categoria de veículo × etapa × produto (FASE B).
+ * `quantityPerService` é a mediana das amostras válidas (null enquanto não houver amostras;
+ * nunca preenchido manualmente com um valor inventado — ver src/lib/recipes/service.ts,
+ * recalculateStatistics). Só receitas com status "aprovada" podem gerar consumo automático,
+ * e mesmo assim somente em modo preview_and_confirm nas fases seguintes — nenhuma baixa
+ * automática existe ainda nesta fase.
+ *
+ * `isActiveVersion` mantém no máximo uma versão ativa por combinação
+ * (serviceId, vehicleCategory, processStep, itemId) — versões antigas permanecem no banco
+ * com isActiveVersion=false para preservar o histórico (ver createNewVersion). A unicidade da
+ * combinação ativa é garantida na camada de aplicação (não há índice parcial no banco).
  */
 export const serviceConsumptionRules = pgTable("service_consumption_rules", {
   id: id(),
@@ -135,11 +178,76 @@ export const serviceConsumptionRules = pgTable("service_consumption_rules", {
   itemId: uuid("item_id")
     .notNull()
     .references(() => inventoryItems.id),
-  quantityPerService: numeric("quantity_per_service", { precision: 12, scale: 3 }).notNull(),
+  vehicleCategory: vehicleCategoryEnum("vehicle_category").notNull(),
+  processStep: processStepEnum("process_step").notNull(),
+  /** Mediana das amostras válidas — null até haver ao menos 1 amostra (nunca um valor inventado). */
+  quantityPerService: numeric("quantity_per_service", { precision: 12, scale: 3 }),
   unit: inventoryUnitEnum("unit").notNull(),
+  status: recipeStatusEnum("status").notNull().default("rascunho"),
+  version: integer("version").notNull().default(1),
+  isActiveVersion: boolean("is_active_version").notNull().default(true),
+  /** Partes de água por parte de produto (1:5 → 5). Null = produto puro / diluição não aplicável. */
+  dilutionRatio: numeric("dilution_ratio", { precision: 8, scale: 2 }),
+  minObserved: numeric("min_observed", { precision: 12, scale: 3 }),
+  maxObserved: numeric("max_observed", { precision: 12, scale: 3 }),
+  /** Contagem de amostras válidas (status "valida") — recalculado a cada adição/exclusão. */
+  sampleCount: integer("sample_count").notNull().default(0),
+  lastCalibratedAt: date("last_calibrated_at"),
   active: active(),
   source: source(),
   externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Amostra individual de calibração de uma receita (FASE B). Amostras com status "excluida"
+ * nunca entram no cálculo de mediana/mínimo/máximo (ver src/lib/recipes/stats.ts), mas
+ * permanecem no banco com `exclusionReason` preenchido — nunca apagadas.
+ */
+export const recipeCalibrationSamples = pgTable("recipe_calibration_samples", {
+  id: id(),
+  recipeId: uuid("recipe_id")
+    .notNull()
+    .references(() => serviceConsumptionRules.id),
+  /** Identificador externo da ordem no JumpPark, quando a amostra foi vinculada a uma ordem real. */
+  serviceOrderExternalId: text("service_order_external_id"),
+  date: date("date").notNull(),
+  quantityBefore: numeric("quantity_before", { precision: 12, scale: 3 }).notNull(),
+  quantityAfter: numeric("quantity_after", { precision: 12, scale: 3 }).notNull(),
+  /** Volume/peso da solução diluída preparada, quando o método de medição foi por diluição. */
+  preparedQuantity: numeric("prepared_quantity", { precision: 12, scale: 3 }),
+  leftoverReused: numeric("leftover_reused", { precision: 12, scale: 3 }),
+  discarded: numeric("discarded", { precision: 12, scale: 3 }),
+  dilutionRatio: numeric("dilution_ratio", { precision: 8, scale: 2 }),
+  /** Concentrado real consumido, já calculado (ver src/lib/recipes/dilution.ts) — é o valor usado nas estatísticas. */
+  concentrateConsumed: numeric("concentrate_consumed", { precision: 12, scale: 3 }).notNull(),
+  responsibleName: text("responsible_name"),
+  status: calibrationSampleStatusEnum("status").notNull().default("valida"),
+  exclusionReason: text("exclusion_reason"),
+  active: active(),
+  source: source(),
+  externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Sugestão de mapeamento etapa → produto candidato (FASE B, seção 7) — NUNCA gera consumo
+ * automático; é só um lembrete de "este produto costuma ser usado nesta etapa", pendente de
+ * confirmação humana ao criar a receita de fato (service_consumption_rules).
+ */
+export const processStepProductSuggestions = pgTable("process_step_product_suggestions", {
+  id: id(),
+  processStep: processStepEnum("process_step").notNull(),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id),
+  confirmed: boolean("confirmed").notNull().default(false),
+  active: active(),
+  source: source(),
+  /** Único (ex.: "pre_lavagem:apc-100") — permite seed idempotente (ON CONFLICT DO NOTHING). */
+  externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
 });

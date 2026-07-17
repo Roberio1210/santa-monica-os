@@ -64,6 +64,20 @@
       "when": 1784296029085,
       "tag": "0008_inventory_ledger_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784313734165,
+      "tag": "0009_recipe_calibration_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784313880847,
+      "tag": "0010_process_step_suggestion_external_id_unique",
+      "breakpoints": true
     }
   ]
 }
