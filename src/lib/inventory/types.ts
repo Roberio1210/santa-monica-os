@@ -43,9 +43,20 @@ export type InventoryCondition = "lacrado" | "aberto" | "pela_metade" | "estimad
 
 export type InventoryStatus = "ok" | "atencao" | "comprar" | "sem_minimo";
 
+/** Líquido/massa nunca são convertidos um no outro — apenas derivado da unidade para exibição. */
+export type PhysicalState = "liquido" | "massa" | "peca";
+
+/**
+ * "measurement_pending": conteúdo real da embalagem ainda não foi medido fisicamente (ex.:
+ * pote de composto polidor sem peso informado na contagem) — nunca inventar esse valor.
+ */
+export type QuantityStatus = "confirmed" | "measurement_pending";
+
 export interface InventoryItem {
   id: string;
   name: string;
+  /** Nome exatamente como informado na origem (contagem/nota), quando diverge do nome canônico. Null quando igual a `name`. */
+  originalName: string | null;
   brand: string;
   category: InventoryCategory;
   currentQuantity: number;
@@ -62,6 +73,8 @@ export interface InventoryItem {
   lastCountDate: string;
   /** Custo unitário (por unidade de currentQuantity). Null quando não cadastrado. */
   unitCost: number | null;
+  /** "measurement_pending" quando o conteúdo real da embalagem ainda não foi medido. Default "confirmed". */
+  quantityStatus: QuantityStatus;
 }
 
 export interface InventoryItemView extends InventoryItem {
@@ -70,28 +83,52 @@ export interface InventoryItemView extends InventoryItem {
   stockValue: number | null;
   /** Percentual do conteúdo restante em relação à embalagem, quando packageCapacity é conhecido. */
   fillPercent: number | null;
+  /** Derivado só da unidade (ml/L→liquido, g/kg→massa, unidade/caixa→peca) — nunca armazenado. */
+  physicalState: PhysicalState;
 }
 
+/**
+ * Taxa completa de tipos do livro-razão (ver docs do módulo). Todo tipo além dos 6 originais
+ * (entrada, saida, ajuste_inventario, perda, consumo_interno, compra) foi adicionado de forma
+ * aditiva para suportar contagem inicial, calibração e correções sem perder histórico.
+ */
 export type MovementType =
   | "entrada"
   | "saida"
   | "ajuste_inventario"
   | "perda"
   | "consumo_interno"
-  | "compra";
+  | "compra"
+  | "contagem_fisica_inicial"
+  | "ajuste_positivo"
+  | "ajuste_negativo"
+  | "avaria"
+  | "vencimento"
+  | "devolucao"
+  | "transferencia"
+  | "consumo_teste_calibracao"
+  | "correcao_inventario";
 
 export interface StockMovement {
   id: string;
   itemId: string;
   type: MovementType;
   /**
-   * Para entrada/saida/perda/consumo_interno/compra: quantidade delta (sempre positiva, o sinal é
-   * definido pelo type). Para ajuste_inventario: quantidade absoluta recontada (novo valor de
-   * currentQuantity), não um delta.
+   * Para tipos de delta (entrada/saida/perda/consumo_interno/compra/ajuste_positivo/
+   * ajuste_negativo/avaria/vencimento/devolucao/transferencia/consumo_teste_calibracao):
+   * quantidade sempre positiva, o sinal é definido pelo type (ver applyMovementDelta). Para
+   * ajuste_inventario/contagem_fisica_inicial/correcao_inventario: quantidade absoluta
+   * recontada (novo valor de currentQuantity), não um delta.
    */
   quantity: number;
   unit: InventoryUnit;
   date: string;
   notes: string | null;
   responsible: string | null;
+  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15"). */
+  reference: string | null;
+  /** Saldo do item imediatamente antes desta movimentação. Null só na 1ª movimentação já existente antes deste campo existir. */
+  previousBalance: number | null;
+  /** Saldo do item imediatamente após esta movimentação. */
+  newBalance: number | null;
 }

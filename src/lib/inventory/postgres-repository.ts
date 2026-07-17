@@ -9,6 +9,7 @@ import type {
   InventoryItem,
   InventoryUnit,
   MovementType,
+  QuantityStatus,
   StockMovement,
 } from "@/lib/inventory/types";
 import { applyMovementDelta } from "@/lib/inventory/movement-math";
@@ -17,6 +18,7 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
   return {
     id: row.id,
     name: row.name,
+    originalName: row.originalName,
     brand: row.brand,
     category: row.category as InventoryCategory,
     currentQuantity: Number(row.currentQuantity),
@@ -28,6 +30,7 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
     notes: row.notes,
     lastCountDate: row.lastCountDate,
     unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
+    quantityStatus: row.quantityStatus as QuantityStatus,
   };
 }
 
@@ -41,6 +44,9 @@ function toMovement(row: typeof inventoryMovements.$inferSelect): StockMovement 
     date: row.date,
     notes: row.notes,
     responsible: row.responsible,
+    reference: row.reference,
+    previousBalance: row.previousBalance !== null ? Number(row.previousBalance) : null,
+    newBalance: row.newBalance !== null ? Number(row.newBalance) : null,
   };
 }
 
@@ -76,17 +82,18 @@ export class PostgresInventoryRepository implements InventoryRepository {
     return rows.map(toMovement);
   }
 
-  async recordMovement(movement: Omit<StockMovement, "id">): Promise<StockMovement> {
+  async recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement> {
     const db = this.db();
     return db.transaction(async (tx) => {
       const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, movement.itemId)).limit(1);
       if (!item) throw new Error(`Item de estoque não encontrado: ${movement.itemId}`);
 
-      const newQuantity = applyMovementDelta(Number(item.currentQuantity), movement.type, movement.quantity);
+      const previousBalance = Number(item.currentQuantity);
+      const newBalance = applyMovementDelta(previousBalance, movement.type, movement.quantity);
 
       await tx
         .update(inventoryItems)
-        .set({ currentQuantity: String(newQuantity), updatedAt: new Date() })
+        .set({ currentQuantity: String(newBalance), updatedAt: new Date() })
         .where(eq(inventoryItems.id, movement.itemId));
 
       const [inserted] = await tx
@@ -99,6 +106,9 @@ export class PostgresInventoryRepository implements InventoryRepository {
           date: movement.date,
           notes: movement.notes,
           responsible: movement.responsible,
+          reference: movement.reference,
+          previousBalance: String(previousBalance),
+          newBalance: String(newBalance),
         })
         .returning();
 

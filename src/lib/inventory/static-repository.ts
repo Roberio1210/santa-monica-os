@@ -19,7 +19,11 @@ import { applyMovementDelta } from "@/lib/inventory/movement-math";
  * Ver docs/inventory-module.md para o caminho de migração recomendado.
  */
 export class StaticInventoryRepository implements InventoryRepository {
-  private items: InventoryItem[] = initialCount20260710.map((item) => ({ ...item }));
+  private items: InventoryItem[] = initialCount20260710.map((item) => ({
+    ...item,
+    originalName: item.originalName ?? null,
+    quantityStatus: item.quantityStatus ?? "confirmed",
+  }));
   private movements: StockMovement[] = [];
   private nextMovementId = 1;
 
@@ -37,13 +41,15 @@ export class StaticInventoryRepository implements InventoryRepository {
     return movements.map((m) => ({ ...m }));
   }
 
-  async recordMovement(movement: Omit<StockMovement, "id">): Promise<StockMovement> {
+  async recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement> {
     const item = this.items.find((i) => i.id === movement.itemId);
     if (!item) throw new Error(`Item de estoque não encontrado: ${movement.itemId}`);
 
-    item.currentQuantity = applyMovementDelta(item.currentQuantity, movement.type, movement.quantity);
+    const previousBalance = item.currentQuantity;
+    const newBalance = applyMovementDelta(previousBalance, movement.type, movement.quantity);
+    item.currentQuantity = newBalance;
 
-    const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++) };
+    const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++), previousBalance, newBalance };
     this.movements.push(recorded);
     return { ...recorded };
   }

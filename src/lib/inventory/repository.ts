@@ -10,9 +10,12 @@ export interface InventoryRepository {
   getItem(id: string): Promise<InventoryItem | null>;
   listMovements(itemId?: string): Promise<StockMovement[]>;
   /**
-   * Registra uma movimentação e atualiza a quantidade do item correspondente.
+   * Registra uma movimentação e atualiza a quantidade do item correspondente. `previousBalance`
+   * e `newBalance` são sempre calculados pela própria implementação a partir do saldo do item
+   * no momento do registro — nunca informados pelo chamador — para que o saldo do livro-razão
+   * nunca divirja da regra de negócio (applyMovementDelta).
    * Implementações sem persistência real (ex.: StaticInventoryRepository) devem deixar
    * claro que o efeito não sobrevive a um novo cold start em ambiente serverless.
    */
-  recordMovement(movement: Omit<StockMovement, "id">): Promise<StockMovement>;
+  recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement>;
 }

@@ -1,4 +1,4 @@
-import type { InventoryItem, InventoryItemView, InventoryStatus } from "@/lib/inventory/types";
+import type { InventoryItem, InventoryItemView, InventoryStatus, InventoryUnit, PhysicalState } from "@/lib/inventory/types";
 
 /**
  * Nunca infere um estoque mínimo. Quando minimumStock é null, o status é sempre
@@ -25,11 +25,19 @@ export function computeStockValue(item: Pick<InventoryItem, "currentQuantity" | 
   return item.currentQuantity * item.unitCost;
 }
 
+/** Nunca converte peso em volume nem volume em peso — só classifica a partir da unidade-base já gravada. */
+export function derivePhysicalState(unit: InventoryUnit): PhysicalState {
+  if (unit === "ml" || unit === "L") return "liquido";
+  if (unit === "g" || unit === "kg") return "massa";
+  return "peca";
+}
+
 export function toItemView(item: InventoryItem): InventoryItemView {
   return {
     ...item,
     status: computeStatus(item),
     stockValue: computeStockValue(item),
     fillPercent: computeFillPercent(item),
+    physicalState: derivePhysicalState(item.unit),
   };
 }

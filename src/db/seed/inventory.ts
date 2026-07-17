@@ -33,6 +33,7 @@ async function main() {
       .insert(inventoryItems)
       .values({
         name: item.name,
+        originalName: item.originalName ?? null,
         brand: item.brand,
         category: item.category,
         currentQuantity: String(item.currentQuantity),
@@ -43,6 +44,7 @@ async function main() {
         minimumStock: item.minimumStock !== null ? String(item.minimumStock) : null,
         unitCost: item.unitCost !== null ? String(item.unitCost) : null,
         lastCountDate: item.lastCountDate,
+        quantityStatus: item.quantityStatus ?? "confirmed",
         source: "seed:initial-count-2026-07-10",
         externalId: item.id,
         notes: item.notes,

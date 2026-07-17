@@ -40,11 +40,24 @@ export const movementTypeEnum = pgEnum("movement_type", [
   "perda",
   "consumo_interno",
   "compra",
+  "contagem_fisica_inicial",
+  "ajuste_positivo",
+  "ajuste_negativo",
+  "avaria",
+  "vencimento",
+  "devolucao",
+  "transferencia",
+  "consumo_teste_calibracao",
+  "correcao_inventario",
 ]);
+
+export const quantityStatusEnum = pgEnum("inventory_quantity_status", ["confirmed", "measurement_pending"]);
 
 export const inventoryItems = pgTable("inventory_items", {
   id: id(),
   name: text("name").notNull(),
+  /** Nome exatamente como informado na origem, quando diverge do nome canônico (`name`). Null quando igual. */
+  originalName: text("original_name"),
   brand: text("brand").notNull(),
   category: inventoryCategoryEnum("category").notNull(),
   currentQuantity: numeric("current_quantity", { precision: 12, scale: 3 }).notNull(),
@@ -56,6 +69,8 @@ export const inventoryItems = pgTable("inventory_items", {
   minimumStock: numeric("minimum_stock", { precision: 12, scale: 3 }),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }),
   lastCountDate: date("last_count_date").notNull(),
+  /** "measurement_pending" quando o conteúdo real da embalagem ainda não foi medido — nunca inventado. */
+  quantityStatus: quantityStatusEnum("quantity_status").notNull().default("confirmed"),
   active: active(),
   source: source(),
   /**
@@ -74,14 +89,21 @@ export const inventoryMovements = pgTable("inventory_movements", {
     .notNull()
     .references(() => inventoryItems.id),
   type: movementTypeEnum("type").notNull(),
-  /** Para ajuste_inventario, valor absoluto recontado — não um delta (ver static-repository.ts). */
+  /** Para tipos absolutos (ajuste_inventario/contagem_fisica_inicial/correcao_inventario), valor recontado — não um delta (ver movement-math.ts). */
   quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
   unit: inventoryUnitEnum("unit").notNull(),
   date: date("date").notNull(),
   responsible: text("responsible"),
+  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15"). */
+  reference: text("reference"),
+  /** Saldo do item imediatamente antes desta movimentação — sempre calculado pelo repositório, nunca informado pelo chamador. */
+  previousBalance: numeric("previous_balance", { precision: 12, scale: 3 }),
+  /** Saldo do item imediatamente após esta movimentação — sempre calculado pelo repositório. */
+  newBalance: numeric("new_balance", { precision: 12, scale: 3 }),
   active: active(),
   source: source(),
-  externalId: externalId(),
+  /** Único quando informado — permite backfill/seed idempotente (ON CONFLICT DO NOTHING) sem duplicar movimentações históricas. */
+  externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
 });
