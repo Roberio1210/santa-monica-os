@@ -14,6 +14,7 @@ import {
   type ReceivableAlert,
 } from "@/lib/finance/service";
 import { fetchInventoryOverview, type InventorySummary } from "@/lib/inventory/service";
+import { fetchDataQualitySummary, type DataQualitySummary } from "@/lib/inventory/data-quality";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowAlert, CashFlowProjectionPoint, FinancialAccountBalance } from "@/lib/finance/types";
 
 /**
@@ -41,6 +42,9 @@ export interface CentralOverview {
   accountsReceivable: SectionResult<{ items: AccountsReceivableView[]; summary: AccountsReceivableSummary; alerts: ReceivableAlert[] }>;
   classificationPendingCount: SectionResult<number>;
   inventory: SectionResult<InventorySummary>;
+  /** Contagem de itens com saldo negativo — calculada junto do resumo de estoque, nunca um valor separado buscado de novo. */
+  negativeStockCount: SectionResult<number>;
+  inventoryQuality: SectionResult<DataQualitySummary>;
 }
 
 async function settle<T>(promise: Promise<T>): Promise<SectionResult<T>> {
@@ -68,13 +72,14 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
       }))
     : Promise.reject(new JumpParkNotConfiguredError());
 
-  const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory] = await Promise.all([
+  const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory, inventoryQuality] = await Promise.all([
     settle(jumpparkPromise),
     settle(fetchCashFlowOverview(asOfDate)),
     settle(fetchAccountsPayableOverview(asOfDate)),
     settle(fetchAccountsReceivableOverview(asOfDate)),
     settle(fetchClassificationQueue()),
     settle(fetchInventoryOverview()),
+    settle(fetchDataQualitySummary()),
   ]);
 
   const accountsPayable: SectionResult<{ items: AccountsPayableView[]; summary: AccountsPayableSummary; alerts: PayableAlert[] }> = apOverview.data
@@ -89,6 +94,10 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     ? { data: classificationQueue.data.length, error: null }
     : { data: null, error: classificationQueue.error };
 
+  const negativeStockCount: SectionResult<number> = inventory.data
+    ? { data: inventory.data.items.filter((i) => i.currentQuantity < 0).length, error: null }
+    : { data: null, error: inventory.error };
+
   return {
     asOfDate,
     checkedAt: new Date().toISOString(),
@@ -99,6 +108,8 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     accountsReceivable,
     classificationPendingCount,
     inventory: inventory.data ? { data: inventory.data.summary, error: null } : { data: null, error: inventory.error },
+    negativeStockCount,
+    inventoryQuality,
   };
 }
 
@@ -197,6 +208,62 @@ export function computeConsolidatedAlerts(overview: CentralOverview): Consolidat
       module: "Estoque",
       href: "/estoque",
     });
+  }
+
+  if ((overview.negativeStockCount.data ?? 0) > 0) {
+    alerts.push({
+      severity: "critico",
+      title: "Estoque negativo",
+      description: `${overview.negativeStockCount.data} item(ns) com saldo negativo — verifique as movimentações.`,
+      date: null,
+      module: "Estoque",
+      href: "/estoque/movimentacoes",
+    });
+  }
+
+  const dq = overview.inventoryQuality.data;
+  if (dq) {
+    if (dq.measurementPending.length > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Itens com medição pendente",
+        description: `${dq.measurementPending.length} item(ns) com conteúdo real ainda não medido.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/produtos?quantityStatus=measurement_pending",
+      });
+    }
+    const recipesAwaitingCalibration = dq.recipesWithoutSamples.length + dq.recipesWithFewSamples.length;
+    if (recipesAwaitingCalibration > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Receitas aguardando calibração",
+        description: `${recipesAwaitingCalibration} receita(s) sem amostras suficientes.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/receitas",
+      });
+    }
+    if (dq.servicesWithoutRecipe.length > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Serviços sem receita",
+        description: `${dq.servicesWithoutRecipe.length} serviço(s) sem nenhuma receita cadastrada.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/pendencias",
+      });
+    }
+    if (dq.pendingMappings.length > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Mapeamentos pendentes",
+        description: `${dq.pendingMappings.length} sugestão(ões) de produto ainda não confirmada(s) nem rejeitada(s).`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/mapeamentos",
+      });
+    }
   }
 
   if (overview.jumpparkConfigured && overview.jumppark.error) {

@@ -2,6 +2,9 @@ import "server-only";
 import { computeConsolidatedAlerts, fetchCentralOverview, findFirstNegativeProjection, sumOutstandingDueWithin } from "@/lib/operations/central";
 import { fetchDreReport } from "@/lib/finance/service";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
+import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import { getRecipeRepository } from "@/lib/recipes/repository-factory";
+import { MIN_SAMPLES_FOR_PROVISIONAL } from "@/lib/recipes/types";
 
 /**
  * "Zézinho — Resumo Gerencial": funções determinísticas sobre dados reais do sistema, sem
@@ -113,6 +116,16 @@ const KEYWORD_INTENTS: { keywords: string[]; questionId: string }[] = [
   { keywords: ["classifica"], questionId: "sem_classificacao" },
   { keywords: ["resultado", "dre", "lucro"], questionId: "resultado_mes" },
   { keywords: ["alerta"], questionId: "alertas_importantes" },
+  { keywords: ["medição pendente", "medicao pendente"], questionId: "estoque_medicao_pendente" },
+  { keywords: ["receita", "amostra"], questionId: "estoque_receitas_sem_amostras" },
+  { keywords: ["aprovada", "aprovar receita"], questionId: "estoque_receitas_aprovaveis" },
+  { keywords: ["produto sem custo", "sem custo"], questionId: "estoque_sem_custo" },
+  { keywords: ["estoque mínimo", "estoque minimo"], questionId: "estoque_sem_minimo" },
+  { keywords: ["mais entraram", "mais entrada"], questionId: "estoque_mais_entradas" },
+  { keywords: ["ajuste"], questionId: "estoque_com_ajustes" },
+  { keywords: ["estoque negativo", "saldo negativo"], questionId: "estoque_negativo" },
+  { keywords: ["serviço sem receita", "servico sem receita"], questionId: "estoque_servicos_sem_receita" },
+  { keywords: ["mapeamento"], questionId: "estoque_mapeamentos_pendentes" },
 ];
 
 export function matchIntent(freeText: string): string {
@@ -137,6 +150,16 @@ export const ZEZINHO_QUESTIONS: ZezinhoQuestion[] = [
   { id: "alertas_importantes", label: "Quais são os alertas mais importantes?" },
   { id: "sem_classificacao", label: "Quais lançamentos estão sem classificação?" },
   { id: "resultado_mes", label: "Qual foi o resultado gerencial do mês?" },
+  { id: "estoque_medicao_pendente", label: "Quais produtos estão com medição pendente?" },
+  { id: "estoque_receitas_sem_amostras", label: "Quais receitas ainda não têm amostras?" },
+  { id: "estoque_receitas_aprovaveis", label: "Quais receitas podem ser aprovadas?" },
+  { id: "estoque_sem_custo", label: "Quais produtos não têm custo?" },
+  { id: "estoque_sem_minimo", label: "Quais produtos não têm estoque mínimo?" },
+  { id: "estoque_mais_entradas", label: "Quais produtos mais entraram no estoque?" },
+  { id: "estoque_com_ajustes", label: "Quais produtos tiveram ajustes?" },
+  { id: "estoque_negativo", label: "Existe estoque negativo?" },
+  { id: "estoque_servicos_sem_receita", label: "Quais serviços ainda não têm receita?" },
+  { id: "estoque_mapeamentos_pendentes", label: "Quais mapeamentos estão pendentes?" },
 ];
 
 function currentMonthRange(): { from: string; to: string; label: string } {
@@ -264,6 +287,112 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
       } catch {
         return UNKNOWN_ANSWER;
       }
+    }
+
+    case "estoque_medicao_pendente": {
+      const items = overview.inventoryQuality.data?.measurementPending ?? null;
+      if (items === null) return UNKNOWN_ANSWER;
+      return {
+        text:
+          items.length > 0
+            ? `${items.length} produto(s) com medição pendente: ${items.slice(0, 5).map((i) => i.name).join(", ")}${items.length > 5 ? "..." : ""}.`
+            : "Nenhum produto está com medição pendente.",
+        links: [{ label: "Ver produtos", href: "/estoque/produtos?quantityStatus=measurement_pending" }],
+      };
+    }
+
+    case "estoque_receitas_sem_amostras": {
+      const recipes = overview.inventoryQuality.data?.recipesWithoutSamples ?? null;
+      if (recipes === null) return UNKNOWN_ANSWER;
+      return {
+        text: recipes.length > 0 ? `${recipes.length} receita(s) ainda sem nenhuma amostra de calibração.` : "Todas as receitas já têm ao menos uma amostra.",
+        links: [{ label: "Ver receitas", href: "/estoque/receitas" }],
+      };
+    }
+
+    case "estoque_receitas_aprovaveis": {
+      const recipes = await getRecipeRepository().listRecipes();
+      const eligible = recipes.filter((r) => r.isActiveVersion && r.status !== "aprovada" && r.status !== "suspensa" && r.sampleCount >= MIN_SAMPLES_FOR_PROVISIONAL);
+      return {
+        text: eligible.length > 0 ? `${eligible.length} receita(s) já têm amostras suficientes e podem ser aprovadas manualmente.` : "Nenhuma receita atingiu o mínimo de amostras para aprovação ainda.",
+        links: [{ label: "Ver receitas", href: "/estoque/receitas" }],
+      };
+    }
+
+    case "estoque_sem_custo": {
+      const items = overview.inventoryQuality.data?.withoutCost ?? null;
+      if (items === null) return UNKNOWN_ANSWER;
+      return {
+        text: items.length > 0 ? `${items.length} produto(s) sem custo cadastrado.` : "Todos os produtos têm custo cadastrado.",
+        links: [{ label: "Ver produtos", href: "/estoque/produtos" }],
+      };
+    }
+
+    case "estoque_sem_minimo": {
+      const items = overview.inventoryQuality.data?.withoutMinimum ?? null;
+      if (items === null) return UNKNOWN_ANSWER;
+      return {
+        text: items.length > 0 ? `${items.length} produto(s) sem estoque mínimo configurado.` : "Todos os produtos têm estoque mínimo configurado.",
+        links: [{ label: "Ver produtos", href: "/estoque/produtos" }],
+      };
+    }
+
+    case "estoque_mais_entradas": {
+      const [movements, items] = await Promise.all([getInventoryRepository().listMovements(), getInventoryRepository().listItems()]);
+      const itemMap = new Map(items.map((i) => [i.id, i.name]));
+      const entryCounts = new Map<string, number>();
+      for (const m of movements) {
+        if (m.type === "entrada" || m.type === "compra") entryCounts.set(m.itemId, (entryCounts.get(m.itemId) ?? 0) + 1);
+      }
+      const top = Array.from(entryCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([id, count]) => `${itemMap.get(id) ?? "produto removido"} (${count}x)`);
+      return {
+        text: top.length > 0 ? `Produtos com mais entradas registradas: ${top.join(", ")}.` : "Nenhuma entrada registrada ainda.",
+        links: [{ label: "Ver movimentações", href: "/estoque/movimentacoes?type=compra" }],
+      };
+    }
+
+    case "estoque_com_ajustes": {
+      const [movements, items] = await Promise.all([getInventoryRepository().listMovements(), getInventoryRepository().listItems()]);
+      const itemMap = new Map(items.map((i) => [i.id, i.name]));
+      const adjustTypes = new Set(["ajuste_positivo", "ajuste_negativo", "correcao_inventario"]);
+      const adjustedIds = new Set(movements.filter((m) => adjustTypes.has(m.type)).map((m) => m.itemId));
+      const names = Array.from(adjustedIds)
+        .slice(0, 5)
+        .map((id) => itemMap.get(id) ?? "produto removido");
+      return {
+        text: adjustedIds.size > 0 ? `${adjustedIds.size} produto(s) tiveram ajuste registrado: ${names.join(", ")}${adjustedIds.size > 5 ? "..." : ""}.` : "Nenhum produto teve ajuste registrado.",
+        links: [{ label: "Ver movimentações", href: "/estoque/movimentacoes" }],
+      };
+    }
+
+    case "estoque_negativo": {
+      const count = overview.negativeStockCount.data;
+      if (count === null) return UNKNOWN_ANSWER;
+      return {
+        text: count > 0 ? `Sim, ${count} item(ns) estão com saldo negativo.` : "Não, nenhum item está com saldo negativo.",
+        links: [{ label: "Ver movimentações", href: "/estoque/movimentacoes" }],
+      };
+    }
+
+    case "estoque_servicos_sem_receita": {
+      const services = overview.inventoryQuality.data?.servicesWithoutRecipe ?? null;
+      if (services === null) return UNKNOWN_ANSWER;
+      return {
+        text: services.length > 0 ? `${services.length} serviço(s) sem nenhuma receita: ${services.slice(0, 5).map((s) => s.name).join(", ")}.` : "Todos os serviços já têm ao menos uma receita.",
+        links: [{ label: "Ver pendências do estoque", href: "/estoque/pendencias" }],
+      };
+    }
+
+    case "estoque_mapeamentos_pendentes": {
+      const pending = overview.inventoryQuality.data?.pendingMappings ?? null;
+      if (pending === null) return UNKNOWN_ANSWER;
+      return {
+        text: pending.length > 0 ? `${pending.length} mapeamento(s) ainda pendente(s) de confirmação.` : "Não há mapeamentos pendentes.",
+        links: [{ label: "Ver mapeamentos", href: "/estoque/mapeamentos" }],
+      };
     }
 
     default:

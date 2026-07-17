@@ -47,6 +47,11 @@ function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview
     accountsReceivable: { data: { items: [], summary: { totalOpen: 0, totalReceivedThisMonth: 0, totalOverdue: 0, upcomingCount: 0, count: 0 }, alerts: [] }, error: null },
     classificationPendingCount: { data: 0, error: null },
     inventory: { data: { totalItems: 10, lowStockCount: 0, nearEmptyCount: 0, itemsWithoutMinimum: 0, sealedCount: 0, totalStockValue: 0 }, error: null },
+    negativeStockCount: { data: 0, error: null },
+    inventoryQuality: {
+      data: { measurementPending: [], withoutCost: [], withoutMinimum: [], withoutBrand: [], servicesWithoutRecipe: [], recipesWithoutSamples: [], recipesWithFewSamples: [], pendingMappings: [] },
+      error: null,
+    },
     ...overrides,
   };
 }
