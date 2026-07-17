@@ -20,9 +20,6 @@ export interface FormActionState {
   success: string | null;
 }
 
-const initialState: FormActionState = { error: null, success: null };
-export { initialState as initialRecipeActionState };
-
 function parseOptionalString(value: FormDataEntryValue | null): string | null {
   const str = String(value ?? "").trim();
   return str.length > 0 ? str : null;

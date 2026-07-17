@@ -9,10 +9,12 @@ import { processSteps, vehicleCategories } from "@/lib/recipes/types";
 import type { ProcessStep, Recipe, VehicleCategory } from "@/lib/recipes/types";
 import type { InventoryItemView } from "@/lib/inventory/types";
 import type { ServiceCatalogEntry } from "@/lib/inventory/services-catalog";
-import { calibrarAction, initialCalibracaoState } from "@/app/estoque/calibracao/actions";
+import { calibrarAction, type CalibracaoState } from "@/app/estoque/calibracao/actions";
 
 const fieldClasses =
   "h-9 rounded-lg border border-border bg-background-elevated px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50";
+
+const initialState: CalibracaoState = { error: null };
 
 function toNumber(value: string): number | null {
   const clean = value.trim().replace(",", ".");
@@ -28,7 +30,7 @@ interface CalibracaoViewProps {
 }
 
 export function CalibracaoView({ services, items, recipes }: CalibracaoViewProps) {
-  const [state, formAction, isPending] = useActionState(calibrarAction, initialCalibracaoState);
+  const [state, formAction, isPending] = useActionState(calibrarAction, initialState);
 
   const [serviceId, setServiceId] = useState("");
   const [itemId, setItemId] = useState("");

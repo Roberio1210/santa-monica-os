@@ -12,9 +12,6 @@ export interface CalibracaoState {
   error: string | null;
 }
 
-const initialState: CalibracaoState = { error: null };
-export { initialState as initialCalibracaoState };
-
 function parseOptionalString(value: FormDataEntryValue | null): string | null {
   const str = String(value ?? "").trim();
   return str.length > 0 ? str : null;

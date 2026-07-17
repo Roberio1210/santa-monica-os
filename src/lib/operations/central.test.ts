@@ -330,3 +330,44 @@ describe("buildMovementTimeline", () => {
     expect(exitEntry.amount).toBe(75);
   });
 });
+
+describe("Fase C: alertas de estoque/receitas — severidade correta, nunca crítico por simples falta de configuração", () => {
+  it("estoque negativo é sempre crítico", () => {
+    const overview = baseOverview({ negativeStockCount: { data: 2, error: null } });
+    const alerts = computeConsolidatedAlerts(overview);
+    const alert = alerts.find((a) => a.title === "Estoque negativo");
+    expect(alert?.severity).toBe("critico");
+    expect(computeSituation(alerts)).toBe("critica");
+  });
+
+  it("medição pendente, receitas aguardando calibração, serviços sem receita e mapeamentos pendentes são sempre atenção — nunca crítico", () => {
+    const overview = baseOverview({
+      inventoryQuality: {
+        data: {
+          measurementPending: [{ id: "i1" } as never],
+          withoutCost: [],
+          withoutMinimum: [],
+          withoutBrand: [],
+          servicesWithoutRecipe: [{ id: "s1", name: "Bronze", category: null }],
+          recipesWithoutSamples: [{ id: "r1" } as never],
+          recipesWithFewSamples: [],
+          pendingMappings: [{ id: "m1" } as never],
+        },
+        error: null,
+      },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    const titles = ["Itens com medição pendente", "Receitas aguardando calibração", "Serviços sem receita", "Mapeamentos pendentes"];
+    for (const title of titles) {
+      const alert = alerts.find((a) => a.title === title);
+      expect(alert?.severity).toBe("atencao");
+    }
+    expect(computeSituation(alerts)).toBe("atencao");
+  });
+
+  it("sem nenhuma pendência de estoque, nenhum alerta é criado (ausência de configuração não é tratada como erro)", () => {
+    const overview = baseOverview();
+    const alerts = computeConsolidatedAlerts(overview);
+    expect(alerts.some((a) => a.module === "Estoque")).toBe(false);
+  });
+});

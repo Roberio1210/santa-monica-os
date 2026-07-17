@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Unavailable } from "@/components/shared/unavailable";
 import { formatDateBR } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
-import { MANUAL_MOVEMENT_TYPES } from "@/lib/inventory/manual-movement";
+import { MANUAL_MOVEMENT_TYPES } from "@/lib/inventory/manual-movement-types";
 import { recordManualMovementAction, type FormActionState } from "@/app/estoque/actions";
 import type { InventoryItemView, MovementType } from "@/lib/inventory/types";
 import type { MovementView } from "@/lib/inventory/movements-view";

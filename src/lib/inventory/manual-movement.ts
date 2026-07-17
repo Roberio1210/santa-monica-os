@@ -1,18 +1,9 @@
 import "server-only";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import { MANUAL_MOVEMENT_TYPES } from "@/lib/inventory/manual-movement-types";
 import type { InventoryUnit, MovementType, StockMovement } from "@/lib/inventory/types";
 
-/** Únicos tipos que um formulário manual pode registrar — os demais só nascem de fluxos automáticos (seed, contagem, calibração). */
-export const MANUAL_MOVEMENT_TYPES: MovementType[] = [
-  "ajuste_positivo",
-  "ajuste_negativo",
-  "perda",
-  "avaria",
-  "vencimento",
-  "devolucao",
-  "transferencia",
-  "correcao_inventario",
-];
+export { MANUAL_MOVEMENT_TYPES };
 
 export interface ManualMovementInput {
   itemId: string;
