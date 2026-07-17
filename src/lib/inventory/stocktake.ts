@@ -2,6 +2,12 @@ import "server-only";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import type { StockMovement } from "@/lib/inventory/types";
 
+/** Referência única de uma sessão de contagem — gerada uma vez por carregamento da página (Server Component), nunca no cliente. */
+export function generateStocktakeReference(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `CONTAGEM-${today}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export interface StocktakeLineInput {
   itemId: string;
   /** Null quando o item foi marcado "não encontrado" ou "medição pendente" — nunca gera movimentação nesses casos. */
