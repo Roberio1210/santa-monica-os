@@ -78,6 +78,13 @@
       "when": 1784313880847,
       "tag": "0010_process_step_suggestion_external_id_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784332570248,
+      "tag": "0011_jumppark_consumption_integration",
+      "breakpoints": true
     }
   ]
 }

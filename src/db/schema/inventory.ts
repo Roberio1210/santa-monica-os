@@ -1,4 +1,4 @@
-import { boolean, date, integer, numeric, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 
 /**
@@ -248,6 +248,122 @@ export const processStepProductSuggestions = pgTable("process_step_product_sugge
   source: source(),
   /** Único (ex.: "pre_lavagem:apc-100") — permite seed idempotente (ON CONFLICT DO NOTHING). */
   externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * FASE D — integração preview_and_confirm entre JumpPark e estoque. Espelha
+ * src/lib/orders/types.ts.
+ */
+export const jumpparkServiceMappingStatusEnum = pgEnum("jumppark_service_mapping_status", ["mapeado", "nao_mapeado"]);
+
+/** Inclui "desconhecido" — o JumpPark não expõe categoria estruturada de veículo. */
+export const orderVehicleCategoryEnum = pgEnum("order_vehicle_category", ["hatch", "sedan", "suv", "caminhonete", "desconhecido"]);
+
+export const consumptionConfirmationStatusEnum = pgEnum("consumption_confirmation_status", ["confirmada", "parcial", "estornada"]);
+
+/**
+ * Mapeamento explícito texto do serviço JumpPark → serviço canônico (Fase D, seção 1). Nunca
+ * mapeado por aproximação — cada texto novo encontrado numa ordem real gera uma linha própria
+ * com status "nao_mapeado" até confirmação humana explícita.
+ */
+export const jumpparkServiceMappings = pgTable("jumppark_service_mappings", {
+  id: id(),
+  /** Texto exatamente como retornado pelo JumpPark — nunca alterado, preservado para auditoria. */
+  jumpparkServiceName: text("jumppark_service_name").notNull(),
+  canonicalServiceId: uuid("canonical_service_id").references(() => services.id),
+  status: jumpparkServiceMappingStatusEnum("status").notNull().default("nao_mapeado"),
+  lastValidatedAt: date("last_validated_at"),
+  active: active(),
+  source: source(),
+  /** Slug estável derivado do texto normalizado — idempotência do primeiro registro automático. */
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Categoria do veículo por placa (Fase D, seção 2) — o JumpPark não expõe um id estável de
+ * veículo, então a placa normalizada é a chave de identidade. Nunca confirmada automaticamente
+ * pelo texto do modelo; fica "desconhecido" até revisão manual explícita.
+ */
+export const vehicleCategoryAssignments = pgTable("vehicle_category_assignments", {
+  id: id(),
+  /** Placa normalizada (maiúscula, sem espaços) — única. */
+  plateNormalized: text("plate_normalized").notNull().unique(),
+  category: orderVehicleCategoryEnum("category").notNull().default("desconhecido"),
+  previousCategory: orderVehicleCategoryEnum("previous_category"),
+  responsibleName: text("responsible_name"),
+  changedAt: timestamp("changed_at", { withTimezone: true }),
+  reason: text("reason"),
+  active: active(),
+  source: source(),
+  externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Uma confirmação humana de consumo para uma ordem JumpPark (Fase D, seção 5/6). Nunca criada
+ * automaticamente — sempre exige responsável textual. `idempotencyKey` (ordem + versão) tem
+ * UNIQUE no banco: é a garantia real contra duplo clique/dupla aba/reexecução, não apenas uma
+ * checagem de aplicação.
+ */
+export const inventoryConsumptionConfirmations = pgTable("inventory_consumption_confirmations", {
+  id: id(),
+  jumpparkOrderExternalId: text("jumppark_order_external_id").notNull(),
+  /** Incrementa a cada nova confirmação da MESMA ordem após um estorno — nunca reaproveita a mesma versão. */
+  version: integer("version").notNull().default(1),
+  vehicleCategory: orderVehicleCategoryEnum("vehicle_category").notNull(),
+  status: consumptionConfirmationStatusEnum("status").notNull(),
+  responsibleName: text("responsible_name").notNull(),
+  justification: text("justification"),
+  /** [{itemName, recipeId, reason}] — itens que estavam na prévia e foram removidos antes de confirmar; nunca geram movimentação nem linha. */
+  removedItemsLog: jsonb("removed_items_log"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
+  reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  reversedBy: text("reversed_by"),
+  reversalReason: text("reversal_reason"),
+  /** `${jumpparkOrderExternalId}:v${version}` — único no banco. */
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  active: active(),
+  source: source(),
+  externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Uma linha de produto dentro de uma confirmação — sempre vinculada à movimentação real do
+ * livro-razão que ela gerou (Fase A). `expectedQuantity` null quando o item foi adicionado extra
+ * (sem receita), nunca inventado.
+ */
+export const inventoryConsumptionLines = pgTable("inventory_consumption_lines", {
+  id: id(),
+  confirmationId: uuid("confirmation_id")
+    .notNull()
+    .references(() => inventoryConsumptionConfirmations.id),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id),
+  recipeId: uuid("recipe_id").references(() => serviceConsumptionRules.id),
+  processStep: processStepEnum("process_step"),
+  expectedQuantity: numeric("expected_quantity", { precision: 12, scale: 3 }),
+  confirmedQuantity: numeric("confirmed_quantity", { precision: 12, scale: 3 }).notNull(),
+  unit: inventoryUnitEnum("unit").notNull(),
+  previousBalance: numeric("previous_balance", { precision: 12, scale: 3 }).notNull(),
+  newBalance: numeric("new_balance", { precision: 12, scale: 3 }).notNull(),
+  movementId: uuid("movement_id")
+    .notNull()
+    .references(() => inventoryMovements.id),
+  /** Preenchido só quando a confirmação é estornada — aponta para o movimento inverso ("devolucao"). */
+  reversalMovementId: uuid("reversal_movement_id").references(() => inventoryMovements.id),
+  isExtra: boolean("is_extra").notNull().default(false),
+  lineJustification: text("line_justification"),
+  active: active(),
+  source: source(),
+  externalId: externalId(),
   notes: notes(),
   ...timestamps,
 });

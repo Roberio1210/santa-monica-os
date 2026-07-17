@@ -28,6 +28,8 @@ const SEED_SERVICES: SeedService[] = [
   { externalId: "revitalizacao-farois", name: "Revitalização de Faróis", category: "Faróis" },
   { externalId: "cristalizacao-vidros", name: "Cristalização de Vidros", category: "Vidros" },
   { externalId: "chuva-acida", name: "Remoção de Chuva Ácida", category: "Polimento" },
+  /** Fase D, seção 1 — alvo explícito de mapeamento para serviços JumpPark reais que não se encaixam em nenhum canônico específico. */
+  { externalId: "outro", name: "Outro", category: "Outros" },
 ];
 
 async function main() {
