@@ -14,6 +14,11 @@ import { isJumpParkConfigured } from "@/lib/config/env";
 import { addDaysIso, resolvePeriod, saoPauloDateISO, SAO_PAULO_TZ } from "@/lib/utils/timezone";
 import { fetchOperationalOrders, computeOperationalSummary, comparePeriods } from "@/lib/integrations/jumppark/operations-summary";
 import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
+import { normalize, parseComparisonExpression } from "@/lib/zezinho/date-parser";
+import { buildComparisonReport } from "@/lib/zezinho/comparison-engine";
+import { buildComparisonNarrative } from "@/lib/zezinho/response-builder";
+import { EMPTY_ZEZINHO_CONTEXT } from "@/lib/zezinho/types";
+import type { ZezinhoAnswer, ZezinhoContext, ZezinhoQuestion } from "@/lib/zezinho/types";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
 
@@ -22,15 +27,8 @@ import type { ConsumptionPreview } from "@/lib/orders/preview";
  * nenhuma API externa de IA. Somente leitura — nunca cria, altera, paga ou exclui nada.
  */
 
-export interface ZezinhoLink {
-  label: string;
-  href: string;
-}
-
-export interface ZezinhoAnswer {
-  text: string;
-  links: ZezinhoLink[];
-}
+export type { ZezinhoAnswer, ZezinhoLink, ZezinhoContext, ZezinhoQuestion } from "@/lib/zezinho/types";
+export { EMPTY_ZEZINHO_CONTEXT };
 
 function greeting(now: Date): string {
   const hour = Number(new Intl.DateTimeFormat("pt-BR", { timeZone: SAO_PAULO_TZ, hour: "2-digit", hour12: false }).format(now));
@@ -98,11 +96,6 @@ export async function generateDailySummary(): Promise<string> {
   return lines.join(" ");
 }
 
-export interface ZezinhoQuestion {
-  id: string;
-  label: string;
-}
-
 /**
  * Roteador simples e explícito para texto livre — casa palavras-chave com uma das intenções
  * pré-definidas. Nunca interpreta linguagem natural livremente; quando nada combina, cai no
@@ -120,7 +113,7 @@ const KEYWORD_INTENTS: { keywords: string[]; questionId: string }[] = [
   { keywords: ["estacionamento"], questionId: "estacionamento_mes" },
   { keywords: ["classifica"], questionId: "sem_classificacao" },
   { keywords: ["resultado", "dre", "lucro"], questionId: "resultado_mes" },
-  { keywords: ["alerta"], questionId: "alertas_importantes" },
+  { keywords: ["alerta", "precisando da minha atenção", "precisando de atenção", "o que está precisando", "alguma coisa preocupante", "algo preocupante"], questionId: "alertas_importantes" },
   { keywords: ["medição pendente", "medicao pendente"], questionId: "estoque_medicao_pendente" },
   { keywords: ["receita", "amostra"], questionId: "estoque_receitas_sem_amostras" },
   { keywords: ["aprovada", "aprovar receita"], questionId: "estoque_receitas_aprovaveis" },
@@ -794,4 +787,120 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
     default:
       return UNKNOWN_ANSWER;
   }
+}
+
+/**
+ * Camada A/E do Zézinho 2.0: interpreta saudação, comparação de períodos e perguntas de
+ * acompanhamento em texto livre. Quando nada disso se aplica, cai no roteador determinístico
+ * existente (matchIntent + answerQuestion) — o fallback seguro exigido pela sprint. Este é o
+ * modo "analítico local": funciona inteiramente sem nenhum provedor de IA configurado.
+ */
+
+const GREETING_PATTERN = /^\s*(bom\s*dia|boa\s*tarde|boa\s*noite|oi|ol[áa]|e\s*a[íi])\b[\s,!.]*(z[eé]zinho)?[\s,!.]*/iu;
+
+function extractGreeting(freeText: string): { hasGreeting: boolean; rest: string } {
+  const match = freeText.match(GREETING_PATTERN);
+  if (!match) return { hasGreeting: false, rest: freeText.trim() };
+  return { hasGreeting: true, rest: freeText.slice(match[0].length).trim() };
+}
+
+function detectKindFilter(text: string): "lavacao" | "estacionamento" | null {
+  const normalized = normalize(text);
+  if (normalized.includes("lavacao") || normalized.includes("lavagem")) return "lavacao";
+  if (normalized.includes("estacionamento")) return "estacionamento";
+  return null;
+}
+
+function isWhyFollowUp(text: string): boolean {
+  const n = normalize(text);
+  return n.includes("por que") || n.includes("por qu") || n.includes("o que explica") || n.includes("o que causou") || n.includes("o que aconteceu") || n.includes("qual foi o principal") || n.includes("quais servicos explicam") || n.includes("qual servico");
+}
+
+function isAreaComparisonFollowUp(text: string): boolean {
+  const n = normalize(text);
+  return n.includes("qual area") || n.includes("area esta performando") || n.includes("area performando") || n.includes("area foi melhor");
+}
+
+function isRevenueVsCashFollowUp(text: string): boolean {
+  const n = normalize(text);
+  return n.includes("faturamento") && (n.includes("entrada de caixa") || n.includes("entrada real") || (n.includes("caixa") && n.includes("operacional")));
+}
+
+/** Único ponto de entrada da conversa em texto livre — usado pelo Server Action do Zézinho. */
+export async function answerFreeText(freeText: string, context: ZezinhoContext = EMPTY_ZEZINHO_CONTEXT): Promise<{ answer: ZezinhoAnswer; nextContext: ZezinhoContext }> {
+  const trimmed = freeText.trim();
+  if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: context };
+
+  const { hasGreeting, rest } = extractGreeting(trimmed);
+  const greetingText = hasGreeting ? `${greeting(new Date())}, Robério` : null;
+
+  // Saudação pura ("Bom dia.") -> resumo do dia, nunca trava esperando mais contexto.
+  if (hasGreeting && rest.length === 0) {
+    const summary = await generateDailySummary();
+    return { answer: { text: summary, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: context };
+  }
+
+  const text = rest || trimmed;
+  const kindFromText = detectKindFilter(text);
+  const newComparison = parseComparisonExpression(text);
+
+  // Nova comparação de períodos detectada (inclui a pergunta obrigatória da sprint).
+  if (newComparison) {
+    const report = await buildComparisonReport(newComparison.periodA, newComparison.periodB, { kind: kindFromText ?? undefined });
+    const answer = buildComparisonNarrative(report, { greeting: greetingText, dayMatchedNote: newComparison.dayMatched ? newComparison.note : null });
+    return {
+      answer,
+      nextContext: { lastPeriodA: newComparison.periodA, lastPeriodB: newComparison.periodB, lastKindFilter: kindFromText, lastTopic: "comparacao" },
+    };
+  }
+
+  // Acompanhamento: "E só a lavação?" — reaproveita os períodos da última comparação, muda o filtro.
+  if (kindFromText && context.lastPeriodA) {
+    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: kindFromText });
+    const answer = buildComparisonNarrative(report, { greeting: greetingText });
+    return { answer, nextContext: { ...context, lastKindFilter: kindFromText } };
+  }
+
+  // Acompanhamento: "Por que mudou?" / "Qual foi o principal serviço responsável?"
+  if (isWhyFollowUp(text) && context.lastPeriodA) {
+    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: context.lastKindFilter ?? undefined });
+    const answer = buildComparisonNarrative(report, { greeting: greetingText });
+    const top = report.topServicesA.slice(0, 3);
+    const topText = top.length > 0 ? ` Os serviços que mais faturaram no período foram: ${top.map((s) => `${s.description} (${formatCurrency(s.amount)})`).join(", ")}.` : "";
+    return { answer: { ...answer, text: answer.text + topText }, nextContext: context };
+  }
+
+  // Acompanhamento: "Qual área está performando melhor?"
+  if (isAreaComparisonFollowUp(text) && context.lastPeriodA) {
+    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, {});
+    const answer = buildComparisonNarrative(report, { greeting: greetingText });
+    const wash = report.metrics.find((m) => m.key === "washRevenue");
+    const parking = report.metrics.find((m) => m.key === "parkingRevenue");
+    let prefix = "";
+    if (wash && parking && wash.comparison.deltaPercent !== null && parking.comparison.deltaPercent !== null) {
+      const better = wash.comparison.deltaPercent >= parking.comparison.deltaPercent ? "lavação" : "estacionamento";
+      prefix = `A área que mais performou foi a ${better}. `;
+    }
+    return { answer: { ...answer, text: prefix + answer.text }, nextContext: context };
+  }
+
+  // Acompanhamento: "Compare faturamento operacional e entrada de caixa." — nunca mistura os dois sem explicar.
+  if (isRevenueVsCashFollowUp(text)) {
+    const period = context.lastPeriodA ?? resolvePeriod("month");
+    const report = await buildComparisonReport(period, context.lastPeriodA ? context.lastPeriodB : null, {});
+    if (!report.jumpparkConfigured) return { answer: { text: "O JumpPark não está configurado neste ambiente.", links: [] }, nextContext: context };
+    const revenue = report.metrics.find((m) => m.key === "revenue");
+    const cash = report.metrics.find((m) => m.key === "cashEntradas");
+    const prefix = greetingText ? `${greetingText}! ` : "";
+    const text2 =
+      `${prefix}No período de ${formatDateBR(period.from)} a ${formatDateBR(period.to)}, o faturamento operacional (JumpPark) foi ${formatCurrency(revenue?.a ?? 0)} e as entradas reais de caixa (Neon) foram ${formatCurrency(cash?.a ?? 0)}. ` +
+      `Esses números são diferentes de propósito: faturamento operacional é o valor das ordens de serviço fechadas, enquanto entrada de caixa é o dinheiro que efetivamente entrou nas contas — nem toda ordem vira entrada no mesmo dia, e o caixa pode ter entradas que não vêm da operação.`;
+    return { answer: { text: text2, links: [{ label: "Ver Movimentações", href: `/movimentacoes?period=custom&from=${period.from}&to=${period.to}` }, { label: "Ver Fluxo de Caixa", href: "/financeiro/fluxo-de-caixa" }], sources: buildComparisonNarrative(report).sources }, nextContext: context };
+  }
+
+  // Fallback determinístico existente — nunca deixa a pergunta sem resposta.
+  const questionId = matchIntent(text);
+  const answer = await answerQuestion(questionId);
+  const finalAnswer = greetingText ? { ...answer, text: `${greetingText}! ${answer.text}` } : answer;
+  return { answer: finalAnswer, nextContext: context };
 }
