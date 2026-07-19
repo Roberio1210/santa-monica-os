@@ -1,11 +1,13 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { isJumpParkConfigured } from "@/lib/config/env";
-import { fetchDailyFinancial } from "@/lib/integrations/jumppark";
+import { JumpParkConnectionTest } from "@/components/configuracoes/jumppark-connection-test";
+import { getInventoryConsumptionMode } from "@/lib/config/env";
+import { fetchJumpParkDiagnostics } from "@/lib/integrations/jumppark/diagnostics";
 import { isDatabaseConfigured } from "@/db/client";
 import { getStorageMode } from "@/lib/storage/mode";
 import { getAuthStatus } from "@/lib/auth/status";
+import { SAO_PAULO_TZ } from "@/lib/utils/timezone";
 import packageJson from "../../../../package.json";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
@@ -26,17 +28,6 @@ const plannedIntegrations: IntegrationMeta[] = [
   camerasIntegration,
 ];
 
-async function getJumpParkStatus(): Promise<{ configured: boolean; reachable: boolean | null }> {
-  if (!isJumpParkConfigured()) return { configured: false, reachable: null };
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    await fetchDailyFinancial(today);
-    return { configured: true, reachable: true };
-  } catch {
-    return { configured: true, reachable: false };
-  }
-}
-
 function StatusRow({ label, ok, okLabel, notOkLabel, neutralLabel }: {
   label: string;
   ok: boolean | null;
@@ -55,14 +46,15 @@ function StatusRow({ label, ok, okLabel, notOkLabel, neutralLabel }: {
 }
 
 export default async function StatusPage() {
-  const jumpPark = await getJumpParkStatus();
+  const jumpPark = await fetchJumpParkDiagnostics();
   const databaseConfigured = isDatabaseConfigured();
   const storageMode = getStorageMode();
   const auth = getAuthStatus();
+  const consumptionMode = getInventoryConsumptionMode();
 
   const commitSha = process.env.VERCEL_GIT_COMMIT_SHA;
   const shortCommit = commitSha ? commitSha.slice(0, 7) : null;
-  const environment = process.env.VERCEL_ENV ?? null;
+  const environment = process.env.VERCEL_ENV ?? "development";
 
   return (
     <div className="space-y-6">
@@ -85,7 +77,7 @@ export default async function StatusPage() {
               neutralLabel="Não configurado"
             />
             <StatusRow
-              label="Banco de dados"
+              label="Banco de dados (Neon)"
               ok={databaseConfigured}
               okLabel="Configurado"
               notOkLabel="Não configurado"
@@ -96,6 +88,14 @@ export default async function StatusPage() {
               okLabel="Persistente (banco)"
               notOkLabel="Temporário (memória)"
             />
+            <div className="flex items-center justify-between border-b border-border-subtle py-2">
+              <p className="text-sm text-foreground-muted">Modo de consumo de estoque</p>
+              <Badge variant={consumptionMode === "preview_and_confirm" ? "positive" : "outline"}>{consumptionMode}</Badge>
+            </div>
+            <div className="flex items-center justify-between py-2 last:border-0">
+              <p className="text-sm text-foreground-muted">Fuso horário operacional</p>
+              <Badge variant="outline">{SAO_PAULO_TZ}</Badge>
+            </div>
           </CardContent>
         </Card>
 
@@ -133,6 +133,15 @@ export default async function StatusPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Diagnóstico da integração JumpPark</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <JumpParkConnectionTest initial={jumpPark} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -8,6 +8,7 @@ import type {
 import type { PaymentBreakdown } from "@/types/finance";
 import type { PaymentMethod } from "@/types/common";
 import { maskPlate, maskPhone } from "@/lib/utils/mask";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 function classifyPaymentMethod(name: string): PaymentMethod {
   const normalized = name.toLowerCase();
@@ -95,12 +96,6 @@ export async function fetchServiceOrders(
   return response.data?.content ?? [];
 }
 
-function isoDate(offsetDays: number, from: Date = new Date()): string {
-  const d = new Date(from);
-  d.setDate(d.getDate() - offsetDays);
-  return d.toISOString().slice(0, 10);
-}
-
 export interface JumpParkOverviewMetrics {
   dailyRevenue: number;
   monthlyRevenue: number;
@@ -116,7 +111,7 @@ export interface JumpParkOverviewMetrics {
  * veículos presentes. O princípio do projeto é nunca inventar dados ausentes.
  */
 export async function fetchOverviewMetrics(): Promise<JumpParkOverviewMetrics> {
-  const today = isoDate(0);
+  const today = saoPauloDateISO();
   const firstDayOfMonth = `${today.slice(0, 7)}-01`;
 
   const [dailyReport, monthlyReport] = await Promise.all([

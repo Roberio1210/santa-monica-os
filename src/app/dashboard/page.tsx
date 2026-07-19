@@ -15,16 +15,13 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { computeConsolidatedAlerts, computeSituation, fetchCentralOverview } from "@/lib/operations/central";
 import { getStorageMode } from "@/lib/storage/mode";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 // Consulta dados reais a cada acesso — a Central nunca deve servir HTML estático desatualizado.
 export const dynamic = "force-dynamic";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export default async function DashboardPage() {
-  const asOfDate = todayIso();
+  const asOfDate = saoPauloDateISO();
   const overview = await fetchCentralOverview(asOfDate);
   const storageMode = getStorageMode();
   const alerts = computeConsolidatedAlerts(overview);

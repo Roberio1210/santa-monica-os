@@ -5,13 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { OperationsView } from "@/components/operations/operations-view";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchTodayOperations, type OperationOrder } from "@/lib/integrations/jumppark";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 import { Wifi } from "lucide-react";
 
 // Consulta dados reais do JumpPark a cada acesso — nunca serve HTML estático desatualizado.
 export const dynamic = "force-dynamic";
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return saoPauloDateISO();
 }
 
 function isValidDate(value: string): boolean {

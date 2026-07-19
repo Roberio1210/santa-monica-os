@@ -11,6 +11,7 @@ import { listServiceMappings } from "@/lib/orders/service-mapping";
 import { getVehicleCategory } from "@/lib/orders/vehicle-category";
 import { listConsumptionConfirmations } from "@/lib/orders/consumption-history";
 import { isJumpParkConfigured } from "@/lib/config/env";
+import { addDaysIso, saoPauloDateISO, SAO_PAULO_TZ } from "@/lib/utils/timezone";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
 
@@ -30,20 +31,14 @@ export interface ZezinhoAnswer {
 }
 
 function greeting(now: Date): string {
-  const hour = now.getHours();
+  const hour = Number(new Intl.DateTimeFormat("pt-BR", { timeZone: SAO_PAULO_TZ, hour: "2-digit", hour12: false }).format(now));
   if (hour < 12) return "Bom dia";
   if (hour < 18) return "Boa tarde";
   return "Boa noite";
 }
 
-function addDaysIso(dateIso: string, days: number): string {
-  const date = new Date(`${dateIso}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return saoPauloDateISO();
 }
 
 /**
@@ -191,18 +186,17 @@ export const ZEZINHO_QUESTIONS: ZezinhoQuestion[] = [
 ];
 
 function currentMonthRange(): { from: string; to: string; label: string } {
-  const now = new Date();
-  const from = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
-  const to = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).toISOString().slice(0, 10);
+  const today = saoPauloDateISO();
+  const from = `${today.slice(0, 7)}-01`;
+  const [year, month] = today.slice(0, 7).split("-").map(Number);
+  const to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
   return { from, to, label: from.slice(0, 7) };
 }
 
 const UNKNOWN_ANSWER: ZezinhoAnswer = { text: "Ainda não tenho dados suficientes para responder isso.", links: [] };
 
 function daysAgoIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return addDaysIso(saoPauloDateISO(), -days);
 }
 
 /**
