@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildComparisonNarrative } from "@/lib/zezinho/response-builder";
+import { buildComparisonNarrative, buildRecommendationNarrative, metricSentence } from "@/lib/zezinho/response-builder";
 import type { ComparisonMetric, ComparisonReport } from "@/lib/zezinho/comparison-engine";
 import { comparePeriods } from "@/lib/integrations/jumppark/operations-summary";
 import { formatCurrency } from "@/lib/utils/format";
@@ -101,5 +101,87 @@ describe("buildComparisonNarrative", () => {
     const answer = buildComparisonNarrative(report);
     expect(answer.text.length).toBeGreaterThan(0);
     expect(answer.sources!.some((s) => s.includes("⚠"))).toBe(true);
+  });
+});
+
+describe("metricSentence — direção previousValue -> currentValue (bug fix)", () => {
+  it("'cresceu ... de previousValue para currentValue' quando o valor subiu", () => {
+    const m = metric("washCount", "Lavações", "count", 41, 22); // a=41 (atual), b=22 (anterior)
+    const sentence = metricSentence(m);
+    expect(sentence).toContain("cresceu");
+    expect(sentence).toContain("de 22 para 41");
+    expect(sentence).not.toContain("de 41 para 22");
+  });
+
+  it("'caiu ... de previousValue para currentValue' quando o valor desceu", () => {
+    const m = metric("cashEntradas", "Entradas de caixa", "currency", 0, 901); // a=0 (atual), b=901 (anterior)
+    const sentence = metricSentence(m);
+    expect(sentence).toContain("caiu");
+    expect(sentence).toContain(`de ${formatCurrency(901)} para ${formatCurrency(0)}`);
+  });
+
+  it("não gera percentual infinito quando o período anterior é zero — usa 'passou de'", () => {
+    const m = metric("revenue", "Faturamento", "currency", 500, 0); // a=500 (atual), b=0 (anterior)
+    const sentence = metricSentence(m);
+    expect(sentence).not.toMatch(/infinity/i);
+    expect(sentence).not.toContain("%");
+    expect(sentence).toContain("passou de");
+    expect(sentence).toContain(`de ${formatCurrency(0)} para ${formatCurrency(500)}`);
+    expect(sentence.toLowerCase()).toContain("sem base percentual");
+  });
+
+  it("indica estabilidade quando o valor não mudou", () => {
+    const m = metric("orders", "Ordens", "count", 30, 30);
+    expect(metricSentence(m)).toContain("permaneceu estável");
+  });
+});
+
+describe("buildRecommendationNarrative — bug fix: recomendação conversacional, não repete a comparação", () => {
+  it("gera recomendações fundamentadas nos dados (ticket médio em queda) sem repetir a narrativa de comparação", () => {
+    const report = baseReport({
+      metrics: [
+        metric("revenue", "Faturamento operacional", "currency", 12000, 10000),
+        metric("avgTicket", "Ticket médio", "currency", 90, 110),
+        metric("washCount", "Lavações", "count", 130, 100),
+      ],
+      packageCountsA: { Bronze: 40, Silver: 10, Gold: 5 },
+    });
+    const answer = buildRecommendationNarrative(report, { greeting: "Bom dia, Robério" });
+    expect(answer.text).toContain("Bom dia, Robério!");
+    expect(answer.text).toMatch(/priorizaria/i);
+    expect(answer.text).toContain(formatCurrency(90));
+    expect(answer.text).toContain(formatCurrency(110));
+    // Não repete o formato da narrativa de comparação completa (seção "Números principais").
+    expect(answer.text).not.toContain("Números principais:");
+  });
+
+  it("prioriza no máximo 3 recomendações", () => {
+    const report = baseReport({
+      metrics: [
+        metric("revenue", "Faturamento operacional", "currency", 12000, 10000),
+        metric("avgTicket", "Ticket médio", "currency", 90, 110),
+        metric("washCount", "Lavações", "count", 130, 100),
+        metric("parkingRevenue", "Faturamento de estacionamento", "currency", 4000, 2000),
+        metric("washRevenue", "Faturamento de lavação", "currency", 8000, 7800),
+        metric("cashResultado", "Resultado de caixa", "currency", 1000, 3000),
+      ],
+      packageCountsA: { Bronze: 40, Silver: 10, Gold: 5 },
+      peakHourA: { hour: "10h", count: 40 },
+    });
+    const answer = buildRecommendationNarrative(report);
+    const numbered = answer.text.match(/^\d+\./gm) ?? [];
+    expect(numbered.length).toBeLessThanOrEqual(3);
+  });
+
+  it("honesto quando não há comparação anterior — nunca inventa recomendação", () => {
+    const report = baseReport({ periodB: null, metrics: [metric("revenue", "Faturamento", "currency", 5000, null)] });
+    const answer = buildRecommendationNarrative(report);
+    expect(answer.text).toMatch(/não tenho uma comparação/i);
+  });
+
+  it("honesto quando o JumpPark não está configurado", () => {
+    const report = baseReport({ jumpparkConfigured: false, metrics: [], errors: ["JumpPark não configurado neste ambiente."] });
+    const answer = buildRecommendationNarrative(report, { greeting: "Bom dia" });
+    expect(answer.text).toContain("não está configurado");
   });
 });

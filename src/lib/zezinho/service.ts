@@ -16,7 +16,7 @@ import { fetchOperationalOrders, computeOperationalSummary, comparePeriods } fro
 import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
 import { normalize, parseComparisonExpression } from "@/lib/zezinho/date-parser";
 import { buildComparisonReport } from "@/lib/zezinho/comparison-engine";
-import { buildComparisonNarrative } from "@/lib/zezinho/response-builder";
+import { buildComparisonNarrative, buildRecommendationNarrative } from "@/lib/zezinho/response-builder";
 import { EMPTY_ZEZINHO_CONTEXT } from "@/lib/zezinho/types";
 import type { ZezinhoAnswer, ZezinhoContext, ZezinhoQuestion } from "@/lib/zezinho/types";
 import type { EligibleOrder } from "@/lib/orders/types";
@@ -826,6 +826,42 @@ function isRevenueVsCashFollowUp(text: string): boolean {
   return n.includes("faturamento") && (n.includes("entrada de caixa") || n.includes("entrada real") || (n.includes("caixa") && n.includes("operacional")));
 }
 
+/**
+ * Reconhece pedidos de recomendação/plano de ação (ex.: "o que devemos fazer?", "como podemos
+ * melhorar?", "que faria para manter o crescimento?"). Checado ANTES de `parseComparisonExpression`
+ * na resposta (bug fix): uma frase como "o que fazer nessa próxima semana" menciona "semana" e,
+ * sem essa prioridade, era reinterpretada como um pedido de NOVA comparação (semana atual vs.
+ * passada) em vez de uma recomendação — repetindo a resposta anterior. A intenção da mensagem
+ * atual sempre vence sobre uma releitura literal de palavras que também aparecem no contexto.
+ */
+const RECOMMENDATION_PATTERNS: RegExp[] = [
+  /\bque devemos fazer\b/,
+  /\bo que fazer\b/,
+  /\bvoce recomenda\b/,
+  /\bo que recomenda\b/,
+  /\bsua sugestao\b/,
+  /\bsua opiniao\b/,
+  /\bcomo podemos melhorar\b/,
+  /\bcomo melhorar\b/,
+  /\bcomo elevar\b/,
+  /\belevar\w*\s+(esses|os|nossos)?\s*numeros\b/,
+  /\baumentar\w*\s+(esses|os|nossos)?\s*numeros\b/,
+  /\baumentar\w*\s+(o\s+)?ticket\s*medio\b/,
+  /\bqual\s+(deve ser\s+)?(o\s+)?(nosso\s+)?plano\b/,
+  /\bonde devemos agir\b/,
+  /\bcomo gerente\b/,
+  /\bo que faria\b/,
+  /\bmanter\s+(o|esse|esta)?\s*crescimento\b/,
+  /\bplano de acao\b/,
+  /\bde um plano\b/,
+  /\bplano para\b/,
+];
+
+function isRecommendationFollowUp(text: string): boolean {
+  const n = normalize(text);
+  return RECOMMENDATION_PATTERNS.some((p) => p.test(n));
+}
+
 /** Único ponto de entrada da conversa em texto livre — usado pelo Server Action do Zézinho. */
 export async function answerFreeText(freeText: string, context: ZezinhoContext = EMPTY_ZEZINHO_CONTEXT): Promise<{ answer: ZezinhoAnswer; nextContext: ZezinhoContext }> {
   const trimmed = freeText.trim();
@@ -841,6 +877,26 @@ export async function answerFreeText(freeText: string, context: ZezinhoContext =
   }
 
   const text = rest || trimmed;
+
+  // Pedido de recomendação/plano de ação — checado antes de tudo, com prioridade sobre o
+  // contexto herdado (bug fix): a intenção da mensagem atual nunca é substituída por uma releitura
+  // literal de palavras (ex.: "semana") que também aparecem na comparação anterior.
+  if (isRecommendationFollowUp(text)) {
+    if (!context.lastPeriodA) {
+      const prefix = greetingText ? `${greetingText}! ` : "";
+      return {
+        answer: {
+          text: `${prefix}Ainda não tenho uma comparação de períodos para basear uma recomendação. Peça algo como "Compare esta semana com a passada" primeiro e eu já sugiro os próximos passos.`,
+          links: [],
+        },
+        nextContext: context,
+      };
+    }
+    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: context.lastKindFilter ?? undefined });
+    const answer = buildRecommendationNarrative(report, { greeting: greetingText });
+    return { answer, nextContext: { ...context, lastTopic: "recomendacao" } };
+  }
+
   const kindFromText = detectKindFilter(text);
   const newComparison = parseComparisonExpression(text);
 

@@ -147,7 +147,7 @@ export function ZezinhoConversation() {
                   <p className="font-medium">{m.text}</p>
                 ) : (
                   <div className="space-y-2">
-                    <p className={cn(m.isError ? "text-critical" : "text-foreground")}>{m.text}</p>
+                    <p className={cn("whitespace-pre-wrap", m.isError ? "text-critical" : "text-foreground")}>{m.text}</p>
                     {m.links && m.links.length > 0 ? (
                       <div className="flex flex-wrap gap-3 pt-1">
                         {m.links.map((link) => (

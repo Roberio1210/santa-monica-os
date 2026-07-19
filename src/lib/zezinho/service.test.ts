@@ -108,3 +108,70 @@ describe("answerFreeText — pergunta obrigatória da sprint e modo local (sem p
     expect(followUp.nextContext.lastKindFilter).toBe("lavacao");
   });
 });
+
+describe("answerFreeText — bug fix: follow-up de recomendação não repete a comparação anterior", () => {
+  it("'O que acha que devemos fazer nessa próxima semana...' não repete a resposta da comparação anterior", async () => {
+    const first = await answerFreeText("Bom dia, Zezinho, tudo bem? Como foi essa nossa semana?");
+    expect(first.nextContext.lastPeriodA).not.toBeNull();
+    expect(first.nextContext.lastPeriodB).not.toBeNull();
+    expect(first.answer.text).toMatch(/analisar a operação/i);
+
+    const second = await answerFreeText("O que acha que devemos fazer nessa próxima semana para elevarmos esses números?", first.nextContext);
+
+    // A resposta muda — não é mais o texto de comparação, e sim o de recomendação.
+    expect(second.answer.text).not.toBe(first.answer.text);
+    expect(second.answer.text).toMatch(/recomendação/i);
+    // O contexto (períodos da comparação anterior) é preservado, não descartado nem recriado.
+    expect(second.nextContext.lastPeriodA).toEqual(first.nextContext.lastPeriodA);
+    expect(second.nextContext.lastPeriodB).toEqual(first.nextContext.lastPeriodB);
+  });
+
+  it("'O que você recomenda com base nisso?' é reconhecida como pedido de recomendação", async () => {
+    const first = await answerFreeText("Compare esta semana com a semana passada.");
+    const second = await answerFreeText("O que você recomenda com base nisso?", first.nextContext);
+    expect(second.answer.text).toMatch(/recomendação/i);
+    expect(second.nextContext.lastPeriodA).toEqual(first.nextContext.lastPeriodA);
+  });
+
+  it("'Como podemos aumentar o ticket médio?' é recomendação, não uma nova comparação", async () => {
+    const first = await answerFreeText("Compare julho com junho.");
+    const second = await answerFreeText("Como podemos aumentar o ticket médio?", first.nextContext);
+    expect(second.answer.text).toMatch(/recomendação/i);
+    expect(second.nextContext.lastPeriodA).toEqual(first.nextContext.lastPeriodA);
+    expect(second.nextContext.lastPeriodB).toEqual(first.nextContext.lastPeriodB);
+  });
+
+  it("'E o que faria para manter o crescimento?' é reconhecida como pedido de recomendação", async () => {
+    const first = await answerFreeText("Compare este mês com o mês passado.");
+    const second = await answerFreeText("E o que faria para manter o crescimento?", first.nextContext);
+    expect(second.answer.text).toMatch(/recomendação/i);
+    expect(second.nextContext.lastPeriodA).toEqual(first.nextContext.lastPeriodA);
+  });
+
+  it("'Por que isso aconteceu?' continua sendo tratada como explicação, não como recomendação", async () => {
+    const first = await answerFreeText("Compare julho com junho.");
+    const second = await answerFreeText("Por que isso aconteceu?", first.nextContext);
+    expect(second.answer.text).not.toMatch(/recomendação/i);
+  });
+
+  it("'E só a lavação?' continua sendo tratada como filtro, não como recomendação", async () => {
+    const first = await answerFreeText("Compare julho com junho.");
+    const second = await answerFreeText("E só a lavação?", first.nextContext);
+    expect(second.nextContext.lastKindFilter).toBe("lavacao");
+    expect(second.answer.text).not.toMatch(/recomendação/i);
+  });
+
+  it("'Agora me dê um plano para a próxima semana.' vira recomendação mesmo mencionando 'semana' — não recria a comparação", async () => {
+    const first = await answerFreeText("Compare esta semana com a semana passada.");
+    const second = await answerFreeText("Agora me dê um plano para a próxima semana.", first.nextContext);
+    expect(second.answer.text).toMatch(/recomendação/i);
+    // Os períodos continuam os mesmos da comparação original — não foram recriados como "semana atual vs. passada" de novo.
+    expect(second.nextContext.lastPeriodA).toEqual(first.nextContext.lastPeriodA);
+    expect(second.nextContext.lastPeriodB).toEqual(first.nextContext.lastPeriodB);
+  });
+
+  it("pedido de recomendação sem nenhuma comparação anterior no contexto responde honestamente, sem inventar dados", async () => {
+    const { answer } = await answerFreeText("O que você recomenda?", EMPTY_ZEZINHO_CONTEXT);
+    expect(answer.text).toMatch(/não tenho uma comparação/i);
+  });
+});

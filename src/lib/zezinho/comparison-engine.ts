@@ -14,11 +14,21 @@ import type { CashLedgerEntry } from "@/lib/finance/types";
 
 export type MetricUnit = "currency" | "count";
 
+/**
+ * Contrato de uma métrica comparada: `a` é sempre o valor do período atual (periodA —
+ * "currentValue"), `b` é sempre o valor do período anterior (periodB — "previousValue", `null`
+ * quando não há comparação). `comparison` (de `comparePeriods`) segue a mesma convenção:
+ * `current`=a, `previous`=b. Toda narração deve ler "de b (anterior) para a (atual)", nunca o
+ * inverso — essa inversão foi a causa de um bug de frases como "de 41 para 22" quando o valor
+ * na verdade subiu de 22 para 41.
+ */
 export interface ComparisonMetric {
   key: string;
   label: string;
   unit: MetricUnit;
+  /** Valor do período atual (periodA) — "currentValue". */
   a: number;
+  /** Valor do período anterior (periodB) — "previousValue"; `null` quando não há periodB. */
   b: number | null;
   comparison: PeriodComparison;
   source: string;
