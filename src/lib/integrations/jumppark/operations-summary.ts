@@ -3,6 +3,7 @@ import { isJumpParkConfigured } from "@/lib/config/env";
 import { maskPlate, maskPhone } from "@/lib/utils/mask";
 import { fetchServiceOrders } from "./service";
 import { JumpParkNotConfiguredError, JumpParkRequestError } from "./client";
+import { resolvePeriod } from "@/lib/utils/timezone";
 import type { PaymentMethod } from "@/types/common";
 import type { JumpParkServiceOrder } from "./types";
 
@@ -220,4 +221,39 @@ export function comparePeriods(current: number, previous: number | null): Period
   const deltaPercent = round2(((current - previous) / previous) * 100);
   const trend: ComparisonTrend = deltaPercent > 0.5 ? "aumento" : deltaPercent < -0.5 ? "queda" : "estavel";
   return { current, previous, deltaPercent, trend };
+}
+
+export interface ReferencePeriodSummaries {
+  today: OperationalSummary;
+  yesterday: OperationalSummary;
+  week: OperationalSummary;
+  month: OperationalSummary;
+  jumpparkConfigured: boolean;
+  error: string | null;
+}
+
+/**
+ * Resumos de hoje/ontem/semana/mês, sempre nas mesmas janelas fixas — usados pelos cards de
+ * referência de /lavacao e /estacionamento, independente do período selecionado pelo usuário
+ * para a tabela filtrada abaixo.
+ */
+export async function fetchReferencePeriodSummaries(): Promise<ReferencePeriodSummaries> {
+  const periods = { today: resolvePeriod("today"), yesterday: resolvePeriod("yesterday"), week: resolvePeriod("week"), month: resolvePeriod("month") };
+  const [today, yesterday, week, month] = await Promise.all([
+    fetchOperationalOrders(periods.today.from, periods.today.to),
+    fetchOperationalOrders(periods.yesterday.from, periods.yesterday.to),
+    fetchOperationalOrders(periods.week.from, periods.week.to),
+    fetchOperationalOrders(periods.month.from, periods.month.to),
+  ]);
+
+  const firstError = [today, yesterday, week, month].find((r) => r.error)?.error ?? null;
+
+  return {
+    today: computeOperationalSummary(today.orders),
+    yesterday: computeOperationalSummary(yesterday.orders),
+    week: computeOperationalSummary(week.orders),
+    month: computeOperationalSummary(month.orders),
+    jumpparkConfigured: today.jumpparkConfigured,
+    error: firstError,
+  };
 }

@@ -1,87 +1,63 @@
 import { PageHeader } from "@/components/shared/page-header";
-import { DemoDataBadge } from "@/components/shared/demo-data-badge";
-import { StatCard } from "@/components/cards/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Unavailable } from "@/components/shared/unavailable";
 import { Badge } from "@/components/ui/badge";
-import { mockParkingEntries, mockParkingSummary } from "@/data/mock/parking";
-import { formatCurrency, formatPercent } from "@/lib/utils/format";
-import { Car, DollarSign, Gauge, LogIn, LogOut, Timer } from "lucide-react";
+import { PeriodSelector } from "@/components/operations/period-selector";
+import { ParkingView } from "@/components/operations/parking-view";
+import { fetchOperationalOrders, computeOperationalSummary, fetchReferencePeriodSummaries } from "@/lib/integrations/jumppark/operations-summary";
+import { parsePeriodParams } from "@/lib/utils/timezone";
+import { Wifi } from "lucide-react";
 
-const paymentLabels: Record<string, string> = {
-  dinheiro: "Dinheiro",
-  debito: "Débito",
-  credito: "Crédito",
-  pix: "Pix",
-  outro: "Outro",
-};
+export const dynamic = "force-dynamic";
 
-export default function EstacionamentoPage() {
+export default async function EstacionamentoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
+}) {
+  const params = await searchParams;
+  const period = parsePeriodParams(params);
+
+  const [result, reference] = await Promise.all([fetchOperationalOrders(period.from, period.to), fetchReferencePeriodSummaries()]);
+  const parkingOrders = result.orders.filter((o) => o.kind === "estacionamento");
+  const summary = computeOperationalSummary(parkingOrders);
+  const entriesInPeriod = parkingOrders.filter((o) => {
+    const entryDate = o.entryDateTime?.slice(0, 10);
+    return entryDate && entryDate >= period.from && entryDate <= period.to;
+  }).length;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Estacionamento"
-        description="Ocupação, movimentação e receita do estacionamento."
-        actions={<DemoDataBadge />}
+        description="Movimentação e receita real do estacionamento — dados do JumpPark, sem números inventados."
+        actions={
+          result.jumpparkConfigured && !result.error ? (
+            <Badge variant="positive">
+              <Wifi className="h-3 w-3" />
+              JumpPark
+            </Badge>
+          ) : undefined
+        }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Veículos presentes" value={String(mockParkingSummary.vehiclesPresent)} icon={Car} />
-        <StatCard label="Entradas hoje" value={String(mockParkingSummary.entriesToday)} icon={LogIn} />
-        <StatCard label="Saídas hoje" value={String(mockParkingSummary.exitsToday)} icon={LogOut} />
-        <StatCard label="Ocupação" value={formatPercent(mockParkingSummary.occupancyPercent)} icon={Gauge} />
-        <StatCard label="Receita" value={formatCurrency(mockParkingSummary.revenue)} icon={DollarSign} />
-        <StatCard label="Permanência média" value={`${mockParkingSummary.averageStayMinutes} min`} icon={Timer} />
-      </div>
+      <PeriodSelector period={period} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Movimentação</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
-                  <th className="pb-2 pr-3 font-medium">Placa</th>
-                  <th className="pb-2 pr-3 font-medium">Veículo</th>
-                  <th className="pb-2 pr-3 font-medium">Cliente</th>
-                  <th className="pb-2 pr-3 font-medium">Entrada</th>
-                  <th className="pb-2 pr-3 font-medium">Saída</th>
-                  <th className="pb-2 pr-3 font-medium">Permanência</th>
-                  <th className="pb-2 pr-3 font-medium">Valor</th>
-                  <th className="pb-2 pr-3 font-medium">Pagamento</th>
-                  <th className="pb-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mockParkingEntries.map((entry) => (
-                  <tr key={entry.id} className="border-b border-border-subtle last:border-0">
-                    <td className="py-2 pr-3 font-mono text-xs text-foreground-subtle">{entry.plateMasked}</td>
-                    <td className="py-2 pr-3 text-foreground-muted">{entry.vehicleModel}</td>
-                    <td className="py-2 pr-3 text-foreground-muted">{entry.customerName}</td>
-                    <td className="py-2 pr-3 text-foreground">{entry.entryTime}</td>
-                    <td className="py-2 pr-3 text-foreground">{entry.exitTime ?? "—"}</td>
-                    <td className="py-2 pr-3 text-foreground-muted">
-                      {entry.durationMinutes ? `${entry.durationMinutes} min` : "—"}
-                    </td>
-                    <td className="py-2 pr-3 font-medium text-foreground">
-                      {entry.amount > 0 ? formatCurrency(entry.amount) : "—"}
-                    </td>
-                    <td className="py-2 pr-3 text-foreground-muted">
-                      {entry.paymentMethod ? paymentLabels[entry.paymentMethod] : "—"}
-                    </td>
-                    <td className="py-2">
-                      <Badge variant={entry.status === "presente" ? "info" : "default"}>
-                        {entry.status === "presente" ? "Presente" : "Finalizado"}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+      {!result.jumpparkConfigured ? (
+        <Card>
+          <CardContent className="pt-4">
+            <Unavailable label="JumpPark não configurado neste ambiente — sem dados reais disponíveis nesta tela." />
+          </CardContent>
+        </Card>
+      ) : result.error ? (
+        <Card>
+          <CardContent className="pt-4">
+            <Unavailable label={result.error} />
+          </CardContent>
+        </Card>
+      ) : (
+        <ParkingView orders={parkingOrders} summary={summary} period={period} reference={reference} entriesInPeriod={entriesInPeriod} />
+      )}
     </div>
   );
 }
