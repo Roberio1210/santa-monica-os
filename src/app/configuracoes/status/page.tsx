@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { JumpParkConnectionTest } from "@/components/configuracoes/jumppark-connection-test";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
 import { fetchJumpParkDiagnostics } from "@/lib/integrations/jumppark/diagnostics";
+import { getAiProviderConfig } from "@/lib/zezinho/ai-provider";
 import { isDatabaseConfigured } from "@/db/client";
 import { getStorageMode } from "@/lib/storage/mode";
 import { getAuthStatus } from "@/lib/auth/status";
@@ -51,6 +52,7 @@ export default async function StatusPage() {
   const storageMode = getStorageMode();
   const auth = getAuthStatus();
   const consumptionMode = getInventoryConsumptionMode();
+  const ai = getAiProviderConfig();
 
   const commitSha = process.env.VERCEL_GIT_COMMIT_SHA;
   const shortCommit = commitSha ? commitSha.slice(0, 7) : null;
@@ -140,6 +142,22 @@ export default async function StatusPage() {
         </CardHeader>
         <CardContent className="pt-0">
           <JumpParkConnectionTest initial={jumpPark} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Zézinho IA</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <StatusRow label="Disponível" ok={true} okLabel="Sim" notOkLabel="Não" />
+          <StatusRow label="Modo" ok={ai.enabled} okLabel={`IA generativa (${ai.provider})`} notOkLabel="Analítico local" />
+          <StatusRow label="Provedor configurado" ok={ai.provider !== "disabled"} okLabel={ai.provider} notOkLabel="Nenhum" />
+          <div className="flex items-center justify-between py-2 last:border-0">
+            <p className="text-sm text-foreground-muted">Modelo</p>
+            <Badge variant="outline">{ai.model ?? "Não informado"}</Badge>
+          </div>
+          {!ai.enabled ? <p className="mt-2 text-xs text-foreground-subtle">IA generativa não configurada — usando modo analítico local.</p> : null}
         </CardContent>
       </Card>
 

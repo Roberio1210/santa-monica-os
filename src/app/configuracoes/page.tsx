@@ -1,6 +1,9 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { isJumpParkConfigured } from "@/lib/config/env";
 import { agentProfiles } from "@/data/mock/agents";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
@@ -32,6 +35,8 @@ const statusLabel: Record<IntegrationMeta["status"], string> = {
 };
 
 export default function ConfiguracoesPage() {
+  const jumpparkConfigured = isJumpParkConfigured();
+
   return (
     <div className="space-y-6">
       <PageHeader title="Configurações" description="Perfil da empresa, integrações, agentes e segurança." />
@@ -69,11 +74,14 @@ export default function ConfiguracoesPage() {
             <div className="rounded-lg border border-border-subtle p-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-foreground">JumpPark</p>
-                <Badge variant="outline">Consultar em /configuracoes → status via /api/jumppark/status</Badge>
+                <Badge variant={jumpparkConfigured ? "positive" : "outline"}>{jumpparkConfigured ? "Configurado" : "Não configurado"}</Badge>
               </div>
               <p className="mt-1 text-xs text-foreground-muted">
                 Estacionamento e ordens de serviço. Modo somente leitura.
               </p>
+              <Button asChild variant="outline" size="sm" className="mt-2">
+                <Link href="/configuracoes/status">Ver status da integração</Link>
+              </Button>
             </div>
             {integrations.map((integration) => (
               <div key={integration.id} className="rounded-lg border border-border-subtle p-3">
@@ -122,16 +130,11 @@ export default function ConfiguracoesPage() {
           <CardHeader>
             <CardTitle>Status do sistema</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1 pt-0 text-xs text-foreground-muted">
-            <p>Consulte <code className="text-foreground">/api/health</code> para verificação básica da aplicação.</p>
-            <p>Consulte <code className="text-foreground">/api/jumppark/status</code> para diagnóstico seguro da integração JumpPark.</p>
-            <p>
-              Veja{" "}
-              <a href="/configuracoes/status" className="text-foreground underline underline-offset-2">
-                /configuracoes/status
-              </a>{" "}
-              para um resumo administrativo de banco, autenticação e estoque.
-            </p>
+          <CardContent className="space-y-2 pt-0 text-xs text-foreground-muted">
+            <p>Resumo administrativo de JumpPark, Neon, autenticação, estoque e Zézinho.</p>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/configuracoes/status">Ver status da integração</Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
