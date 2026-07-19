@@ -5,6 +5,14 @@ import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { MIN_SAMPLES_FOR_PROVISIONAL } from "@/lib/recipes/types";
+import { fetchEligibleOrders } from "@/lib/orders/eligible-orders";
+import { fetchOrderPreview } from "@/lib/orders/preview-service";
+import { listServiceMappings } from "@/lib/orders/service-mapping";
+import { getVehicleCategory } from "@/lib/orders/vehicle-category";
+import { listConsumptionConfirmations } from "@/lib/orders/consumption-history";
+import { isJumpParkConfigured } from "@/lib/config/env";
+import type { EligibleOrder } from "@/lib/orders/types";
+import type { ConsumptionPreview } from "@/lib/orders/preview";
 
 /**
  * "Zézinho — Resumo Gerencial": funções determinísticas sobre dados reais do sistema, sem
@@ -126,6 +134,16 @@ const KEYWORD_INTENTS: { keywords: string[]; questionId: string }[] = [
   { keywords: ["estoque negativo", "saldo negativo"], questionId: "estoque_negativo" },
   { keywords: ["serviço sem receita", "servico sem receita"], questionId: "estoque_servicos_sem_receita" },
   { keywords: ["mapeamento"], questionId: "estoque_mapeamentos_pendentes" },
+  { keywords: ["não analisad", "nao analisad", "consumo analisado"], questionId: "ordens_sem_analise" },
+  { keywords: ["ordens bloqueada", "ordem bloqueada", "ordens estão bloqueada"], questionId: "ordens_bloqueadas" },
+  { keywords: ["serviço não está mapeado", "servico não mapeado", "serviços não mapeados", "servicos nao mapeados"], questionId: "ordens_servicos_nao_mapeados" },
+  { keywords: ["veículo sem categoria", "veiculos sem categoria", "veículos estão sem categoria"], questionId: "ordens_veiculos_sem_categoria" },
+  { keywords: ["usadas para calibração", "usar para calibração", "ordens para calibracao"], questionId: "ordens_para_calibracao" },
+  { keywords: ["prévias aguardam", "previas aguardam", "prévia aguardando confirmação"], questionId: "ordens_previas_aguardando_confirmacao" },
+  { keywords: ["consumo teve divergência", "consumos tiveram divergência", "consumos com divergencia"], questionId: "ordens_consumos_com_divergencia" },
+  { keywords: ["consumo duplicado", "duplicidade de consumo"], questionId: "ordens_consumo_duplicado" },
+  { keywords: ["consumos foram estornados", "consumo estornado"], questionId: "ordens_consumos_estornados" },
+  { keywords: ["produto foi confirmado hoje", "quanto produto foi confirmado"], questionId: "ordens_consumo_confirmado_hoje" },
 ];
 
 export function matchIntent(freeText: string): string {
@@ -160,6 +178,16 @@ export const ZEZINHO_QUESTIONS: ZezinhoQuestion[] = [
   { id: "estoque_negativo", label: "Existe estoque negativo?" },
   { id: "estoque_servicos_sem_receita", label: "Quais serviços ainda não têm receita?" },
   { id: "estoque_mapeamentos_pendentes", label: "Quais mapeamentos estão pendentes?" },
+  { id: "ordens_sem_analise", label: "Quais ordens ainda não tiveram o consumo analisado?" },
+  { id: "ordens_bloqueadas", label: "Quais ordens estão bloqueadas?" },
+  { id: "ordens_servicos_nao_mapeados", label: "Quais serviços do JumpPark não estão mapeados?" },
+  { id: "ordens_veiculos_sem_categoria", label: "Quais veículos estão sem categoria?" },
+  { id: "ordens_para_calibracao", label: "Quais ordens podem ser usadas para calibração?" },
+  { id: "ordens_previas_aguardando_confirmacao", label: "Quais prévias aguardam confirmação?" },
+  { id: "ordens_consumos_com_divergencia", label: "Quais consumos tiveram divergência?" },
+  { id: "ordens_consumo_duplicado", label: "Houve consumo duplicado?" },
+  { id: "ordens_consumos_estornados", label: "Quais consumos foram estornados?" },
+  { id: "ordens_consumo_confirmado_hoje", label: "Quanto produto foi confirmado hoje?" },
 ];
 
 function currentMonthRange(): { from: string; to: string; label: string } {
@@ -170,6 +198,25 @@ function currentMonthRange(): { from: string; to: string; label: string } {
 }
 
 const UNKNOWN_ANSWER: ZezinhoAnswer = { text: "Ainda não tenho dados suficientes para responder isso.", links: [] };
+
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Ordens elegíveis dos últimos 30 dias sem confirmação ativa, com a prévia de consumo já
+ * calculada — mesma janela usada em /estoque/ordens. Retorna null quando o JumpPark não está
+ * configurado, nunca inventa ordem.
+ */
+async function fetchOpenOrdersWithPreviews(): Promise<{ order: EligibleOrder; preview: ConsumptionPreview }[] | null> {
+  if (!isJumpParkConfigured()) return null;
+  const result = await fetchEligibleOrders(daysAgoIso(30), daysAgoIso(0));
+  if (!result.jumpparkConfigured) return null;
+  const open = result.orders.filter((o) => !o.activeConfirmationId);
+  return Promise.all(open.map(async (order) => ({ order, preview: await fetchOrderPreview(order) })));
+}
 
 /**
  * Roteador de intenções explícito — cada pergunta pré-definida mapeia para uma função
@@ -392,6 +439,137 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
       return {
         text: pending.length > 0 ? `${pending.length} mapeamento(s) ainda pendente(s) de confirmação.` : "Não há mapeamentos pendentes.",
         links: [{ label: "Ver mapeamentos", href: "/estoque/mapeamentos" }],
+      };
+    }
+
+    case "ordens_sem_analise": {
+      if (!isJumpParkConfigured()) return { text: "O JumpPark não está configurado neste ambiente — não há ordens para analisar.", links: [] };
+      const result = await fetchEligibleOrders(daysAgoIso(30), daysAgoIso(0));
+      if (!result.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente — não há ordens para analisar.", links: [] };
+      const open = result.orders.filter((o) => !o.activeConfirmationId);
+      const names = open.slice(0, 5).map((o) => `${o.externalId} (${o.vehicleModel})`);
+      return {
+        text: open.length > 0 ? `${open.length} ordem(ns) dos últimos 30 dias ainda sem consumo confirmado: ${names.join(", ")}${open.length > 5 ? "..." : ""}.` : "Não há ordens pendentes de análise nos últimos 30 dias.",
+        links: [{ label: "Ver ordens", href: "/estoque/ordens" }],
+      };
+    }
+
+    case "ordens_bloqueadas": {
+      const withPreviews = await fetchOpenOrdersWithPreviews();
+      if (withPreviews === null) return { text: "O JumpPark não está configurado neste ambiente — não há ordens para avaliar.", links: [] };
+      const blocked = withPreviews.filter(({ preview }) => preview.state === "bloqueada");
+      const names = blocked.slice(0, 5).map(({ order }) => order.externalId);
+      return {
+        text: blocked.length > 0 ? `${blocked.length} ordem(ns) bloqueada(s): ${names.join(", ")}${blocked.length > 5 ? "..." : ""}. Motivos variam entre categoria de veículo não confirmada, serviço não mapeado ou inconsistência de unidade.` : "Não há ordens bloqueadas no momento.",
+        links: [{ label: "Ver ordens", href: "/estoque/ordens" }],
+      };
+    }
+
+    case "ordens_servicos_nao_mapeados": {
+      const mappings = await listServiceMappings();
+      const unmapped = mappings.filter((m) => m.status === "nao_mapeado");
+      const names = unmapped.slice(0, 5).map((m) => m.jumpparkServiceName);
+      return {
+        text: unmapped.length > 0 ? `${unmapped.length} serviço(s) do JumpPark ainda sem mapeamento: ${names.join(", ")}${unmapped.length > 5 ? "..." : ""}.` : "Todos os serviços do JumpPark já vistos estão mapeados.",
+        links: [{ label: "Ver mapeamentos de serviço", href: "/estoque/mapeamentos" }],
+      };
+    }
+
+    case "ordens_veiculos_sem_categoria": {
+      const withPreviews = await fetchOpenOrdersWithPreviews();
+      if (withPreviews === null) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      const plates = new Set<string>();
+      for (const { order } of withPreviews) {
+        if (!order.plateNormalized) continue;
+        if ((await getVehicleCategory(order.plateNormalized)) === "desconhecido") plates.add(order.plateMasked);
+      }
+      const names = Array.from(plates).slice(0, 5);
+      return {
+        text: plates.size > 0 ? `${plates.size} veículo(s) com ordem pendente ainda sem categoria confirmada: ${names.join(", ")}${plates.size > 5 ? "..." : ""}.` : "Todos os veículos com ordem pendente já têm categoria confirmada.",
+        links: [{ label: "Ver ordens", href: "/estoque/ordens" }],
+      };
+    }
+
+    case "ordens_para_calibracao": {
+      const withPreviews = await fetchOpenOrdersWithPreviews();
+      if (withPreviews === null) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      const candidates = withPreviews.filter(({ preview }) => preview.servicesWithoutApprovedRecipe.length > 0);
+      const names = candidates.slice(0, 5).map(({ order }) => order.externalId);
+      return {
+        text:
+          candidates.length > 0
+            ? `${candidates.length} ordem(ns) têm serviço sem receita aprovada e podem ser usadas para calibração: ${names.join(", ")}${candidates.length > 5 ? "..." : ""}.`
+            : "Não há ordens pendentes com serviço sem receita aprovada no momento.",
+        links: [{ label: "Ver calibração", href: "/estoque/calibracao" }],
+      };
+    }
+
+    case "ordens_previas_aguardando_confirmacao": {
+      const withPreviews = await fetchOpenOrdersWithPreviews();
+      if (withPreviews === null) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      const awaiting = withPreviews.filter(({ preview }) => preview.state === "pronta" || preview.state === "parcial");
+      const names = awaiting.slice(0, 5).map(({ order }) => order.externalId);
+      return {
+        text: awaiting.length > 0 ? `${awaiting.length} prévia(s) prontas ou parciais aguardando confirmação humana: ${names.join(", ")}${awaiting.length > 5 ? "..." : ""}.` : "Não há prévias aguardando confirmação no momento.",
+        links: [{ label: "Ver ordens", href: "/estoque/ordens" }],
+      };
+    }
+
+    case "ordens_consumos_com_divergencia": {
+      const confirmations = await listConsumptionConfirmations();
+      const divergent = confirmations.filter((c) => c.status !== "estornada" && c.lines.some((l) => l.difference !== null && Math.abs(l.difference) > 0.001));
+      const names = divergent.slice(0, 5).map((c) => c.jumpparkOrderExternalId);
+      return {
+        text: divergent.length > 0 ? `${divergent.length} confirmação(ões) com quantidade ajustada em relação ao esperado pela receita: ${names.join(", ")}${divergent.length > 5 ? "..." : ""}.` : "Nenhuma confirmação de consumo teve divergência em relação ao esperado.",
+        links: [{ label: "Ver consumos", href: "/estoque/consumos" }],
+      };
+    }
+
+    case "ordens_consumo_duplicado": {
+      const confirmations = await listConsumptionConfirmations();
+      const activeByOrder = new Map<string, number>();
+      for (const c of confirmations) {
+        if (c.status === "estornada") continue;
+        activeByOrder.set(c.jumpparkOrderExternalId, (activeByOrder.get(c.jumpparkOrderExternalId) ?? 0) + 1);
+      }
+      const duplicated = Array.from(activeByOrder.entries()).filter(([, count]) => count > 1);
+      return {
+        text:
+          duplicated.length > 0
+            ? `Sim — ${duplicated.length} ordem(ns) com mais de uma confirmação ativa simultânea, o que não deveria acontecer: ${duplicated.map(([id]) => id).join(", ")}. Verifique com prioridade.`
+            : "Não. Cada ordem tem no máximo uma confirmação ativa por vez — a idempotência do sistema impede duplicidade de baixa.",
+        links: [{ label: "Ver consumos", href: "/estoque/consumos" }],
+      };
+    }
+
+    case "ordens_consumos_estornados": {
+      const confirmations = await listConsumptionConfirmations();
+      const reversed = confirmations.filter((c) => c.status === "estornada");
+      const names = reversed.slice(0, 5).map((c) => c.jumpparkOrderExternalId);
+      return {
+        text: reversed.length > 0 ? `${reversed.length} confirmação(ões) de consumo foram estornadas: ${names.join(", ")}${reversed.length > 5 ? "..." : ""}.` : "Nenhuma confirmação de consumo foi estornada.",
+        links: [{ label: "Ver consumos", href: "/estoque/consumos" }],
+      };
+    }
+
+    case "ordens_consumo_confirmado_hoje": {
+      const confirmations = await listConsumptionConfirmations();
+      const today = asOfDate;
+      const totals = new Map<string, { quantity: number; unit: string }>();
+      for (const c of confirmations) {
+        if (c.status === "estornada" || c.confirmedAt.slice(0, 10) !== today) continue;
+        for (const line of c.lines) {
+          const entry = totals.get(line.itemName) ?? { quantity: 0, unit: line.unit };
+          entry.quantity = Math.round((entry.quantity + line.confirmedQuantity) * 1000) / 1000;
+          totals.set(line.itemName, entry);
+        }
+      }
+      const parts = Array.from(totals.entries())
+        .slice(0, 5)
+        .map(([name, { quantity, unit }]) => `${name}: ${quantity} ${unit}`);
+      return {
+        text: parts.length > 0 ? `Produtos confirmados hoje (${formatDateBR(today)}): ${parts.join(", ")}.` : `Nenhum consumo foi confirmado hoje (${formatDateBR(today)}).`,
+        links: [{ label: "Ver consumos", href: "/estoque/consumos" }],
       };
     }
 

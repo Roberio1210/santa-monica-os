@@ -27,6 +27,8 @@ import {
   Map,
   AlertCircle,
   ShoppingBag,
+  ListChecks,
+  ArrowLeftRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -59,6 +61,8 @@ export const navItems: NavItem[] = [
   { href: "/estoque/receitas", label: "Receitas", icon: FlaskConical },
   { href: "/estoque/calibracao", label: "Calibração", icon: Beaker },
   { href: "/estoque/mapeamentos", label: "Mapeamentos", icon: Map },
+  { href: "/estoque/ordens", label: "Ordens JumpPark", icon: ListChecks },
+  { href: "/estoque/consumos", label: "Consumos de Estoque", icon: ArrowLeftRight },
   { href: "/estoque/pendencias", label: "Pendências do Estoque", icon: AlertCircle },
   { href: "/estoque/compras-sugeridas", label: "Compras Sugeridas", icon: ShoppingBag },
   { href: "/compras", label: "Compras", icon: ShoppingCart },

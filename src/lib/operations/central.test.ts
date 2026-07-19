@@ -52,6 +52,7 @@ function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview
       data: { measurementPending: [], withoutCost: [], withoutMinimum: [], withoutBrand: [], servicesWithoutRecipe: [], recipesWithoutSamples: [], recipesWithFewSamples: [], pendingMappings: [] },
       error: null,
     },
+    ordersConsumption: { data: null, error: null },
     ...overrides,
   };
 }
@@ -369,5 +370,60 @@ describe("Fase C: alertas de estoque/receitas — severidade correta, nunca crí
     const overview = baseOverview();
     const alerts = computeConsolidatedAlerts(overview);
     expect(alerts.some((a) => a.module === "Estoque")).toBe(false);
+  });
+
+  it("categoria desconhecida, serviço não mapeado, prévia aguardando confirmação e divergência de consumo são sempre atenção — nunca crítico", () => {
+    const overview = baseOverview({
+      ordersConsumption: {
+        data: {
+          totalOrders: 4,
+          awaitingAnalysis: 4,
+          blockedByCategory: 1,
+          unmappedService: 1,
+          withoutApprovedRecipe: 0,
+          previewsAwaitingConfirmation: 1,
+          divergentConfirmations: 1,
+          reversedConsumptions: 0,
+        },
+        error: null,
+      },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    const titles = ["Ordens com categoria de veículo desconhecida", "Ordens com serviço não mapeado", "Prévias de consumo aguardando confirmação", "Consumos confirmados com divergência"];
+    for (const title of titles) {
+      const alert = alerts.find((a) => a.title === title);
+      expect(alert?.severity).toBe("atencao");
+    }
+    expect(computeSituation(alerts)).toBe("atencao");
+  });
+
+  it("receita ainda em calibração e consumo estornado são sempre informativo — falta de receita aprovada nunca vira crítico nem atenção", () => {
+    const overview = baseOverview({
+      ordersConsumption: {
+        data: {
+          totalOrders: 2,
+          awaitingAnalysis: 2,
+          blockedByCategory: 0,
+          unmappedService: 0,
+          withoutApprovedRecipe: 2,
+          previewsAwaitingConfirmation: 0,
+          divergentConfirmations: 0,
+          reversedConsumptions: 1,
+        },
+        error: null,
+      },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    const semReceita = alerts.find((a) => a.title === "Ordens com receita ainda em calibração");
+    const estornado = alerts.find((a) => a.title === "Consumos estornados");
+    expect(semReceita?.severity).toBe("informativo");
+    expect(estornado?.severity).toBe("informativo");
+    expect(computeSituation(alerts)).toBe("normal");
+  });
+
+  it("sem nenhum indicador de ordens/consumo (JumpPark não configurado), nenhum alerta de ordens é criado", () => {
+    const overview = baseOverview();
+    const alerts = computeConsolidatedAlerts(overview);
+    expect(alerts.some((a) => a.title.startsWith("Ordens") || a.title.startsWith("Prévias") || a.title.startsWith("Consumos"))).toBe(false);
   });
 });

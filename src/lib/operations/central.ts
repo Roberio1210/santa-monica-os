@@ -15,6 +15,7 @@ import {
 } from "@/lib/finance/service";
 import { fetchInventoryOverview, type InventorySummary } from "@/lib/inventory/service";
 import { fetchDataQualitySummary, type DataQualitySummary } from "@/lib/inventory/data-quality";
+import { fetchOrdersConsumptionIndicators, type OrdersConsumptionIndicators } from "@/lib/orders/central-indicators";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowAlert, CashFlowProjectionPoint, FinancialAccountBalance } from "@/lib/finance/types";
 
 /**
@@ -45,6 +46,7 @@ export interface CentralOverview {
   /** Contagem de itens com saldo negativo — calculada junto do resumo de estoque, nunca um valor separado buscado de novo. */
   negativeStockCount: SectionResult<number>;
   inventoryQuality: SectionResult<DataQualitySummary>;
+  ordersConsumption: SectionResult<OrdersConsumptionIndicators | null>;
 }
 
 async function settle<T>(promise: Promise<T>): Promise<SectionResult<T>> {
@@ -72,7 +74,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
       }))
     : Promise.reject(new JumpParkNotConfiguredError());
 
-  const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory, inventoryQuality] = await Promise.all([
+  const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory, inventoryQuality, ordersConsumption] = await Promise.all([
     settle(jumpparkPromise),
     settle(fetchCashFlowOverview(asOfDate)),
     settle(fetchAccountsPayableOverview(asOfDate)),
@@ -80,6 +82,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     settle(fetchClassificationQueue()),
     settle(fetchInventoryOverview()),
     settle(fetchDataQualitySummary()),
+    settle(fetchOrdersConsumptionIndicators()),
   ]);
 
   const accountsPayable: SectionResult<{ items: AccountsPayableView[]; summary: AccountsPayableSummary; alerts: PayableAlert[] }> = apOverview.data
@@ -110,6 +113,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     inventory: inventory.data ? { data: inventory.data.summary, error: null } : { data: null, error: inventory.error },
     negativeStockCount,
     inventoryQuality,
+    ordersConsumption,
   };
 }
 
@@ -262,6 +266,70 @@ export function computeConsolidatedAlerts(overview: CentralOverview): Consolidat
         date: null,
         module: "Estoque",
         href: "/estoque/mapeamentos",
+      });
+    }
+  }
+
+  const oc = overview.ordersConsumption.data;
+  if (oc) {
+    if (oc.blockedByCategory > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Ordens com categoria de veículo desconhecida",
+        description: `${oc.blockedByCategory} ordem(ns) do JumpPark sem categoria de veículo confirmada — prévia de consumo bloqueada.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/ordens",
+      });
+    }
+    if (oc.unmappedService > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Ordens com serviço não mapeado",
+        description: `${oc.unmappedService} ordem(ns) com serviço do JumpPark ainda sem mapeamento para um serviço canônico.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/ordens",
+      });
+    }
+    if (oc.previewsAwaitingConfirmation > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Prévias de consumo aguardando confirmação",
+        description: `${oc.previewsAwaitingConfirmation} ordem(ns) com prévia pronta ou parcial aguardando confirmação humana.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/ordens",
+      });
+    }
+    if (oc.divergentConfirmations > 0) {
+      alerts.push({
+        severity: "atencao",
+        title: "Consumos confirmados com divergência",
+        description: `${oc.divergentConfirmations} confirmação(ões) com quantidade ajustada em relação ao esperado pela receita.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/consumos",
+      });
+    }
+    if (oc.withoutApprovedRecipe > 0) {
+      alerts.push({
+        severity: "informativo",
+        title: "Ordens com receita ainda em calibração",
+        description: `${oc.withoutApprovedRecipe} ordem(ns) com serviço sem receita aprovada — consumo indisponível até a calibração.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/calibracao",
+      });
+    }
+    if (oc.reversedConsumptions > 0) {
+      alerts.push({
+        severity: "informativo",
+        title: "Consumos estornados",
+        description: `${oc.reversedConsumptions} confirmação(ões) de consumo foram estornadas.`,
+        date: null,
+        module: "Estoque",
+        href: "/estoque/consumos",
       });
     }
   }
