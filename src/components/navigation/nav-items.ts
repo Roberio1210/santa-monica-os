@@ -40,7 +40,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Central de Operações", icon: LayoutDashboard },
-  { href: "/operacoes", label: "Movimentações", icon: ClipboardList },
+  { href: "/movimentacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
   { href: "/estacionamento", label: "Estacionamento", icon: ParkingSquare },
   { href: "/agenda", label: "Agenda", icon: CalendarDays },
