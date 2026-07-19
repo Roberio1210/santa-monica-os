@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Unavailable } from "@/components/shared/unavailable";
 import { formatCurrency } from "@/lib/utils/format";
@@ -38,10 +39,10 @@ export function OperationBlock({ overview }: { overview: CentralOverview }) {
           <Unavailable label={overview.jumppark.error ?? "Informação indisponível"} />
         ) : (
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <Row label="Ordens" value={String(orders.length)} />
-            <Row label="Veículos" value={String(overview.jumppark.data.vehicles)} />
-            <Row label="Faturamento Estética" value={formatCurrency(servicesRevenue)} />
-            <Row label="Faturamento Estacionamento" value={formatCurrency(parkingRevenue)} />
+            <Row label="Ordens" value={String(orders.length)} href="/movimentacoes?period=today" />
+            <Row label="Veículos" value={String(overview.jumppark.data.vehicles)} href="/movimentacoes?period=today" />
+            <Row label="Faturamento Estética" value={formatCurrency(servicesRevenue)} href="/lavacao?period=today" />
+            <Row label="Faturamento Estacionamento" value={formatCurrency(parkingRevenue)} href="/estacionamento?period=today" />
             <Row label="Ticket médio" value={averageTicket !== null ? formatCurrency(averageTicket) : "—"} />
             <Row label="Adicionais vendidos" value={String(additionalsCount)} />
             <Row label="Clientes novos" value="Informação indisponível" muted />
@@ -73,11 +74,17 @@ export function OperationBlock({ overview }: { overview: CentralOverview }) {
   );
 }
 
-function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
-  return (
+function Row({ label, value, muted, href }: { label: string; value: string; muted?: boolean; href?: string }) {
+  const content = (
     <div>
       <p className="text-xs text-foreground-subtle">{label}</p>
       <p className={muted ? "text-xs italic text-foreground-subtle" : "font-medium text-foreground"}>{value}</p>
     </div>
+  );
+  if (!href) return content;
+  return (
+    <Link href={href} className="block rounded-lg transition-colors hover:text-accent">
+      {content}
+    </Link>
   );
 }

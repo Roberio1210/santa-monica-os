@@ -11,7 +11,9 @@ import { listServiceMappings } from "@/lib/orders/service-mapping";
 import { getVehicleCategory } from "@/lib/orders/vehicle-category";
 import { listConsumptionConfirmations } from "@/lib/orders/consumption-history";
 import { isJumpParkConfigured } from "@/lib/config/env";
-import { addDaysIso, saoPauloDateISO, SAO_PAULO_TZ } from "@/lib/utils/timezone";
+import { addDaysIso, resolvePeriod, saoPauloDateISO, SAO_PAULO_TZ } from "@/lib/utils/timezone";
+import { fetchOperationalOrders, computeOperationalSummary, comparePeriods } from "@/lib/integrations/jumppark/operations-summary";
+import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
 
@@ -139,6 +141,21 @@ const KEYWORD_INTENTS: { keywords: string[]; questionId: string }[] = [
   { keywords: ["consumo duplicado", "duplicidade de consumo"], questionId: "ordens_consumo_duplicado" },
   { keywords: ["consumos foram estornados", "consumo estornado"], questionId: "ordens_consumos_estornados" },
   { keywords: ["produto foi confirmado hoje", "quanto produto foi confirmado"], questionId: "ordens_consumo_confirmado_hoje" },
+  { keywords: ["quantos carros atendemos hoje", "quantos carros hoje"], questionId: "carros_hoje_quantidade" },
+  { keywords: ["quais carros atendemos hoje", "quais carros hoje"], questionId: "carros_hoje_lista" },
+  { keywords: ["quais carros atendemos ontem", "carros ontem"], questionId: "carros_ontem_lista" },
+  { keywords: ["lavações fizemos na semana", "lavacoes na semana", "quantas lavações"], questionId: "lavacoes_semana" },
+  { keywords: ["faturamos no mês", "faturamento no mes", "quanto faturamos no mês"], questionId: "faturamento_mes_operacional" },
+  { keywords: ["serviços vendemos hoje", "servicos vendemos hoje"], questionId: "servicos_vendidos_hoje" },
+  { keywords: ["serviços mais vendidos no mês", "servicos mais vendidos"], questionId: "servicos_mais_vendidos_mes" },
+  { keywords: ["clientes vieram hoje", "quais clientes hoje"], questionId: "clientes_hoje" },
+  { keywords: ["formas de pagamento foram usadas hoje", "pagamento usado hoje"], questionId: "pagamentos_hoje" },
+  { keywords: ["ticket médio da semana", "ticket medio da semana"], questionId: "ticket_medio_semana" },
+  { keywords: ["bronze, silver e gold", "bronze silver gold", "quantos carros fizeram bronze"], questionId: "carros_por_pacote" },
+  { keywords: ["veículos ainda estão em atendimento", "veiculos em atendimento", "carros ainda no pátio"], questionId: "veiculos_em_atendimento" },
+  { keywords: ["horários de maior movimento", "horarios de maior movimento", "horário de pico"], questionId: "horarios_pico" },
+  { keywords: ["compare hoje com ontem"], questionId: "comparar_hoje_ontem" },
+  { keywords: ["compare este mês com o mês passado", "compare o mês com o mês passado"], questionId: "comparar_mes_anterior" },
 ];
 
 export function matchIntent(freeText: string): string {
@@ -183,6 +200,21 @@ export const ZEZINHO_QUESTIONS: ZezinhoQuestion[] = [
   { id: "ordens_consumo_duplicado", label: "Houve consumo duplicado?" },
   { id: "ordens_consumos_estornados", label: "Quais consumos foram estornados?" },
   { id: "ordens_consumo_confirmado_hoje", label: "Quanto produto foi confirmado hoje?" },
+  { id: "carros_hoje_quantidade", label: "Quantos carros atendemos hoje?" },
+  { id: "carros_hoje_lista", label: "Quais carros atendemos hoje?" },
+  { id: "carros_ontem_lista", label: "Quais carros atendemos ontem?" },
+  { id: "lavacoes_semana", label: "Quantas lavações fizemos na semana?" },
+  { id: "faturamento_mes_operacional", label: "Quanto faturamos no mês?" },
+  { id: "servicos_vendidos_hoje", label: "Quais serviços vendemos hoje?" },
+  { id: "servicos_mais_vendidos_mes", label: "Quais foram os serviços mais vendidos no mês?" },
+  { id: "clientes_hoje", label: "Quais clientes vieram hoje?" },
+  { id: "pagamentos_hoje", label: "Quais formas de pagamento foram usadas hoje?" },
+  { id: "ticket_medio_semana", label: "Qual foi o ticket médio da semana?" },
+  { id: "carros_por_pacote", label: "Quantos carros fizeram Bronze, Silver e Gold?" },
+  { id: "veiculos_em_atendimento", label: "Quais veículos ainda estão em atendimento?" },
+  { id: "horarios_pico", label: "Quais foram os horários de maior movimento?" },
+  { id: "comparar_hoje_ontem", label: "Compare hoje com ontem." },
+  { id: "comparar_mes_anterior", label: "Compare este mês com o mês passado." },
 ];
 
 function currentMonthRange(): { from: string; to: string; label: string } {
@@ -197,6 +229,13 @@ const UNKNOWN_ANSWER: ZezinhoAnswer = { text: "Ainda não tenho dados suficiente
 
 function daysAgoIso(days: number): string {
   return addDaysIso(saoPauloDateISO(), -days);
+}
+
+function trendLabel(trend: "aumento" | "queda" | "estavel" | "indisponivel", deltaPercent: number | null): string {
+  if (trend === "indisponivel") return "sem base de comparação";
+  if (trend === "estavel") return "estável";
+  if (deltaPercent === null) return trend === "aumento" ? "aumento" : "queda";
+  return `${trend} de ${Math.abs(deltaPercent)}%`;
 }
 
 /**
@@ -564,6 +603,191 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
       return {
         text: parts.length > 0 ? `Produtos confirmados hoje (${formatDateBR(today)}): ${parts.join(", ")}.` : `Nenhum consumo foi confirmado hoje (${formatDateBR(today)}).`,
         links: [{ label: "Ver consumos", href: "/estoque/consumos" }],
+      };
+    }
+
+    case "carros_hoje_quantidade": {
+      const p = resolvePeriod("today");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const summary = computeOperationalSummary(r.orders);
+      return {
+        text: summary.vehiclesServed > 0 ? `Atendemos ${summary.vehiclesServed} veículo(s) hoje, em ${summary.ordersCount} ordem(ns) finalizada(s).` : "Nenhum atendimento finalizado hoje até o momento.",
+        links: [{ label: "Ver movimentações de hoje", href: "/movimentacoes?period=today" }],
+      };
+    }
+
+    case "carros_hoje_lista":
+    case "carros_ontem_lista": {
+      const key = questionId === "carros_hoje_lista" ? "today" : "yesterday";
+      const p = resolvePeriod(key);
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const names = r.orders.slice(0, 8).map((o) => `${o.vehicleModel} (${o.plateMasked})`);
+      return {
+        text: names.length > 0 ? `${r.orders.length} carro(s) ${key === "today" ? "hoje" : "ontem"}: ${names.join(", ")}${r.orders.length > 8 ? "..." : ""}.` : `Nenhum carro atendido ${key === "today" ? "hoje" : "ontem"}.`,
+        links: [{ label: `Ver movimentações de ${key === "today" ? "hoje" : "ontem"}`, href: `/movimentacoes?period=${key}` }],
+      };
+    }
+
+    case "lavacoes_semana": {
+      const p = resolvePeriod("week");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const summary = computeOperationalSummary(r.orders);
+      return {
+        text: `${summary.washCount} lavação(ões) na semana atual, com faturamento de ${formatCurrency(summary.washRevenue)}.`,
+        links: [{ label: "Ver Lavação", href: "/lavacao?period=week" }],
+      };
+    }
+
+    case "faturamento_mes_operacional": {
+      const p = resolvePeriod("month");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const summary = computeOperationalSummary(r.orders);
+      return {
+        text: `Faturamento operacional de ${p.label.toLowerCase()} (${formatDateBR(p.from)} a ${formatDateBR(p.to)}): ${formatCurrency(summary.revenue)}.`,
+        links: [{ label: "Ver movimentações do mês", href: "/movimentacoes?period=month" }],
+      };
+    }
+
+    case "servicos_vendidos_hoje": {
+      const p = resolvePeriod("today");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const descriptions = Array.from(new Set(r.orders.flatMap((o) => o.services.map((s) => s.description))));
+      return {
+        text: descriptions.length > 0 ? `Serviços vendidos hoje: ${descriptions.slice(0, 8).join(", ")}${descriptions.length > 8 ? "..." : ""}.` : "Nenhum serviço vendido hoje até o momento.",
+        links: [{ label: "Ver Lavação", href: "/lavacao?period=today" }],
+      };
+    }
+
+    case "servicos_mais_vendidos_mes": {
+      const p = resolvePeriod("month");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const totals = new Map<string, number>();
+      for (const o of r.orders) for (const s of o.services) totals.set(s.description, (totals.get(s.description) ?? 0) + s.amount);
+      const top = Array.from(totals.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([desc, amount]) => `${desc} (${formatCurrency(amount)})`);
+      return {
+        text: top.length > 0 ? `Serviços mais vendidos no mês: ${top.join(", ")}.` : "Nenhum serviço vendido neste mês até o momento.",
+        links: [{ label: "Ver Lavação", href: "/lavacao?period=month" }],
+      };
+    }
+
+    case "clientes_hoje": {
+      const p = resolvePeriod("today");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const names = Array.from(new Set(r.orders.filter((o) => o.clientName).map((o) => o.clientName as string)));
+      return {
+        text: names.length > 0 ? `Clientes identificados hoje: ${names.slice(0, 8).join(", ")}${names.length > 8 ? "..." : ""}.` : "Nenhum cliente identificado hoje — o JumpPark frequentemente não vincula um cliente cadastrado à ordem de walk-in.",
+        links: [{ label: "Ver movimentações de hoje", href: "/movimentacoes?period=today" }],
+      };
+    }
+
+    case "pagamentos_hoje": {
+      const p = resolvePeriod("today");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const summary = computeOperationalSummary(r.orders);
+      const parts = summary.paymentBreakdown.map((p2) => `${p2.label}: ${formatCurrency(p2.amount)} (${p2.count}x)`);
+      return {
+        text: parts.length > 0 ? `Formas de pagamento hoje: ${parts.join(", ")}.` : "Nenhum pagamento registrado hoje até o momento.",
+        links: [{ label: "Ver movimentações de hoje", href: "/movimentacoes?period=today" }],
+      };
+    }
+
+    case "ticket_medio_semana": {
+      const p = resolvePeriod("week");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const summary = computeOperationalSummary(r.orders);
+      return {
+        text: summary.averageTicket !== null ? `O ticket médio da semana atual é ${formatCurrency(summary.averageTicket)}, sobre ${summary.ordersCount} ordem(ns).` : "Ainda não há ordens finalizadas na semana atual para calcular o ticket médio.",
+        links: [{ label: "Ver Movimentações", href: "/movimentacoes?period=week" }],
+      };
+    }
+
+    case "carros_por_pacote": {
+      const p = resolvePeriod("month");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const washOrders = r.orders.filter((o) => o.kind === "lavacao");
+      const groups = await computeWashCategoryGroups(washOrders);
+      const packages = ["Bronze", "Silver", "Gold"].map((label) => `${label}: ${groups.find((g) => g.label === label)?.count ?? 0}`);
+      return {
+        text: `No mês atual — ${packages.join(", ")}.`,
+        links: [{ label: "Ver Lavação por categoria", href: "/lavacao?period=month" }],
+      };
+    }
+
+    case "veiculos_em_atendimento":
+      return {
+        text: "Não há um endpoint confiável do JumpPark para veículos ainda em atendimento — a exportação de ordens não retorna ordens em aberto (ver docs/jumppark-open-orders-investigation.md). Nenhum número foi inventado.",
+        links: [],
+      };
+
+    case "horarios_pico": {
+      const p = resolvePeriod("today");
+      const r = await fetchOperationalOrders(p.from, p.to);
+      if (!r.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (r.error) return { text: r.error, links: [] };
+      const hourCounts = new Map<string, number>();
+      for (const o of r.orders) {
+        if (!o.exitTime) continue;
+        const hour = `${o.exitTime.slice(0, 2)}h`;
+        hourCounts.set(hour, (hourCounts.get(hour) ?? 0) + 1);
+      }
+      const top = Array.from(hourCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      return {
+        text: top.length > 0 ? `Horários de maior movimento hoje (por saída registrada): ${top.map(([h, c]) => `${h} (${c})`).join(", ")}.` : "Ainda não há saídas registradas hoje para calcular horário de pico.",
+        links: [{ label: "Ver movimentações de hoje", href: "/movimentacoes?period=today" }],
+      };
+    }
+
+    case "comparar_hoje_ontem": {
+      const today = resolvePeriod("today");
+      const yesterday = resolvePeriod("yesterday");
+      const [todayResult, yesterdayResult] = await Promise.all([fetchOperationalOrders(today.from, today.to), fetchOperationalOrders(yesterday.from, yesterday.to)]);
+      if (!todayResult.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (todayResult.error || yesterdayResult.error) return { text: todayResult.error ?? yesterdayResult.error ?? "Falha ao consultar o JumpPark.", links: [] };
+      const todaySummary = computeOperationalSummary(todayResult.orders);
+      const yesterdaySummary = computeOperationalSummary(yesterdayResult.orders);
+      const revenueCmp = comparePeriods(todaySummary.revenue, yesterdaySummary.revenue);
+      const vehiclesCmp = comparePeriods(todaySummary.vehiclesServed, yesterdaySummary.vehiclesServed);
+      return {
+        text: `Faturamento: hoje ${formatCurrency(todaySummary.revenue)} vs. ontem ${formatCurrency(yesterdaySummary.revenue)} (${trendLabel(revenueCmp.trend, revenueCmp.deltaPercent)}). Veículos: hoje ${todaySummary.vehiclesServed} vs. ontem ${yesterdaySummary.vehiclesServed} (${trendLabel(vehiclesCmp.trend, vehiclesCmp.deltaPercent)}).`,
+        links: [{ label: "Ver movimentações", href: "/movimentacoes?period=today" }],
+      };
+    }
+
+    case "comparar_mes_anterior": {
+      const month = resolvePeriod("month");
+      const previousMonth = resolvePeriod("previous_month");
+      const [monthResult, previousResult] = await Promise.all([fetchOperationalOrders(month.from, month.to), fetchOperationalOrders(previousMonth.from, previousMonth.to)]);
+      if (!monthResult.jumpparkConfigured) return { text: "O JumpPark não está configurado neste ambiente.", links: [] };
+      if (monthResult.error || previousResult.error) return { text: monthResult.error ?? previousResult.error ?? "Falha ao consultar o JumpPark.", links: [] };
+      const monthSummary = computeOperationalSummary(monthResult.orders);
+      const previousSummary = computeOperationalSummary(previousResult.orders);
+      const revenueCmp = comparePeriods(monthSummary.revenue, previousSummary.revenue);
+      return {
+        text: `Faturamento operacional: mês atual (parcial, até hoje) ${formatCurrency(monthSummary.revenue)} vs. mês anterior (completo) ${formatCurrency(previousSummary.revenue)} — ${trendLabel(revenueCmp.trend, revenueCmp.deltaPercent)}. Compare com cautela: o mês atual ainda não terminou.`,
+        links: [{ label: "Ver Movimentações", href: "/movimentacoes?period=month" }],
       };
     }
 

@@ -51,7 +51,7 @@ export function TodayPanel({ overview, alertsCount }: { overview: CentralOvervie
           label="Faturamento operacional hoje"
           value={overview.jumppark.data ? formatCurrency(overview.jumppark.data.dailyRevenue) : "Informação indisponível"}
           icon={DollarSign}
-          href={overview.jumppark.data ? `/operacoes?date=${today}` : null}
+          href={overview.jumppark.data ? "/movimentacoes?period=today" : null}
         />
         <TodayCard
           label="Entradas de caixa hoje"
@@ -75,7 +75,7 @@ export function TodayPanel({ overview, alertsCount }: { overview: CentralOvervie
           label="Veículos atendidos hoje"
           value={overview.jumppark.data ? String(overview.jumppark.data.vehicles) : "Informação indisponível"}
           icon={Car}
-          href={overview.jumppark.data ? `/operacoes?date=${today}` : null}
+          href={overview.jumppark.data ? "/movimentacoes?period=today" : null}
         />
         <TodayCard label="Agenda do dia" value="Não integrada" icon={CalendarClock} href="/agenda" hint="Agenda real ainda não integrada" />
         <TodayCard
