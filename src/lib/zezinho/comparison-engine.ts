@@ -84,14 +84,19 @@ export function topServicesByRevenue(orders: OperationalOrder[], limit = 5): { d
     .map(([description, amount]) => ({ description, amount }));
 }
 
-function sumCashInRange(ledger: CashLedgerEntry[], from: string, to: string): { entradas: number; saidas: number; resultado: number } {
+/**
+ * Soma entradas/saídas/resultado de caixa num intervalo — exportada (Z2) para o catálogo de
+ * ferramentas (`tools/executor.ts`) reaproveitar exatamente este cálculo em vez de duplicá-lo.
+ */
+export function sumCashInRange(ledger: CashLedgerEntry[], from: string, to: string): { entradas: number; saidas: number; resultado: number } {
   const inRange = ledger.filter((e) => e.kind === "movimento" && e.date >= from && e.date <= to);
   const entradas = round2(inRange.filter((e) => e.amount > 0).reduce((sum, e) => sum + e.amount, 0));
   const saidas = round2(Math.abs(inRange.filter((e) => e.amount < 0).reduce((sum, e) => sum + e.amount, 0)));
   return { entradas, saidas, resultado: round2(entradas - saidas) };
 }
 
-function packageCounts(groups: { label: string; count: number }[]): PackageCounts {
+/** Exportada (Z2) pela mesma razão de `sumCashInRange` acima. */
+export function packageCounts(groups: { label: string; count: number }[]): PackageCounts {
   return {
     Bronze: groups.find((g) => g.label === "Bronze")?.count ?? 0,
     Silver: groups.find((g) => g.label === "Silver")?.count ?? 0,
@@ -99,7 +104,11 @@ function packageCounts(groups: { label: string; count: number }[]): PackageCount
   };
 }
 
-function metric(key: string, label: string, unit: MetricUnit, a: number, b: number | null, hasB: boolean, source: string): ComparisonMetric {
+/**
+ * Constrói um `ComparisonMetric` (fato) a partir de um valor atual e um valor anterior opcional —
+ * exportada (Z2) para o catálogo de ferramentas nunca duplicar a lógica de `comparePeriods`.
+ */
+export function metric(key: string, label: string, unit: MetricUnit, a: number, b: number | null, hasB: boolean, source: string): ComparisonMetric {
   return { key, label, unit, a, b: hasB ? b : null, comparison: comparePeriods(a, hasB ? (b ?? 0) : null), source };
 }
 
