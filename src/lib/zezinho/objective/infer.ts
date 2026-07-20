@@ -32,10 +32,12 @@ export function inferObjective(intent: ZezinhoIntent, entities: ExtractedEntitie
     return build("improve_service_mix", `Pacote ${entities.packageMentioned} mencionado — objetivo é melhorar o mix de serviço / ticket médio.`);
   }
 
+  if (entities.topic === "mix") return build("improve_service_mix", "Pergunta sobre o que vender mais / mix de serviço.");
   if (entities.topic === "preco") return build("evaluate_pricing", "Pergunta sobre preço — objetivo é avaliar o impacto comercial de mexer no preço.");
   if (entities.topic === "equipe") return build("staffing_capacity", "Pergunta sobre equipe/contratação — objetivo é capacidade operacional.");
   if (entities.topic === "clientes") return build("client_retention", "Pergunta sobre clientes/contato — objetivo é retenção/reativação de clientes.");
   if (entities.topic === "caixa") return build("improve_cash_flow", "Pergunta sobre caixa — objetivo é saúde do fluxo de caixa.");
+  if (entities.topic === "estoque") return build("reduce_costs", "Pergunta sobre estoque/produto — objetivo aproximado de redução de desperdício/custo.");
 
   // explain sem entidade nova continua explicando a última análise, mesmo objetivo dela.
   if (intent === "explain" && memory.activeObjective) {

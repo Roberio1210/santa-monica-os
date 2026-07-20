@@ -41,6 +41,9 @@ const RECOMMEND_PATTERNS: RegExp[] = [
   /\bquem contatar\b/,
   /\bquem priorizar\b/,
   /\bem quem focar\b/,
+  /\bo que devemos\s+(tentar\s+)?vender mais\b/,
+  /\breverter a escolha\b/,
+  /\bse o cliente\b/,
 ];
 
 const EVALUATE_DECISION_PATTERNS: RegExp[] = [
@@ -55,6 +58,7 @@ const EVALUATE_DECISION_PATTERNS: RegExp[] = [
   /\bdevemos reduzir\b/,
   /\bcompensa\s+(contratar|aumentar|reduzir|investir)\b/,
   /\bfaz sentido\s+(contratar|aumentar|reduzir|investir)\b/,
+  /\bvale\s+(dar\s+)?desconto\b/,
 ];
 
 const DIAGNOSE_PATTERNS: RegExp[] = [
@@ -67,6 +71,8 @@ const DIAGNOSE_PATTERNS: RegExp[] = [
   /\balgo preocupante\b/,
   /\balguma coisa preocupante\b/,
   /\bqual (e |foi )?o problema\b/,
+  /\bestamos desperdicando\b/,
+  /\bestamos perdendo\b/,
 ];
 
 const EXPLAIN_PATTERNS: RegExp[] = [

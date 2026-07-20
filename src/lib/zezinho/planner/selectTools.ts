@@ -50,6 +50,16 @@ const OBJECTIVE_TOOLS: Record<BusinessObjective, ToolId[]> = {
   business_health: ["jumppark_period_summary", "cash_ledger_totals", "central_alerts"],
 };
 
+/**
+ * Quando o tópico é mais específico que o objetivo (ex.: "estamos desperdiçando produto?" tem
+ * objetivo `reduce_costs`, mas o dado que realmente fundamenta a resposta é estoque/alertas, não
+ * caixa), o tópico sobrepõe a lista padrão do objetivo — continua sendo busca mínima, só que mais
+ * precisa que o objetivo genérico sozinho conseguiria decidir.
+ */
+const TOPIC_TOOL_OVERRIDE: Partial<Record<ExtractedEntities["topic"] & string, ToolId[]>> = {
+  estoque: ["inventory_overview", "central_alerts"],
+};
+
 function buildCall(id: ToolId, periods: ResolvedPeriods | null, filterKind: ExtractedEntities["areaFilter"]): ToolCall {
   return { id, periodA: periods?.periodA ?? null, periodB: periods?.periodB ?? null, filterKind };
 }
@@ -66,9 +76,8 @@ export function selectTools(intent: ZezinhoIntent, objective: BusinessObjective 
 
   if (!objective) return { toolCalls: [], periodResolved: periods !== null };
 
-  const toolCalls = OBJECTIVE_TOOLS[objective]
-    .filter((id) => !TOOL_REGISTRY[id].requiresPeriod || periods !== null)
-    .map((id) => buildCall(id, periods, entities.areaFilter));
+  const baseToolIds = (entities.topic && TOPIC_TOOL_OVERRIDE[entities.topic]) || OBJECTIVE_TOOLS[objective];
+  const toolCalls = baseToolIds.filter((id) => !TOOL_REGISTRY[id].requiresPeriod || periods !== null).map((id) => buildCall(id, periods, entities.areaFilter));
 
   return { toolCalls, periodResolved: periods !== null };
 }

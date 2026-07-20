@@ -13,8 +13,14 @@ export interface ZezinhoLink {
 export interface ZezinhoAnswer {
   text: string;
   links: ZezinhoLink[];
-  /** Seção "Dados utilizados" (transparência) — nunca inclui SQL, token ou segredo. */
+  /** Seção "Ver fundamentos" (transparência) — nunca inclui SQL, token ou segredo. */
   sources?: string[];
+  /** Fatos usados nesta resposta (Sprint 3.0) — mostrados em "Ver fundamentos", nunca no texto principal. */
+  facts?: string[];
+  /** Confiança geral da resposta (Sprint 3.0) — "alta" (dado direto), "media" (relação consistente) ou "baixa" (proxy/evidência parcial). */
+  confidence?: "alta" | "media" | "baixa";
+  /** Sugestões de próxima pergunta, coerentes com esta resposta (Sprint 3.0). */
+  followUps?: string[];
 }
 
 export interface ZezinhoQuestion {

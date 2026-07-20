@@ -66,7 +66,7 @@ function basePathForFilter(filterKind: ComparisonReport["filterKind"]): string {
   return "/movimentacoes";
 }
 
-function buildLinks(report: ComparisonReport): ZezinhoLink[] {
+export function buildLinks(report: ComparisonReport): ZezinhoLink[] {
   const base = basePathForFilter(report.filterKind);
   const links: ZezinhoLink[] = [
     { label: `Ver movimentações de ${report.periodA.label}`, href: `${base}?period=custom&from=${report.periodA.from}&to=${report.periodA.to}` },
@@ -79,7 +79,7 @@ function buildLinks(report: ComparisonReport): ZezinhoLink[] {
   return links;
 }
 
-function buildSources(report: ComparisonReport): string[] {
+export function buildSources(report: ComparisonReport): string[] {
   const sources: string[] = [`JumpPark — ordens de ${formatDateBR(report.periodA.from)} a ${formatDateBR(report.periodA.to)}`];
   if (report.periodB) sources.push(`JumpPark — ordens de ${formatDateBR(report.periodB.from)} a ${formatDateBR(report.periodB.to)}`);
   sources.push("Neon — fluxo de caixa (entradas e saídas reais)");

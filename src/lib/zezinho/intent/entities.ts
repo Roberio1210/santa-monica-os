@@ -21,7 +21,8 @@ function detectPackage(normalized: string): ZezinhoPackage | null {
  * então vencem em caso de menção simultânea.
  */
 const TOPIC_PATTERNS: { topic: ZezinhoTopic; test: (n: string) => boolean }[] = [
-  { topic: "preco", test: (n) => n.includes("preco") || n.includes("valor cobrado") || n.includes("tabela de valores") },
+  { topic: "mix", test: (n) => n.includes("vender mais") || n.includes("reverter a escolha") || n.includes("upsell") },
+  { topic: "preco", test: (n) => n.includes("preco") || n.includes("desconto") || n.includes("valor cobrado") || n.includes("tabela de valores") },
   { topic: "equipe", test: (n) => n.includes("contratar") || n.includes("contratacao") || n.includes("equipe") || n.includes("funcionario") || n.includes("colaborador") },
   { topic: "clientes", test: (n) => n.includes("cliente") || n.includes("ligar") || n.includes("retornar") || n.includes("contato") },
   { topic: "estoque", test: (n) => n.includes("estoque") || n.includes("produto") },

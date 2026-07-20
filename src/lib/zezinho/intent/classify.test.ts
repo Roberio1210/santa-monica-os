@@ -118,6 +118,42 @@ describe("classifyIntent — clarify_needed (só em último caso, conteúdo insu
   });
 });
 
+describe("classifyIntent — conversa obrigatória da Sprint 3.0", () => {
+  it("'O que devemos tentar vender mais ou tentar reverter a escolha do cliente?' -> recommend (tópico mix)", () => {
+    const result = classifyIntent("O que devemos tentar vender mais ou tentar reverter a escolha do cliente?", SESSION_WITH_ANALYSIS, REFERENCE);
+    expect(result.intent).toBe("recommend");
+    expect(result.entities.topic).toBe("mix");
+  });
+
+  it("'E se o cliente quiser somente a Bronze?' -> recommend, pacote Bronze reconhecido", () => {
+    const result = classifyIntent("E se o cliente quiser somente a Bronze?", SESSION_WITH_ANALYSIS, REFERENCE);
+    expect(result.intent).toBe("recommend");
+    expect(result.entities.packageMentioned).toBe("Bronze");
+  });
+
+  it("'Vale dar desconto para converter?' -> evaluate_decision, tópico preço", () => {
+    const result = classifyIntent("Vale dar desconto para converter?", SESSION_WITH_ANALYSIS, REFERENCE);
+    expect(result.intent).toBe("evaluate_decision");
+    expect(result.entities.topic).toBe("preco");
+  });
+
+  it("'Estamos desperdiçando produto?' -> diagnose, tópico estoque", () => {
+    const result = classifyIntent("Estamos desperdiçando produto?", EMPTY_REASONING_SESSION, REFERENCE);
+    expect(result.intent).toBe("diagnose");
+    expect(result.entities.topic).toBe("estoque");
+  });
+
+  it("'Devemos vender mais Silver?' continua evaluate_decision (não colide com o novo padrão de recommend)", () => {
+    const result = classifyIntent("Devemos vender mais Silver?", EMPTY_REASONING_SESSION, REFERENCE);
+    expect(result.intent).toBe("evaluate_decision");
+  });
+
+  it("'Qual a cor que combina mais com a fachada?' -> inform (fora do domínio, tratado no fallback do orquestrador)", () => {
+    const result = classifyIntent("Qual a cor que combina mais com a fachada?", EMPTY_REASONING_SESSION, REFERENCE);
+    expect(result.intent).toBe("inform");
+  });
+});
+
 describe("classifyIntent — não repete o bug da sprint anterior", () => {
   it("'O que acha que devemos fazer nessa próxima semana...' é recommend, não compare, mesmo mencionando 'semana'", () => {
     const result = classifyIntent("O que acha que devemos fazer nessa próxima semana para elevarmos esses números?", SESSION_WITH_ANALYSIS, REFERENCE);

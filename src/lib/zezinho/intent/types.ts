@@ -18,7 +18,7 @@ export type ZezinhoIntent =
   | "status_check"
   | "clarify_needed";
 
-export type ZezinhoTopic = "preco" | "equipe" | "clientes" | "estoque" | "caixa" | "marketing" | "agenda";
+export type ZezinhoTopic = "preco" | "equipe" | "clientes" | "estoque" | "caixa" | "marketing" | "agenda" | "mix";
 
 export type ZezinhoPackage = "Bronze" | "Silver" | "Gold";
 
