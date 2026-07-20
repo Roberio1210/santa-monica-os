@@ -6,22 +6,24 @@ import { Send, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
-import type { ZezinhoAnswer, ZezinhoContext, ZezinhoLink } from "@/lib/zezinho/types";
-
-const EMPTY_CONTEXT: ZezinhoContext = { lastPeriodA: null, lastPeriodB: null, lastKindFilter: null, lastTopic: null };
+import { EMPTY_REASONING_SESSION } from "@/lib/zezinho/memory/types";
+import type { ReasoningSession } from "@/lib/zezinho/memory/types";
+import type { ZezinhoAnswer, ZezinhoLink } from "@/lib/zezinho/types";
 
 const SUGGESTED_QUESTIONS = [
   "Como está a empresa hoje?",
   "Compare este mês com o mês passado.",
   "O que está precisando da minha atenção?",
-  "Quais serviços mais venderam?",
-  "Como está o caixa?",
-  "Quais produtos estão acabando?",
-  "Quais clientes deveriam retornar?",
-  "Qual foi nosso melhor dia do mês?",
+  "O que você faria para melhorarmos esses números?",
+  "Quem devemos ligar hoje?",
+  "Onde estamos errando?",
+  "Vale contratar mais alguém?",
+  "Estamos desperdiçando produto?",
 ];
 
-const LOADING_STAGES = ["Entendendo sua pergunta…", "Consultando movimentações…", "Comparando os períodos…", "Preparando a resposta…"];
+const LOADING_STAGES = ["Entendendo sua pergunta…", "Consultando os dados…", "Montando o raciocínio…", "Preparando a resposta…"];
+
+const CONFIDENCE_LABEL: Record<string, string> = { alta: "Confiança alta (dado direto)", media: "Confiança média (relação consistente)", baixa: "Confiança baixa (indício parcial)" };
 
 interface ChatMessage {
   id: string;
@@ -29,6 +31,9 @@ interface ChatMessage {
   text: string;
   links?: ZezinhoLink[];
   sources?: string[];
+  facts?: string[];
+  confidence?: string;
+  followUps?: string[];
   isError?: boolean;
   durationMs?: number;
   /** Só em mensagens do Zézinho: a pergunta do usuário que originou esta resposta ("Refazer análise"). */
@@ -41,16 +46,17 @@ function fieldId() {
 
 /**
  * Chat do Zézinho — fala com /api/zezinho/ask (nunca acessa banco, token ou variável de ambiente
- * diretamente). Contexto conversacional (últimos períodos/filtro) é mantido só no cliente,
- * nunca persistido no servidor. Cancelamento real via AbortController.
+ * diretamente). Memória conversacional (`ReasoningSession`) é mantida só no cliente, nunca
+ * persistida no servidor. Cancelamento real via AbortController. "Ver fundamentos" mostra fatos,
+ * fontes, limitações e confiança — nunca a cadeia de raciocínio interna.
  */
 export function ZezinhoConversation() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [stageIndex, setStageIndex] = useState(0);
-  const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
-  const contextRef = useRef<ZezinhoContext>(EMPTY_CONTEXT);
+  const [openFundamentos, setOpenFundamentos] = useState<Record<string, boolean>>({});
+  const contextRef = useRef<ReasoningSession>(EMPTY_REASONING_SESSION);
   const abortRef = useRef<AbortController | null>(null);
   const stageTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -91,8 +97,11 @@ export function ZezinhoConversation() {
         return;
       }
       const answer = data.answer as ZezinhoAnswer;
-      contextRef.current = data.nextContext as ZezinhoContext;
-      setMessages((prev) => [...prev, { id: fieldId(), role: "assistant", text: answer.text, links: answer.links, sources: answer.sources, durationMs: data.durationMs, question: trimmed }]);
+      contextRef.current = data.nextContext as ReasoningSession;
+      setMessages((prev) => [
+        ...prev,
+        { id: fieldId(), role: "assistant", text: answer.text, links: answer.links, sources: answer.sources, facts: answer.facts, confidence: answer.confidence, followUps: answer.followUps, durationMs: data.durationMs, question: trimmed },
+      ]);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setMessages((prev) => [...prev, { id: fieldId(), role: "assistant", text: "Análise cancelada.", isError: false, question: trimmed }]);
@@ -157,25 +166,52 @@ export function ZezinhoConversation() {
                         ))}
                       </div>
                     ) : null}
+                    {!m.isError && m.followUps && m.followUps.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {m.followUps.map((q) => (
+                          <button
+                            key={q}
+                            type="button"
+                            onClick={() => send(q)}
+                            disabled={pending}
+                            className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground-muted transition-colors hover:border-accent/50 hover:text-foreground disabled:opacity-50"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     {!m.isError && m.question ? (
                       <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-foreground-subtle">
                         <button type="button" onClick={() => refazer(m.question!)} className="hover:underline">
                           Refazer análise
                         </button>
-                        {m.sources && m.sources.length > 0 ? (
-                          <button type="button" onClick={() => setOpenSources((prev) => ({ ...prev, [m.id]: !prev[m.id] }))} className="hover:underline">
-                            {openSources[m.id] ? "Ocultar dados utilizados" : "Ver dados utilizados"}
+                        {(m.sources && m.sources.length > 0) || (m.facts && m.facts.length > 0) ? (
+                          <button type="button" onClick={() => setOpenFundamentos((prev) => ({ ...prev, [m.id]: !prev[m.id] }))} className="hover:underline">
+                            {openFundamentos[m.id] ? "Ocultar fundamentos" : "Ver fundamentos"}
                           </button>
                         ) : null}
                         {m.durationMs !== undefined ? <span>{(m.durationMs / 1000).toFixed(1)}s</span> : null}
                       </div>
                     ) : null}
-                    {openSources[m.id] && m.sources ? (
-                      <ul className="space-y-0.5 rounded border border-border-subtle bg-background p-2 text-xs text-foreground-subtle">
-                        {m.sources.map((s, i) => (
-                          <li key={i}>• {s}</li>
-                        ))}
-                      </ul>
+                    {openFundamentos[m.id] ? (
+                      <div className="space-y-1.5 rounded border border-border-subtle bg-background p-2 text-xs text-foreground-subtle">
+                        {m.confidence ? <p className="font-medium text-foreground-muted">{CONFIDENCE_LABEL[m.confidence] ?? m.confidence}</p> : null}
+                        {m.facts && m.facts.length > 0 ? (
+                          <ul className="space-y-0.5">
+                            {m.facts.map((f, i) => (
+                              <li key={i}>• {f}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {m.sources && m.sources.length > 0 ? (
+                          <ul className="space-y-0.5 border-t border-border-subtle pt-1">
+                            {m.sources.map((s, i) => (
+                              <li key={i}>{s.startsWith("⚠") ? s : `Fonte: ${s}`}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 )}

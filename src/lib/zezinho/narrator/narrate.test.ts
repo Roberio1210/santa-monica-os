@@ -37,7 +37,8 @@ describe("narrate — recommend", () => {
   it("uma única recomendação vira prosa direta, sem numeração", () => {
     const { answer } = narrate(baseResult({ intent: "recommend", recommendations: [{ action: "Ligar para Maria hoje.", reason: "Está há 45 dias sem retorno.", evidenceFactKeys: [], priority: "alta", risk: null, howToVerify: "Confirmar retorno." }] }), { usedOpeners: [] });
     expect(answer.text).not.toMatch(/^\d\./m);
-    expect(answer.text).toContain("Ligar para Maria hoje");
+    // A abertura ("Pensando como gerente aqui,") funde com a ação em minúscula para formar uma frase só — nunca duas frases desconexas.
+    expect(answer.text).toMatch(/ligar para Maria hoje/i);
   });
 
   it("múltiplas recomendações viram lista numerada, no máximo o que foi passado", () => {

@@ -111,6 +111,18 @@ describe("reason — staffing_capacity sempre rotula proxy, nunca afirma produti
   });
 });
 
+describe("reason — reduce_costs/estoque usa o alerta real de receitas sem calibração (bug fix)", () => {
+  it("recomenda calibrar receitas quando o alerta 'sem receita' está presente — nunca a genérica de acompanhar itens quase vazios", () => {
+    const toolResults: ToolResult[] = [
+      { id: "inventory_overview", source: "Estoque", error: null, summary: { totalItems: 65, lowStockCount: 0, nearEmptyCount: 1, sealedCount: 24, totalStockValue: null, itemsWithoutMinimum: 65 } },
+      { id: "central_alerts", source: "Central de Operações", error: null, alerts: [{ severity: "atencao", title: "Serviços sem receita", description: "17 serviço(s) sem nenhuma receita cadastrada.", date: null, module: "Estoque", href: "/estoque/pendencias" }] },
+    ];
+    const result = reason(baseInput({ intent: "diagnose", objective: "reduce_costs", entities: entities({ topic: "estoque" }), toolResults }), "estamos desperdicando produto");
+    expect(result.recommendations[0].action).toMatch(/[Cc]alibrar as receitas/);
+    expect(result.recommendations[0].evidenceFactKeys.length).toBeGreaterThan(0);
+  });
+});
+
 describe("reason — improve_service_mix respeita a escolha do cliente quando o pacote é mencionado", () => {
   it("pacote Bronze mencionado -> recomendação consultiva, não pressão de upgrade", () => {
     const result = reason(baseInput({ intent: "recommend", objective: "improve_service_mix", entities: entities({ packageMentioned: "Bronze" }) }), "e se o cliente quiser somente a bronze");

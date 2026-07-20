@@ -14,21 +14,31 @@ import { isJumpParkConfigured } from "@/lib/config/env";
 import { addDaysIso, resolvePeriod, saoPauloDateISO, SAO_PAULO_TZ } from "@/lib/utils/timezone";
 import { fetchOperationalOrders, computeOperationalSummary, comparePeriods } from "@/lib/integrations/jumppark/operations-summary";
 import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
-import { normalize, parseComparisonExpression } from "@/lib/zezinho/date-parser";
-import { buildComparisonReport } from "@/lib/zezinho/comparison-engine";
-import { buildComparisonNarrative, buildRecommendationNarrative } from "@/lib/zezinho/response-builder";
-import { EMPTY_ZEZINHO_CONTEXT } from "@/lib/zezinho/types";
-import type { ZezinhoAnswer, ZezinhoContext, ZezinhoQuestion } from "@/lib/zezinho/types";
+import type { ZezinhoAnswer, ZezinhoQuestion } from "@/lib/zezinho/types";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
+import { classifyIntent } from "@/lib/zezinho/intent/classify";
+import { inferObjective } from "@/lib/zezinho/objective/infer";
+import { selectTools } from "@/lib/zezinho/planner/selectTools";
+import { executeTool } from "@/lib/zezinho/tools/executor";
+import { reason } from "@/lib/zezinho/reasoning/reason";
+import { narrate } from "@/lib/zezinho/narrator/narrate";
+import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/memory/types";
+import { withActiveAnalysis, withExplainedMetric, withInsightSummary, withUsedOpener } from "@/lib/zezinho/memory/session";
+import type { IntentResult } from "@/lib/zezinho/intent/types";
+import type { ObjectiveResult } from "@/lib/zezinho/objective/types";
+import type { ReasoningResult, ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
 
 /**
- * "Zézinho — Resumo Gerencial": funções determinísticas sobre dados reais do sistema, sem
- * nenhuma API externa de IA. Somente leitura — nunca cria, altera, paga ou exclui nada.
+ * "Zézinho — Gerente Operacional": pipeline de raciocínio (intenção -> objetivo -> memória ->
+ * planner -> ferramentas -> raciocínio -> narrador) sobre dados reais do sistema, sem nenhuma API
+ * externa de IA obrigatória. Somente leitura — nunca cria, altera, paga ou exclui nada. Ver
+ * docs/zezinho-3.0-architecture.md para o desenho completo.
  */
 
-export type { ZezinhoAnswer, ZezinhoLink, ZezinhoContext, ZezinhoQuestion } from "@/lib/zezinho/types";
-export { EMPTY_ZEZINHO_CONTEXT };
+export type { ZezinhoAnswer, ZezinhoLink, ZezinhoQuestion } from "@/lib/zezinho/types";
+export { EMPTY_REASONING_SESSION };
+export type { ReasoningSession };
 
 function greeting(now: Date): string {
   const hour = Number(new Intl.DateTimeFormat("pt-BR", { timeZone: SAO_PAULO_TZ, hour: "2-digit", hour12: false }).format(now));
@@ -790,10 +800,11 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
 }
 
 /**
- * Camada A/E do Zézinho 2.0: interpreta saudação, comparação de períodos e perguntas de
- * acompanhamento em texto livre. Quando nada disso se aplica, cai no roteador determinístico
- * existente (matchIntent + answerQuestion) — o fallback seguro exigido pela sprint. Este é o
- * modo "analítico local": funciona inteiramente sem nenhum provedor de IA configurado.
+ * Pipeline de raciocínio da Sprint 3.0 (Z4 — integração final): toda pergunta gerencial passa por
+ * intenção -> objetivo -> memória -> planner -> ferramentas -> raciocínio -> narrador. O roteador
+ * determinístico da 2.0 (`matchIntent`/`answerQuestion`) continua existindo, mas só como fallback
+ * para perguntas factuais simples (`inform`) — nunca captura primeiro uma pergunta que a nova
+ * arquitetura já reconhece. Ver docs/zezinho-3.0-architecture.md.
  */
 
 const GREETING_PATTERN = /^\s*(bom\s*dia|boa\s*tarde|boa\s*noite|oi|ol[áa]|e\s*a[íi])\b[\s,!.]*(z[eé]zinho)?[\s,!.]*/iu;
@@ -804,68 +815,59 @@ function extractGreeting(freeText: string): { hasGreeting: boolean; rest: string
   return { hasGreeting: true, rest: freeText.slice(match[0].length).trim() };
 }
 
-function detectKindFilter(text: string): "lavacao" | "estacionamento" | null {
-  const normalized = normalize(text);
-  if (normalized.includes("lavacao") || normalized.includes("lavagem")) return "lavacao";
-  if (normalized.includes("estacionamento")) return "estacionamento";
-  return null;
+/** Mensagens honestas quando o planner não conseguiu montar nenhuma ferramenta (sem período nem memória) — nunca inventa um padrão. */
+const NO_CONTEXT_MESSAGE: Record<string, string> = {
+  compare: "Ainda não consigo montar essa comparação — me diga um período, por exemplo \"compare esta semana com a passada\".",
+  recommend: "Ainda não tenho uma análise para basear uma recomendação. Peça algo como \"Compare esta semana com a passada\" primeiro.",
+  diagnose: "Ainda não tenho dados suficientes reunidos para diagnosticar isso — peça uma comparação de período primeiro.",
+  evaluate_decision: "Não tenho base suficiente ainda para avaliar isso com segurança.",
+  explain: "Não tenho uma análise anterior para explicar ainda — peça uma comparação primeiro.",
+  status_check: "Ainda não tenho dados suficientes para um panorama agora.",
+};
+
+/** Executa as ferramentas do planner em paralelo, medindo a duração de cada uma (seção "Desempenho" do pedido). */
+async function executeToolsWithTrace(calls: Awaited<ReturnType<typeof selectTools>>["toolCalls"]) {
+  const timed = await Promise.all(
+    calls.map(async (call) => {
+      const start = Date.now();
+      const result = await executeTool(call);
+      const trace: ToolTraceEntry = { id: call.id, durationMs: Date.now() - start, error: result.error };
+      return { result, trace };
+    }),
+  );
+  return { results: timed.map((t) => t.result), trace: timed.map((t) => t.trace) };
 }
 
-function isWhyFollowUp(text: string): boolean {
-  const n = normalize(text);
-  return n.includes("por que") || n.includes("por qu") || n.includes("o que explica") || n.includes("o que causou") || n.includes("o que aconteceu") || n.includes("qual foi o principal") || n.includes("quais servicos explicam") || n.includes("qual servico");
-}
+/** Atualiza a memória da sessão após uma resposta — período/objetivo só mudam quando a mensagem atual traz um novo, nunca são redefinidos à toa. */
+function buildNextSession(session: ReasoningSession, intentResult: IntentResult, objectiveResult: ObjectiveResult, reasoningResult: ReasoningResult, openerUsed: string | null): ReasoningSession {
+  let next = session;
+  const { entities } = intentResult;
 
-function isAreaComparisonFollowUp(text: string): boolean {
-  const n = normalize(text);
-  return n.includes("qual area") || n.includes("area esta performando") || n.includes("area performando") || n.includes("area foi melhor");
-}
+  if (entities.comparison) {
+    next = withActiveAnalysis(next, { periodA: entities.comparison.periodA, periodB: entities.comparison.periodB, areaFilter: entities.areaFilter ?? next.activeAreaFilter, objective: objectiveResult.objective });
+  } else if (entities.singlePeriod) {
+    next = withActiveAnalysis(next, { periodA: entities.singlePeriod, periodB: null, areaFilter: entities.areaFilter ?? next.activeAreaFilter, objective: objectiveResult.objective });
+  } else {
+    next = { ...next, activeObjective: objectiveResult.objective ?? next.activeObjective, activeAreaFilter: entities.areaFilter ?? next.activeAreaFilter };
+  }
 
-function isRevenueVsCashFollowUp(text: string): boolean {
-  const n = normalize(text);
-  return n.includes("faturamento") && (n.includes("entrada de caixa") || n.includes("entrada real") || (n.includes("caixa") && n.includes("operacional")));
+  for (const fact of reasoningResult.facts) next = withExplainedMetric(next, fact.key);
+  if (reasoningResult.diagnosis?.mainHypothesis) next = withInsightSummary(next, reasoningResult.diagnosis.mainHypothesis.statement);
+  if (openerUsed) next = withUsedOpener(next, openerUsed);
+
+  return next;
 }
 
 /**
- * Reconhece pedidos de recomendação/plano de ação (ex.: "o que devemos fazer?", "como podemos
- * melhorar?", "que faria para manter o crescimento?"). Checado ANTES de `parseComparisonExpression`
- * na resposta (bug fix): uma frase como "o que fazer nessa próxima semana" menciona "semana" e,
- * sem essa prioridade, era reinterpretada como um pedido de NOVA comparação (semana atual vs.
- * passada) em vez de uma recomendação — repetindo a resposta anterior. A intenção da mensagem
- * atual sempre vence sobre uma releitura literal de palavras que também aparecem no contexto.
+ * Único ponto de entrada da conversa em texto livre. `inform` e perguntas genuinamente fora do
+ * domínio gerencial (nenhum padrão da nova arquitetura nem palavra-chave do roteador antigo
+ * reconhece) caem no fallback — mas nunca voltam à comparação semanal por engano: se
+ * `matchIntent` não reconhece nenhuma palavra-chave específica, a pergunta é honestamente marcada
+ * como fora do escopo, em vez de silenciosamente devolver o resumo do dia.
  */
-const RECOMMENDATION_PATTERNS: RegExp[] = [
-  /\bque devemos fazer\b/,
-  /\bo que fazer\b/,
-  /\bvoce recomenda\b/,
-  /\bo que recomenda\b/,
-  /\bsua sugestao\b/,
-  /\bsua opiniao\b/,
-  /\bcomo podemos melhorar\b/,
-  /\bcomo melhorar\b/,
-  /\bcomo elevar\b/,
-  /\belevar\w*\s+(esses|os|nossos)?\s*numeros\b/,
-  /\baumentar\w*\s+(esses|os|nossos)?\s*numeros\b/,
-  /\baumentar\w*\s+(o\s+)?ticket\s*medio\b/,
-  /\bqual\s+(deve ser\s+)?(o\s+)?(nosso\s+)?plano\b/,
-  /\bonde devemos agir\b/,
-  /\bcomo gerente\b/,
-  /\bo que faria\b/,
-  /\bmanter\s+(o|esse|esta)?\s*crescimento\b/,
-  /\bplano de acao\b/,
-  /\bde um plano\b/,
-  /\bplano para\b/,
-];
-
-function isRecommendationFollowUp(text: string): boolean {
-  const n = normalize(text);
-  return RECOMMENDATION_PATTERNS.some((p) => p.test(n));
-}
-
-/** Único ponto de entrada da conversa em texto livre — usado pelo Server Action do Zézinho. */
-export async function answerFreeText(freeText: string, context: ZezinhoContext = EMPTY_ZEZINHO_CONTEXT): Promise<{ answer: ZezinhoAnswer; nextContext: ZezinhoContext }> {
+export async function answerFreeText(freeText: string, session: ReasoningSession = EMPTY_REASONING_SESSION): Promise<{ answer: ZezinhoAnswer; nextContext: ReasoningSession }> {
   const trimmed = freeText.trim();
-  if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: context };
+  if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: session };
 
   const { hasGreeting, rest } = extractGreeting(trimmed);
   const greetingText = hasGreeting ? `${greeting(new Date())}, Robério` : null;
@@ -873,90 +875,56 @@ export async function answerFreeText(freeText: string, context: ZezinhoContext =
   // Saudação pura ("Bom dia.") -> resumo do dia, nunca trava esperando mais contexto.
   if (hasGreeting && rest.length === 0) {
     const summary = await generateDailySummary();
-    return { answer: { text: summary, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: context };
+    return { answer: { text: summary, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: session };
   }
 
   const text = rest || trimmed;
+  const intentResult = classifyIntent(text, session);
 
-  // Pedido de recomendação/plano de ação — checado antes de tudo, com prioridade sobre o
-  // contexto herdado (bug fix): a intenção da mensagem atual nunca é substituída por uma releitura
-  // literal de palavras (ex.: "semana") que também aparecem na comparação anterior.
-  if (isRecommendationFollowUp(text)) {
-    if (!context.lastPeriodA) {
-      const prefix = greetingText ? `${greetingText}! ` : "";
-      return {
-        answer: {
-          text: `${prefix}Ainda não tenho uma comparação de períodos para basear uma recomendação. Peça algo como "Compare esta semana com a passada" primeiro e eu já sugiro os próximos passos.`,
-          links: [],
-        },
-        nextContext: context,
-      };
-    }
-    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: context.lastKindFilter ?? undefined });
-    const answer = buildRecommendationNarrative(report, { greeting: greetingText });
-    return { answer, nextContext: { ...context, lastTopic: "recomendacao" } };
+  // status_check já tem uma função dedicada e testada (generateDailySummary) — reaproveitada, não recalculada pelo pipeline novo.
+  if (intentResult.intent === "status_check") {
+    const summary = await generateDailySummary();
+    const finalText = greetingText ? `${greetingText}! ${summary}` : summary;
+    return { answer: { text: finalText, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: session };
   }
 
-  const kindFromText = detectKindFilter(text);
-  const newComparison = parseComparisonExpression(text);
+  if (intentResult.intent === "clarify_needed") {
+    const { answer } = narrate({ intent: "clarify_needed", objective: null, facts: [], findings: [], diagnosis: null, confidence: "baixa", gaps: [], recommendations: [], links: [], sources: [], toolTrace: [] }, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners });
+    return { answer, nextContext: session };
+  }
 
-  // Nova comparação de períodos detectada (inclui a pergunta obrigatória da sprint).
-  if (newComparison) {
-    const report = await buildComparisonReport(newComparison.periodA, newComparison.periodB, { kind: kindFromText ?? undefined });
-    const answer = buildComparisonNarrative(report, { greeting: greetingText, dayMatchedNote: newComparison.dayMatched ? newComparison.note : null });
+  // "inform": roteador determinístico existente decide o fato específico. Quando nenhuma
+  // palavra-chave bate (matchIntent cai no próprio fallback interno "como_esta_o_dia"), a
+  // pergunta é honestamente fora do domínio gerencial — nunca devolve o resumo do dia por engano.
+  if (intentResult.intent === "inform") {
+    const questionId = matchIntent(text);
+    if (questionId !== "como_esta_o_dia") {
+      const answer = await answerQuestion(questionId);
+      const finalAnswer = greetingText ? { ...answer, text: `${greetingText}! ${answer.text}` } : answer;
+      return { answer: finalAnswer, nextContext: session };
+    }
+    const prefix = greetingText ? `${greetingText}! ` : "";
     return {
-      answer,
-      nextContext: { lastPeriodA: newComparison.periodA, lastPeriodB: newComparison.periodB, lastKindFilter: kindFromText, lastTopic: "comparacao" },
+      answer: { text: `${prefix}Isso foge do que consigo analisar sobre a operação da Sta Mônica — converso sobre clientes, equipe, estoque, financeiro, JumpPark, marketing, agenda e estacionamento.`, links: [] },
+      nextContext: session,
     };
   }
 
-  // Acompanhamento: "E só a lavação?" — reaproveita os períodos da última comparação, muda o filtro.
-  if (kindFromText && context.lastPeriodA) {
-    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: kindFromText });
-    const answer = buildComparisonNarrative(report, { greeting: greetingText });
-    return { answer, nextContext: { ...context, lastKindFilter: kindFromText } };
-  }
+  // Pipeline de raciocínio: objetivo -> planner -> ferramentas -> raciocínio -> narrador.
+  const objectiveResult = inferObjective(intentResult.intent, intentResult.entities, session);
+  const plannerResult = selectTools(intentResult.intent, objectiveResult.objective, intentResult.entities, session);
 
-  // Acompanhamento: "Por que mudou?" / "Qual foi o principal serviço responsável?"
-  if (isWhyFollowUp(text) && context.lastPeriodA) {
-    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, { kind: context.lastKindFilter ?? undefined });
-    const answer = buildComparisonNarrative(report, { greeting: greetingText });
-    const top = report.topServicesA.slice(0, 3);
-    const topText = top.length > 0 ? ` Os serviços que mais faturaram no período foram: ${top.map((s) => `${s.description} (${formatCurrency(s.amount)})`).join(", ")}.` : "";
-    return { answer: { ...answer, text: answer.text + topText }, nextContext: context };
-  }
-
-  // Acompanhamento: "Qual área está performando melhor?"
-  if (isAreaComparisonFollowUp(text) && context.lastPeriodA) {
-    const report = await buildComparisonReport(context.lastPeriodA, context.lastPeriodB, {});
-    const answer = buildComparisonNarrative(report, { greeting: greetingText });
-    const wash = report.metrics.find((m) => m.key === "washRevenue");
-    const parking = report.metrics.find((m) => m.key === "parkingRevenue");
-    let prefix = "";
-    if (wash && parking && wash.comparison.deltaPercent !== null && parking.comparison.deltaPercent !== null) {
-      const better = wash.comparison.deltaPercent >= parking.comparison.deltaPercent ? "lavação" : "estacionamento";
-      prefix = `A área que mais performou foi a ${better}. `;
-    }
-    return { answer: { ...answer, text: prefix + answer.text }, nextContext: context };
-  }
-
-  // Acompanhamento: "Compare faturamento operacional e entrada de caixa." — nunca mistura os dois sem explicar.
-  if (isRevenueVsCashFollowUp(text)) {
-    const period = context.lastPeriodA ?? resolvePeriod("month");
-    const report = await buildComparisonReport(period, context.lastPeriodA ? context.lastPeriodB : null, {});
-    if (!report.jumpparkConfigured) return { answer: { text: "O JumpPark não está configurado neste ambiente.", links: [] }, nextContext: context };
-    const revenue = report.metrics.find((m) => m.key === "revenue");
-    const cash = report.metrics.find((m) => m.key === "cashEntradas");
+  if (plannerResult.toolCalls.length === 0) {
+    const message = NO_CONTEXT_MESSAGE[intentResult.intent] ?? "Não tenho dados suficientes reunidos para responder isso com segurança agora.";
     const prefix = greetingText ? `${greetingText}! ` : "";
-    const text2 =
-      `${prefix}No período de ${formatDateBR(period.from)} a ${formatDateBR(period.to)}, o faturamento operacional (JumpPark) foi ${formatCurrency(revenue?.a ?? 0)} e as entradas reais de caixa (Neon) foram ${formatCurrency(cash?.a ?? 0)}. ` +
-      `Esses números são diferentes de propósito: faturamento operacional é o valor das ordens de serviço fechadas, enquanto entrada de caixa é o dinheiro que efetivamente entrou nas contas — nem toda ordem vira entrada no mesmo dia, e o caixa pode ter entradas que não vêm da operação.`;
-    return { answer: { text: text2, links: [{ label: "Ver Movimentações", href: `/movimentacoes?period=custom&from=${period.from}&to=${period.to}` }, { label: "Ver Fluxo de Caixa", href: "/financeiro/fluxo-de-caixa" }], sources: buildComparisonNarrative(report).sources }, nextContext: context };
+    return { answer: { text: `${prefix}${message}`, links: [] }, nextContext: session };
   }
 
-  // Fallback determinístico existente — nunca deixa a pergunta sem resposta.
-  const questionId = matchIntent(text);
-  const answer = await answerQuestion(questionId);
-  const finalAnswer = greetingText ? { ...answer, text: `${greetingText}! ${answer.text}` } : answer;
-  return { answer: finalAnswer, nextContext: context };
+  const { results: toolResults, trace: toolTrace } = await executeToolsWithTrace(plannerResult.toolCalls);
+  const reasoningResult = reason({ intent: intentResult.intent, objective: objectiveResult.objective, entities: intentResult.entities, memory: session, toolCalls: plannerResult.toolCalls, toolResults, toolTrace }, text);
+  const dayMatchedNote = intentResult.entities.comparison?.dayMatched ? intentResult.entities.comparison.note : null;
+  const { answer, openerUsed } = narrate(reasoningResult, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners, dayMatchedNote });
+
+  const nextSession = buildNextSession(session, intentResult, objectiveResult, reasoningResult, openerUsed);
+  return { answer, nextContext: nextSession };
 }

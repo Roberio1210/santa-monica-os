@@ -24,6 +24,20 @@ function greetingPrefix(greeting?: string | null): string {
   return greeting ? `${greeting}! ` : "";
 }
 
+/**
+ * Une uma abertura (ex.: "Pensando como gerente aqui,") a uma frase que normalmente viria
+ * capitalizada — se a abertura não termina em pontuação terminal (. ! ? :), a frase seguinte
+ * entra em minúscula para continuar a mesma oração, em vez de virar duas frases desconexas
+ * ("Pensando como gerente aqui, Validar...").
+ */
+function joinAfterLead(lead: string, sentence: string): string {
+  const trimmedLead = lead.trimEnd();
+  if (trimmedLead.length === 0) return sentence;
+  const endsWithTerminal = /[.!?:]$/.test(trimmedLead);
+  const joinedSentence = endsWithTerminal || sentence.length === 0 ? sentence : `${sentence.charAt(0).toLowerCase()}${sentence.slice(1)}`;
+  return `${trimmedLead} ${joinedSentence}`;
+}
+
 function factsFor(result: ReasoningResult): string[] {
   return result.facts.map((f) => f.statement);
 }
@@ -31,12 +45,12 @@ function factsFor(result: ReasoningResult): string[] {
 function narrateCompare(result: ReasoningResult, opts: NarrateOptions): NarrateResult {
   const opener = pickOpener("compare", opts.usedOpeners);
   const mainFact = result.facts.find((f) => f.key === "revenue") ?? result.facts[0];
-  const parts: string[] = [greetingPrefix(opts.greeting) + (opener ? `${opener} ` : "")];
-  if (mainFact) parts.push(mainFact.statement + ".");
+  const lead = greetingPrefix(opts.greeting) + (opener ? `${opener} ` : "");
+  const parts: string[] = [mainFact ? joinAfterLead(lead, mainFact.statement + ".") : lead.trim()];
   if (opts.dayMatchedNote) parts.push(opts.dayMatchedNote);
   if (result.diagnosis?.mainHypothesis) parts.push(result.diagnosis.mainHypothesis.statement);
   else if (result.facts.length > 1) parts.push(result.facts[1].statement + ".");
-  if (result.gaps.length > 0) parts.push(`Não tenho ${result.gaps[0].description.charAt(0).toLowerCase()}${result.gaps[0].description.slice(1)}`);
+  if (result.gaps.length > 0) parts.push(result.gaps[0].description);
 
   return { answer: { text: parts.join(" ").trim(), links: result.links, sources: result.sources, facts: factsFor(result), confidence: result.confidence, followUps: ["O que você faria?", "Onde estamos errando?"] }, openerUsed: opener };
 }
@@ -52,7 +66,7 @@ function narrateRecommend(result: ReasoningResult, opts: NarrateOptions): Narrat
   let text: string;
   if (result.recommendations.length === 1) {
     const r = result.recommendations[0];
-    text = `${prefix}${r.action} ${r.reason}`;
+    text = `${joinAfterLead(prefix, r.action)} ${r.reason}`;
   } else {
     const lines = [prefix.trim()];
     result.recommendations.forEach((r, i) => lines.push(`${i + 1}. ${r.action} ${r.reason}`));
@@ -70,7 +84,7 @@ function narrateDiagnose(result: ReasoningResult, opts: NarrateOptions): Narrate
     return { answer: { text: `${prefix}não encontrei um padrão claro nos dados disponíveis agora para apontar uma causa principal.`, links: result.links, sources: result.sources, confidence: "baixa" }, openerUsed: opener };
   }
 
-  const parts: string[] = [`${prefix}${result.diagnosis.mainHypothesis.statement}`];
+  const parts: string[] = [joinAfterLead(prefix, result.diagnosis.mainHypothesis.statement)];
   if (result.diagnosis.alternativeHypotheses.length > 0) {
     parts.push(`Outra possibilidade: ${result.diagnosis.alternativeHypotheses[0].statement}`);
   }
@@ -101,15 +115,29 @@ function narrateExplain(result: ReasoningResult, opts: NarrateOptions): NarrateR
   const opener = pickOpener("explain", opts.usedOpeners);
   const prefix = greetingPrefix(opts.greeting) + (opener ? `${opener} ` : "");
   const statement = result.diagnosis?.mainHypothesis?.statement ?? "não encontrei uma relação clara nos dados disponíveis para essa pergunta.";
-  return { answer: { text: `${prefix}${statement}`, links: result.links, sources: result.sources, facts: factsFor(result), confidence: result.confidence, followUps: ["O que você faria?"] }, openerUsed: opener };
+  return { answer: { text: joinAfterLead(prefix, statement), links: result.links, sources: result.sources, facts: factsFor(result), confidence: result.confidence, followUps: ["O que você faria?"] }, openerUsed: opener };
 }
 
 function narrateClarifyNeeded(opts: NarrateOptions): NarrateResult {
   return { answer: { text: `${greetingPrefix(opts.greeting)}não entendi bem o que você está perguntando — pode reformular?`, links: [] }, openerUsed: null };
 }
 
+/**
+ * Quando não há nenhum fato (todas as fontes falharam ou não estão configuradas), a resposta é
+ * só a lacuna, honesta e direta — nunca uma narrativa fragmentada tentando falar de dados que não
+ * existem (ex.: "JumpPark não configurado neste ambiente." já é uma frase completa e correta).
+ */
+function narrateNoFacts(result: ReasoningResult, opts: NarrateOptions): NarrateResult {
+  const gapText = result.gaps[0]?.description ?? "não consegui reunir dados suficientes para responder isso agora.";
+  return { answer: { text: `${greetingPrefix(opts.greeting)}${gapText}`, links: result.links, sources: result.sources, confidence: "baixa" }, openerUsed: null };
+}
+
 /** Ponto de entrada único do narrador — escolhe o formato certo pela intenção, nunca despeja tudo. */
 export function narrate(result: ReasoningResult, opts: NarrateOptions): NarrateResult {
+  if (result.facts.length === 0 && result.gaps.length > 0 && result.intent !== "clarify_needed") {
+    return narrateNoFacts(result, opts);
+  }
+
   switch (result.intent) {
     case "compare":
       return narrateCompare(result, opts);

@@ -149,13 +149,19 @@ function recommendStaffing(facts: Fact[]): Recommendation[] {
   }];
 }
 
-function recommendInventory(facts: Fact[]): Recommendation[] {
-  const recipeGap = facts.find((f) => f.key === "recipe_gap");
-  if (recipeGap) {
+/**
+ * `recipe_gap` é a chave de um ACHADO (`findings`), não de um fato — bug corrigido: a versão
+ * anterior procurava essa chave dentro de `facts`, onde ela nunca existe, então a recomendação de
+ * calibração nunca era gerada mesmo quando o alerta real de "serviços sem receita" estava presente.
+ */
+function recommendInventory(facts: Fact[], findings: Finding[]): Recommendation[] {
+  const recipeGapFinding = findings.find((f) => f.key === "recipe_gap");
+  if (recipeGapFinding) {
+    const evidenceFact = facts.find((f) => f.key === recipeGapFinding.factKeys[0]);
     return [{
       action: "Calibrar as receitas de consumo dos serviços que ainda não têm — sem isso não dá para afirmar desperdício com segurança.",
-      reason: recipeGap.statement,
-      evidenceFactKeys: [recipeGap.key],
+      reason: recipeGapFinding.statement,
+      evidenceFactKeys: evidenceFact ? [evidenceFact.key] : [],
       priority: "alta",
       risk: null,
       howToVerify: "Depois de calibrado, comparar consumo esperado vs. real por ordem em /estoque/calibracao.",
@@ -173,7 +179,7 @@ function recommendInventory(facts: Fact[]): Recommendation[] {
 
 function genericFromDiagnosis(mainStatement: string | null): Recommendation[] {
   if (!mainStatement) return [];
-  return [{ action: "Validar essa hipótese antes de agir.", reason: mainStatement, evidenceFactKeys: [], priority: "media", risk: null, howToVerify: "Acompanhar o mesmo indicador no próximo período para confirmar a tendência." }];
+  return [{ action: "Acompanhar esse indicador de perto no próximo período.", reason: mainStatement, evidenceFactKeys: [], priority: "media", risk: null, howToVerify: "Comparar o mesmo número na próxima análise para confirmar se a tendência se mantém." }];
 }
 
 export function deriveRecommendations(facts: Fact[], findings: Finding[], objective: BusinessObjective | null, entities: ExtractedEntities, rawTextNormalized: string, mainHypothesis: string | null): Recommendation[] {
@@ -187,7 +193,7 @@ export function deriveRecommendations(facts: Fact[], findings: Finding[], object
     case "staffing_capacity":
       return recommendStaffing(facts);
     case "reduce_costs":
-      if (entities.topic === "estoque") return recommendInventory(facts);
+      if (entities.topic === "estoque") return recommendInventory(facts, findings);
       return genericFromDiagnosis(mainHypothesis);
     default:
       return genericFromDiagnosis(mainHypothesis);
