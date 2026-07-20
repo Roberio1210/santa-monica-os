@@ -8,6 +8,8 @@ import { fetchCentralOverview, computeConsolidatedAlerts } from "@/lib/operation
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import { buildComparisonReport, computePeakHour, metric, packageCounts, sumCashInRange, topServicesByRevenue, type ComparisonMetric, type PackageCounts } from "@/lib/zezinho/comparison-engine";
+import { fetchWeatherForecast } from "@/lib/integrations/weather/service";
+import { fetchActiveGoal, computeGoalProgress } from "@/lib/goals/service";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolResult } from "@/lib/zezinho/tools/types";
 
@@ -157,6 +159,41 @@ async function runFullPeriodComparison(call: ToolCall): Promise<ToolResult> {
   return { id: "full_period_comparison", source, error: report.errors[0] ?? null, report };
 }
 
+async function runWeatherForecast(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.weather_forecast.source;
+  const forecast = await fetchWeatherForecast();
+  return { id: "weather_forecast", source, error: forecast.error, forecast };
+}
+
+/**
+ * Progresso da meta — busca a meta ativa da área (padrão "lavacao", único cadastrada até agora)
+ * e o faturamento já realizado no período dela (do início do período até hoje), reaproveitando
+ * `fetchOperationalOrders` (mesma fonte de `jumppark_period_summary`). Sem meta cadastrada para
+ * o período atual, devolve `progress: null` honestamente — nunca assume a de outro mês.
+ */
+async function runGoalProgress(call: ToolCall): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.goal_progress.source;
+  const area = call.goalArea ?? "lavacao";
+  const todayIso = saoPauloDateISO();
+
+  try {
+    const goal = await fetchActiveGoal(area, todayIso);
+    if (!goal) return { id: "goal_progress", source, error: `Nenhuma meta configurada para "${area}" no período atual.`, progress: null };
+
+    if (!isJumpParkConfigured()) return { id: "goal_progress", source, error: "JumpPark não configurado neste ambiente — não é possível calcular o valor realizado.", progress: null };
+
+    const result = await fetchOperationalOrders(goal.periodStart, todayIso);
+    if (result.error) return { id: "goal_progress", source, error: result.error, progress: null };
+
+    const relevantOrders = area === "consolidado" ? result.orders : result.orders.filter((o) => o.kind === area);
+    const currentAmount = relevantOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    return { id: "goal_progress", source, error: null, progress: computeGoalProgress(goal, currentAmount, todayIso) };
+  } catch {
+    return { id: "goal_progress", source, error: "Não foi possível calcular o progresso da meta.", progress: null };
+  }
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -176,6 +213,10 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runCentralAlerts();
     case "full_period_comparison":
       return runFullPeriodComparison(call);
+    case "weather_forecast":
+      return runWeatherForecast();
+    case "goal_progress":
+      return runGoalProgress(call);
   }
 }
 

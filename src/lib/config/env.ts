@@ -30,6 +30,25 @@ export function isJumpParkConfigured(): boolean {
   return getJumpParkEnv() !== null;
 }
 
+export interface WeatherEnv {
+  apiKey: string;
+  /** Cidade/UF/país no formato aceito pela API (ex.: "Florianópolis,SC,BR") ou "lat,lon". */
+  location: string;
+}
+
+const DEFAULT_WEATHER_LOCATION = "Florianópolis,SC,BR";
+
+export function getWeatherEnv(): WeatherEnv | null {
+  const apiKey = process.env.WEATHER_API_KEY;
+  if (!apiKey) return null;
+  const location = process.env.WEATHER_LOCATION || DEFAULT_WEATHER_LOCATION;
+  return { apiKey, location };
+}
+
+export function isWeatherConfigured(): boolean {
+  return getWeatherEnv() !== null;
+}
+
 export type InventoryConsumptionMode = "disabled" | "preview_only" | "preview_and_confirm";
 
 const VALID_CONSUMPTION_MODES: InventoryConsumptionMode[] = ["disabled", "preview_only", "preview_and_confirm"];

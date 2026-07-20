@@ -4,6 +4,8 @@ import type { BusinessObjective } from "@/lib/zezinho/objective/types";
 import type { CrmCustomer } from "@/lib/crm/types";
 import type { InventorySummary } from "@/lib/inventory/service";
 import type { ConsolidatedAlert } from "@/lib/operations/central";
+import type { WeatherForecastResult } from "@/lib/integrations/weather/types";
+import type { GoalArea, GoalProgress } from "@/lib/goals/types";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -19,7 +21,9 @@ export type ToolId =
   | "crm_customers"
   | "inventory_overview"
   | "central_alerts"
-  | "full_period_comparison";
+  | "full_period_comparison"
+  | "weather_forecast"
+  | "goal_progress";
 
 export type ToolCostHint = "low" | "medium" | "high";
 
@@ -40,6 +44,8 @@ export interface ToolCall {
   periodA: PeriodRange | null;
   periodB: PeriodRange | null;
   filterKind: "lavacao" | "estacionamento" | null;
+  /** Só usado por `goal_progress` — área da meta a consultar; `null` = "consolidado". */
+  goalArea?: GoalArea | null;
 }
 
 interface ToolResultBase {
@@ -55,4 +61,6 @@ export type ToolResult =
   | (ToolResultBase & { id: "crm_customers"; jumpparkConfigured: boolean; customers: CrmCustomer[] })
   | (ToolResultBase & { id: "inventory_overview"; summary: InventorySummary })
   | (ToolResultBase & { id: "central_alerts"; alerts: ConsolidatedAlert[] })
-  | (ToolResultBase & { id: "full_period_comparison"; report: ComparisonReport });
+  | (ToolResultBase & { id: "full_period_comparison"; report: ComparisonReport })
+  | (ToolResultBase & { id: "weather_forecast"; forecast: WeatherForecastResult })
+  | (ToolResultBase & { id: "goal_progress"; progress: GoalProgress | null });

@@ -78,4 +78,28 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     requiresPeriod: true,
     costHint: "high",
   },
+  /**
+   * Novas na Sprint 4.0 (Z1) — registradas no catálogo e já com executor funcional, mas ainda
+   * SEM entrada na tabela objetivo->ferramentas do planner (`objectives: []`): a seletividade
+   * (quando o clima/meta entram numa resposta) é trabalho do Z2, não deste checkpoint — mesma
+   * disciplina incremental já usada para `inventory_overview` na Sprint 3.0.
+   */
+  weather_forecast: {
+    id: "weather_forecast",
+    label: "Previsão do tempo (hoje/amanhã)",
+    source: "OpenWeatherMap",
+    reuses: "fetchWeatherForecast (src/lib/integrations/weather/service.ts)",
+    objectives: [],
+    requiresPeriod: false,
+    costHint: "low",
+  },
+  goal_progress: {
+    id: "goal_progress",
+    label: "Progresso da meta (percentual, ritmo, projeção, faixas de prêmio)",
+    source: "Metas (Neon)",
+    reuses: "fetchActiveGoal + computeGoalProgress (src/lib/goals/service.ts) + jumppark_period_summary para o valor atual",
+    objectives: [],
+    requiresPeriod: false,
+    costHint: "medium",
+  },
 };
