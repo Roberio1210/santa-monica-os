@@ -74,7 +74,7 @@ describe("detectCrossDirectorHypotheses — 'Contradições' (Sprint 5.0, Z2, de
 describe("computeExecutiveDecisions — as três perguntas centrais (Sprint 5.0, Z2, decisão do usuário)", () => {
   it("'o que merece atenção hoje' prioriza hipóteses cruzadas antes dos riscos individuais, no máximo 3", () => {
     const reports = [report({ director: "financeiro", risks: [{ statement: "risco 1", evidenceFactKeys: [] }, { statement: "risco 2", evidenceFactKeys: [] }, { statement: "risco 3", evidenceFactKeys: [] }, { statement: "risco 4", evidenceFactKeys: [] }] })];
-    const hypotheses = [{ description: "hipótese cruzada", evidenceFactKeys: [], basis: [], confidenceScore: 60, confidenceLevel: "media" as const, limitations: [] }];
+    const hypotheses = [{ description: "hipótese cruzada", evidenceFactKeys: [], contraryEvidenceFactKeys: [], basis: [], confidenceScore: 60, confidenceLevel: "media" as const, limitations: [] }];
     const decisions = computeExecutiveDecisions(reports, hypotheses);
     expect(decisions.whatDeservesAttentionToday.length).toBeLessThanOrEqual(3);
     expect(decisions.whatDeservesAttentionToday[0].statement).toBe("hipótese cruzada");

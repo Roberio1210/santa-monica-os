@@ -408,9 +408,13 @@ Mesmo formato de checkpoints pequenos e aprováveis um a um, como Z1-Z4 da Sprin
 - **Z2 — Prioridade e Plano de Ação**: `computePriority` formal, `Recommendation.steps`,
   consolidação semântica real no Estratégico (deduplicação, detecção de conflito). Reescreve
   `recommend*` de `reasoning/recommend.ts` para devolver passos.
-- **Z3 — Memória Operacional**: schema Drizzle aditivo (`director_observations`), gravação
-  idempotente por Diretor por dia, `computeMemoryNote` com as 3 janelas nomeadas, testes com
-  histórico real semeado no Neon.
+- **Z3A — Memória Conversacional Gerencial** (ver seção 13): memória de sessão, nunca persistida,
+  mais Revisão Cruzada e Evidências Contrárias entre Diretores e o Executive Timeline
+  (arquitetura, ainda sem banco).
+- **Z3B — Memória Operacional persistente**: schema Drizzle aditivo (`director_observations`),
+  gravação idempotente por Diretor por dia, `computeMemoryNote` com as 3 janelas nomeadas, testes
+  com histórico real semeado no Neon. (Chamado de "Z3" na proposta original desta seção — dividido
+  em Z3A/Z3B a pedido do usuário antes do início da implementação.)
 - **Z4 — Reunião de Diretoria + Briefing**: `narrateConsolidatedReport` (ou extensão do narrador
   Z4), `service.ts` decidindo quando acionar 1 Diretor vs. a Diretoria inteira, Briefing
   substituindo o "Resumo do dia", os 20 testes de aceitação da praxe, deploy, validação em
@@ -541,7 +545,90 @@ pronta na estrutura — a integração ao narrador do Executive Briefing é trab
 - **Deduplicação semântica fina** entre riscos/oportunidades individuais (para além dos dois
   padrões nomeados na seção 12.3) continua um refinamento futuro.
 - **Persistência do Plano de Ação** (transições reais entre estados) depende da Memória
-  Operacional (Z3) ou de uma tabela própria — arquitetura pronta, sem banco ainda, como pedido
+  Operacional (Z3B) ou de uma tabela própria — arquitetura pronta, sem banco ainda, como pedido
   ("ainda não quero persistência, somente arquitetura").
 - Nenhuma mudança no chat vivo (`service.ts`)/UI nesta checkpoint — a Diretoria continua não
   conectada a nada visível ao usuário, como no Z1.
+
+---
+
+## 13. Checkpoint Z3A — Memória Conversacional Gerencial (implementado, decisão do usuário)
+
+Antes de iniciar a Memória Operacional persistente (originalmente "Z3"), o usuário pediu para
+dividi-la em duas partes: Z3A cobre tudo que pode existir **sem banco** — memória de sessão,
+Revisão Cruzada entre Diretores, Evidências Contrárias e o Executive Timeline. Z3B (seção 10) fica
+para a persistência real.
+
+### 13.1 Memória Conversacional (`directors/conversationalMemory.ts`)
+
+"O Zézinho deve manter contexto durante toda a conversa... essa memória dura apenas durante a
+conversa. Não deve ser persistida." Mesmo espírito de `memory/session.ts` (`ReasoningSession`) —
+funções puras, nunca mutam, sempre devolvem uma nova memória; carregada pelo cliente e devolvida a
+cada resposta, exatamente como a sessão de raciocínio já funciona desde a Sprint 3.0. Nenhuma
+escrita em banco nasce aqui.
+
+```
+ConversationTurn { askedAt, question, hypotheses, decisions, recommendations, actionPlans }
+ConversationalMemory { turns: ConversationTurn[] }
+```
+
+`buildTurnFromConsolidatedReport` lê o `ConsolidatedReport` já pronto (nunca recalcula).
+`withTurn` respeita um limite de segurança de 20 turnos (não é uma decisão de produto, só um teto
+para o payload client-held não crescer sem fim numa conversa muito longa) — mantém sempre os mais
+recentes. Consultas: `recentQuestions`, `wasHypothesisAlreadyDiscussed`,
+`wasRecommendationAlreadyGiven`, `allHypothesesDiscussed`, `allRecommendationsGiven`,
+`allActionPlansSuggested` — a integração ao narrador (para o Zézinho evitar repetir o que já disse
+na mesma conversa) é trabalho do próximo checkpoint que tocar `service.ts`/o narrador.
+
+### 13.2 Revisão Cruzada e Evidências Contrárias (`directors/crossReview.ts`)
+
+"Os Diretores devem poder confirmar, complementar ou contestar hipóteses uns dos outros antes da
+consolidação do Diretor Estratégico." Cada revisão exige evidência **própria e real** do Diretor
+revisor no mesmo domínio (`basis`) da hipótese — nunca uma opinião solta:
+
+- **`confirma`**: o revisor tem um risco real no mesmo domínio (mesma leitura da hipótese).
+- **`contesta`**: o revisor tem uma oportunidade real no mesmo domínio — uma tensão real entre
+  leituras independentes de Diretores diferentes, nunca uma "IA arbitrando" um desacordo.
+- Sem nenhuma evidência própria no domínio, o Diretor simplesmente não revisa — honestidade antes
+  de opinião.
+
+`Hypothesis` ganhou o campo `contraryEvidenceFactKeys` ("toda hipótese poderá conter evidências
+favoráveis e evidências contrárias — isso melhora o cálculo de confiança"). `recalculateConfidence`
+ajusta a banda numérica: +8 por confirmação, −18 por contestação (evidência contrária pesa mais que
+uma segunda confirmação na mesma direção), sempre entre 0 e 100, com a limitação declarada
+explicitamente quando há contestação. `reviewHypotheses` roda contra as hipóteses de cada Diretor
+e as hipóteses cruzadas do Estratégico, e nunca deixa um Diretor revisar a própria hipótese.
+`consolidate()` (`directors/estrategico.ts`) chama a Revisão Cruzada antes da consolidação final,
+exatamente na ordem pedida, e devolve o resultado em `ConsolidatedReport.reviewedHypotheses` —
+`reports[].hypotheses` continua intocado como registro original de auditoria.
+
+### 13.3 Executive Timeline (`directors/executiveTimeline.ts`)
+
+"Estrutura capaz de resumir: últimos dias, mudanças, tendências, acontecimentos importantes. Ainda
+sem persistência, apenas arquitetura." Sem um banco de observações diárias (isso é o Z3B), a única
+fonte real disponível hoje é a própria `ConversationalMemory` da sessão, agrupada por dia:
+
+```
+TimelineEntry { date, summary, changes, importantEvents }
+ExecutiveTimeline { entries: TimelineEntry[], trends: string[] }
+```
+
+`computeChanges` calcula um diff real entre dois turnos (só o que é novo, nunca uma lista repetida
+do que já existia). `importantEvents` só lista hipóteses de alta confiança e planos de alta
+prioridade — nunca todo o volume do dia, mesma disciplina de "nunca mostrar todos os N alertas".
+`computeTrends` exige um mínimo de 3 dias de histórico; abaixo disso devolve honestamente "ainda
+não há dias suficientes", nunca extrapola uma tendência a partir de 1-2 dias — mesma disciplina de
+`historical-pattern.ts` desde a Sprint 4.0/Z2. A mesma forma `TimelineEntry` será alimentada por
+dado persistido real quando o Z3B existir, sem precisar ser redesenhada.
+
+### 13.4 O que fica para depois
+
+- Integração da Memória Conversacional ao `service.ts`/narrador vivo do Zézinho — Z3A entrega só a
+  arquitetura pura, testada e pronta para ser plugada; nenhuma mudança no chat vivo/UI ainda.
+- Persistência real (Z3B) — a mesma forma de `ConversationTurn`/`TimelineEntry` foi desenhada para
+  não precisar de redesenho quando o banco existir.
+- `complementa` (o terceiro `ReviewStance`) está no tipo, mas `reviewFrom` hoje só produz
+  `confirma`/`contesta` — os dois únicos casos com evidência própria clara e não ambígua
+  (risco vs. risco, oportunidade vs. risco). Um critério honesto para `complementa` (evidência
+  relacionada, mas nem confirmando nem contestando) fica para quando houver um caso real
+  observado, em vez de um critério inventado agora para preencher o tipo.

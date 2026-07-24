@@ -36,12 +36,17 @@ function basisLabelFor(factKey: string): string {
   return BASIS_LABELS.find((b) => b.test(factKey))?.label ?? factKey;
 }
 
+/** Exportado para `directors/crossReview.ts` (Sprint 5.0, Z3A) comparar o domínio de uma hipótese com o domínio dos riscos/oportunidades de outro Diretor, sem duplicar a tabela de rótulos. */
+export function basisLabelsFor(factKeys: string[]): string[] {
+  return Array.from(new Set(factKeys.map(basisLabelFor)));
+}
+
 const MIN_FACTS_FOR_CONCLUSIVE = 2;
 
 function toHypothesis(h: ReasoningHypothesis, findingByKey: Map<string, Finding>): Hypothesis {
   const supportingFindings = h.supportingFindingKeys.map((k) => findingByKey.get(k)).filter((f): f is Finding => !!f);
   const evidenceFactKeys = Array.from(new Set(supportingFindings.flatMap((f) => f.factKeys)));
-  const basis = Array.from(new Set(evidenceFactKeys.map(basisLabelFor)));
+  const basis = basisLabelsFor(evidenceFactKeys);
 
   const limitations: string[] = [];
   if (evidenceFactKeys.length < MIN_FACTS_FOR_CONCLUSIVE) limitations.push("Baseada em poucos fatos — trate como indicativa, não conclusiva.");
@@ -49,6 +54,9 @@ function toHypothesis(h: ReasoningHypothesis, findingByKey: Map<string, Finding>
   return {
     description: h.statement,
     evidenceFactKeys,
+    // Sempre vazia neste ponto — só é preenchida depois da Revisão Cruzada (Sprint 5.0, Z3A,
+    // `directors/crossReview.ts`), quando outro Diretor apresenta evidência que contesta.
+    contraryEvidenceFactKeys: [],
     basis,
     confidenceScore: CONFIDENCE_SCORE_BAND[h.confidence],
     confidenceLevel: h.confidence,

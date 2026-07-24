@@ -1,5 +1,6 @@
 import { computeImpact, computePriority } from "@/lib/zezinho/directors/priority";
 import { CONFIDENCE_SCORE_BAND } from "@/lib/zezinho/directors/hypotheses";
+import { reviewHypotheses } from "@/lib/zezinho/directors/crossReview";
 import type { Correlation, DirectorId, DirectorReport, ConsolidatedReport, ExecutiveAdvice, ExecutiveDecisions, Hypothesis, PriorityLevel } from "@/lib/zezinho/directors/types";
 import type { ConfidenceLevel, EvidencedClaim, Recommendation } from "@/lib/zezinho/reasoning/types";
 
@@ -40,6 +41,7 @@ function detectConversionBottleneck(reports: DirectorReport[]): Hypothesis | nul
     description:
       "Pode haver um gargalo de conversão: o ritmo da meta está abaixo do necessário, o movimento está abaixo do padrão histórico para o dia, e há clientes disponíveis para contato ainda sem retorno — o problema pode não ser falta de demanda, e sim conversão dela.",
     evidenceFactKeys: Array.from(new Set([...financeiroRisk.evidenceFactKeys, ...operacoesRisk.evidenceFactKeys, ...comercialOpportunity.evidenceFactKeys])),
+    contraryEvidenceFactKeys: [],
     basis: ["financeiro", "operação", "clientes"],
     confidenceScore: CONFIDENCE_SCORE_BAND.media,
     confidenceLevel: "media",
@@ -67,6 +69,7 @@ function detectLeadCaptureProblem(reports: DirectorReport[]): Hypothesis | null 
   return {
     description: "Muito tráfego de marketing, mas poucos contatos registrados no CRM no mesmo período — possível problema na captura de leads (formulário, tempo de resposta, ou perda entre o canal e o CRM).",
     evidenceFactKeys: [highTrafficFact.key, lowContactFact.key],
+    contraryEvidenceFactKeys: [],
     basis: ["marketing", "clientes"],
     confidenceScore: CONFIDENCE_SCORE_BAND.media,
     confidenceLevel: "media",
@@ -158,6 +161,10 @@ export function consolidate(reports: DirectorReport[], correlations: Correlation
   const participatingDirectors = reports.filter((r) => r.shouldParticipateInBriefing).map((r) => r.director);
 
   const crossDirectorHypotheses = detectCrossDirectorHypotheses(reports);
+  // Revisão Cruzada (Sprint 5.0, Z3A) — roda ANTES da consolidação, exatamente como pedido: "os
+  // Diretores devem poder confirmar, complementar ou contestar hipóteses uns dos outros antes da
+  // consolidação do Diretor Estratégico".
+  const reviewedHypotheses = reviewHypotheses(reports, crossDirectorHypotheses);
   const decisions = computeExecutiveDecisions(reports, crossDirectorHypotheses);
   const advice = computeExecutiveAdvice(decisions, worstDataConfidence(reports));
   const overallPriority = computeOverallPriority(reports);
@@ -171,6 +178,7 @@ export function consolidate(reports: DirectorReport[], correlations: Correlation
     actionPlans,
     correlations,
     crossDirectorHypotheses,
+    reviewedHypotheses,
     decisions,
     advice,
     overallPriority,

@@ -36,13 +36,45 @@ export type PriorityLevel = "alta" | "media" | "baixa";
  */
 export interface Hypothesis {
   description: string;
-  /** Chaves de `Fact` usadas — rastreável, técnico. */
+  /** Evidências favoráveis — chaves de `Fact` usadas, rastreável, técnico. */
   evidenceFactKeys: string[];
+  /**
+   * Evidências contrárias (Sprint 5.0, Z3A, decisão do usuário: "toda hipótese poderá conter
+   * evidências favoráveis e evidências contrárias — isso melhora o cálculo de confiança").
+   * Sempre vazia até a Revisão Cruzada (`directors/crossReview.ts`) rodar — nunca preenchida por
+   * suposição, só quando outro Diretor apresenta evidência real que aponta na direção oposta.
+   */
+  contraryEvidenceFactKeys: string[];
   /** Rótulos legíveis das fontes usadas (ex.: "clima", "histórico", "operação") — o que o usuário reconhece, não a chave interna. */
   basis: string[];
   confidenceScore: number;
   confidenceLevel: ConfidenceLevel;
   limitations: string[];
+}
+
+/**
+ * Revisão Cruzada (Sprint 5.0, Z3A, novo componente, decisão do usuário) — "os Diretores devem
+ * poder confirmar, complementar ou contestar hipóteses uns dos outros antes da consolidação do
+ * Diretor Estratégico". Uma `HypothesisReview` só existe quando o Diretor revisor tem evidência
+ * PRÓPRIA real no mesmo domínio da hipótese (`directors/crossReview.ts`) — nunca uma opinião sem
+ * lastro. `confirma` = revisor tem risco/oportunidade no mesmo domínio, mesma leitura;
+ * `contesta` = revisor tem oportunidade onde a hipótese aponta risco (ou vice-versa) no mesmo
+ * domínio — uma tensão real entre leituras independentes; `complementa` = evidência relacionada,
+ * mas sem confirmar nem contestar diretamente.
+ */
+export type ReviewStance = "confirma" | "complementa" | "contesta";
+
+export interface HypothesisReview {
+  reviewerDirector: DirectorId;
+  stance: ReviewStance;
+  statement: string;
+  evidenceFactKeys: string[];
+}
+
+/** Uma hipótese de um Diretor, já com as revisões dos demais e a confiança recalculada considerando evidência contrária. */
+export interface ReviewedHypothesis extends Hypothesis {
+  sourceDirector: DirectorId | null;
+  reviews: HypothesisReview[];
 }
 
 /**
@@ -66,7 +98,7 @@ export interface ImpactAssessment {
  * checkpoint, nenhuma persistência ainda. Todo `ActionPlan` recém-gerado nasce `identificado`;
  * as transições seguintes (sugerido/aprovado/em_execucao/concluido/descartado) exigem uma
  * decisão humana registrada em algum lugar — isso é trabalho de uma sprint futura, quando a
- * persistência (Memória Operacional, Z3, ou uma tabela própria) existir.
+ * persistência (Memória Operacional, Z3B, ou uma tabela própria) existir.
  */
 export type ActionPlanStatus = "identificado" | "sugerido" | "aprovado" | "em_execucao" | "concluido" | "descartado";
 
@@ -116,7 +148,7 @@ export interface DirectorReport {
   limitations: string[];
   /**
    * Nota de tendência entre dias/semanas ("já é o 3º dia de queda no ticket médio"). Sempre
-   * `null` até o checkpoint Z3 (Memória Operacional, decisão aprovada do usuário).
+   * `null` até o checkpoint Z3B (Memória Operacional persistente, decisão aprovada do usuário).
    */
   memoryNote: string | null;
   /** Já resolvido pelo `participationCriteria` do diretor (seção "KPIs de participação") — o narrador do Executive Briefing (Z4) só precisa filtrar por isto, nunca reavaliar critério. */
@@ -204,10 +236,57 @@ export interface ConsolidatedReport {
   correlations: Correlation[];
   /** Hipóteses cruzadas entre Diretores (seção "Contradições" — o nome do usuário para o mecanismo; tecnicamente são hipóteses evidenciadas por >=2 Diretores, nunca uma "IA arbitrando"). */
   crossDirectorHypotheses: Hypothesis[];
+  /**
+   * Todas as hipóteses (de cada Diretor + as cruzadas) já passadas pela Revisão Cruzada (Sprint
+   * 5.0, Z3A) — confiança recalculada com evidência favorável/contrária. Dado adicional para
+   * transparência; `reports[].hypotheses` continua intocado como registro original de auditoria.
+   */
+  reviewedHypotheses: ReviewedHypothesis[];
   decisions: ExecutiveDecisions;
   advice: ExecutiveAdvice;
   overallPriority: PriorityLevel;
   limitations: string[];
   /** Diretores cujo `participationCriteria` deu `true` — é exatamente a lista que o Executive Briefing (Z4) narra. */
   participatingDirectors: DirectorId[];
+}
+
+// --- Memória Conversacional Gerencial (Sprint 5.0, Z3A, decisão do usuário) ---
+// "O Zézinho deve manter contexto durante toda a conversa... essa memória dura apenas durante a
+// conversa. Não deve ser persistida." Mesma natureza de `memory/types.ts:ReasoningSession`
+// (client-side, nunca toca o banco) — só que carregando as estruturas ricas da Diretoria em vez
+// de período/objetivo simples.
+
+/** Um turno da conversa — a pergunta e o que a Diretoria concluiu para ela naquele momento. */
+export interface ConversationTurn {
+  askedAt: string;
+  question: string;
+  hypotheses: Hypothesis[];
+  decisions: ExecutiveDecisions | null;
+  recommendations: Recommendation[];
+  actionPlans: ActionPlan[];
+}
+
+export interface ConversationalMemory {
+  turns: ConversationTurn[];
+}
+
+// --- Executive Timeline (Sprint 5.0, Z3A, novo componente, decisão do usuário) ---
+// "Resumir: últimos dias, mudanças, tendências, acontecimentos importantes. Ainda sem
+// persistência, apenas arquitetura." Sem um banco de observações diárias (isso é o Z3B), a única
+// fonte real disponível hoje é a própria `ConversationalMemory` da sessão — a MESMA estrutura
+// (`TimelineEntry`) será alimentada por dado persistido real quando o Z3B existir, sem precisar
+// ser redesenhada.
+
+export interface TimelineEntry {
+  date: string;
+  summary: string;
+  /** O que mudou desde a entrada anterior — diff real entre turnos, nunca inventado. */
+  changes: string[];
+  importantEvents: string[];
+}
+
+export interface ExecutiveTimeline {
+  entries: TimelineEntry[];
+  /** Honesto quando não há entradas suficientes para apontar uma tendência (mesma disciplina de `historical-pattern.ts`, Sprint 4.0/Z2). */
+  trends: string[];
 }
