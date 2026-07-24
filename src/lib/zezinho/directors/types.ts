@@ -147,8 +147,10 @@ export interface DirectorReport {
   impact: ImpactAssessment;
   limitations: string[];
   /**
-   * Nota de tendência entre dias/semanas ("já é o 3º dia de queda no ticket médio"). Sempre
-   * `null` até o checkpoint Z3B (Memória Operacional persistente, decisão aprovada do usuário).
+   * Nota de tendência entre dias/semanas ("já é o 3º dia de queda no ticket médio") — preenchida
+   * pelo `organizationalMemory/service.ts` (Z3B) depois que `runDirector` devolve o relatório;
+   * `null` quando não há sinal dominante no dia ou histórico insuficiente para uma tendência real,
+   * nunca inventado. `runDirector`/`consolidate` continuam sem I/O — só `diretoria.ts` grava.
    */
   memoryNote: string | null;
   /** Já resolvido pelo `participationCriteria` do diretor (seção "KPIs de participação") — o narrador do Executive Briefing (Z4) só precisa filtrar por isto, nunca reavaliar critério. */

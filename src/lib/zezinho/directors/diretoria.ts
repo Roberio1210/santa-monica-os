@@ -2,7 +2,9 @@ import { DIRECTOR_REGISTRY } from "@/lib/zezinho/directors/registry";
 import { runDirector } from "@/lib/zezinho/directors/runDirector";
 import { deriveCorrelations, INTELLIGENCE_SCOPE_LIMITATION } from "@/lib/zezinho/directors/inteligencia";
 import { consolidate } from "@/lib/zezinho/directors/estrategico";
-import type { ConsolidatedReport, DirectorId } from "@/lib/zezinho/directors/types";
+import { recordDiretoriaRun } from "@/lib/zezinho/directors/organizationalMemory/service";
+import type { DiretoriaRunResult } from "@/lib/zezinho/directors/organizationalMemory/types";
+import type { DirectorId } from "@/lib/zezinho/directors/types";
 import type { ExtractedEntities } from "@/lib/zezinho/intent/types";
 import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/memory/types";
 
@@ -12,13 +14,16 @@ import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/me
  * pelo Diretor de Inteligência e consolida pelo Diretor Estratégico. Este é o único ponto de
  * entrada da "Reunião de Diretoria" (seção 7.1 do documento de arquitetura) — o Executive
  * Briefing (Z4) e perguntas amplas do chat (Z4) vão chamar exatamente esta função.
+ *
+ * Desde o Z3B, também é o único ponto que grava/lê a Memória Organizacional (`organizationalMemory/
+ * service.ts`) — `runDirector`/`consolidate` continuam puros/sem I/O, exatamente como antes.
  */
 
 const EMPTY_ENTITIES: ExtractedEntities = { comparison: null, singlePeriod: null, areaFilter: null, packageMentioned: null, topic: null };
 
 export const ALL_DIRECTOR_IDS: DirectorId[] = Object.keys(DIRECTOR_REGISTRY) as DirectorId[];
 
-export async function runDiretoria(directorIds: DirectorId[] = ALL_DIRECTOR_IDS, entities: ExtractedEntities = EMPTY_ENTITIES, memory: ReasoningSession = EMPTY_REASONING_SESSION): Promise<ConsolidatedReport> {
+export async function runDiretoria(directorIds: DirectorId[] = ALL_DIRECTOR_IDS, entities: ExtractedEntities = EMPTY_ENTITIES, memory: ReasoningSession = EMPTY_REASONING_SESSION): Promise<DiretoriaRunResult> {
   const uniqueIds = Array.from(new Set(directorIds));
   const reports = await Promise.all(uniqueIds.map((id) => runDirector(DIRECTOR_REGISTRY[id], entities, memory)));
 
@@ -26,6 +31,9 @@ export async function runDiretoria(directorIds: DirectorId[] = ALL_DIRECTOR_IDS,
   // sobre o alcance atual" de inteligencia.ts) — nunca deixa implícito que já cruza tudo.
   const reportsWithHonestLimits = reports.map((r) => (r.director === "inteligencia" ? { ...r, limitations: Array.from(new Set([...r.limitations, INTELLIGENCE_SCOPE_LIMITATION])) } : r));
 
-  const correlations = deriveCorrelations(reportsWithHonestLimits);
-  return consolidate(reportsWithHonestLimits, correlations);
+  const { reports: reportsWithMemory, organizationalMemory } = await recordDiretoriaRun(reportsWithHonestLimits);
+
+  const correlations = deriveCorrelations(reportsWithMemory);
+  const consolidated = consolidate(reportsWithMemory, correlations);
+  return { consolidated, organizationalMemory };
 }

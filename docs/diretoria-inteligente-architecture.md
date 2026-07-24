@@ -411,10 +411,12 @@ Mesmo formato de checkpoints pequenos e aprováveis um a um, como Z1-Z4 da Sprin
 - **Z3A — Memória Conversacional Gerencial** (ver seção 13): memória de sessão, nunca persistida,
   mais Revisão Cruzada e Evidências Contrárias entre Diretores e o Executive Timeline
   (arquitetura, ainda sem banco).
-- **Z3B — Memória Operacional persistente**: schema Drizzle aditivo (`director_observations`),
-  gravação idempotente por Diretor por dia, `computeMemoryNote` com as 3 janelas nomeadas, testes
-  com histórico real semeado no Neon. (Chamado de "Z3" na proposta original desta seção — dividido
-  em Z3A/Z3B a pedido do usuário antes do início da implementação.)
+- **Z3B — Memória Organizacional** (ver seção 14): escopo ampliado pelo usuário de "só Memória
+  Operacional persistente" para os 4 tipos de memória (Operacional/Estratégica/Organizacional/
+  Crenças) e o pipeline Evento→Observação→Aprendizado→Conhecimento. Schema Drizzle aditivo (4
+  tabelas), `computeMemoryNote`, promoção/esquecimento testados e validados no Neon. (Chamado de
+  "Z3" na proposta original desta seção — dividido em Z3A/Z3B a pedido do usuário antes do início
+  da implementação.)
 - **Z4 — Reunião de Diretoria + Briefing**: `narrateConsolidatedReport` (ou extensão do narrador
   Z4), `service.ts` decidindo quando acionar 1 Diretor vs. a Diretoria inteira, Briefing
   substituindo o "Resumo do dia", os 20 testes de aceitação da praxe, deploy, validação em
@@ -632,3 +634,136 @@ dado persistido real quando o Z3B existir, sem precisar ser redesenhada.
   (risco vs. risco, oportunidade vs. risco). Um critério honesto para `complementa` (evidência
   relacionada, mas nem confirmando nem contestando) fica para quando houver um caso real
   observado, em vez de um critério inventado agora para preencher o tipo.
+
+---
+
+## 14. Checkpoint Z3B — Memória Organizacional do Santa Monica OS (implementado, escopo ampliado pelo usuário)
+
+Antes de começar a Memória Operacional persistente originalmente prevista para o Z3B, o usuário
+ampliou o escopo: "o sistema não deve armazenar simplesmente eventos — ele deve aprender". O
+resultado é a **Memória Organizacional** — primeira persistência real da Diretoria Inteligente,
+via 4 tabelas Drizzle aditivas (migração `0013_parallel_sir_ram.sql`, aplicada e validada no Neon).
+
+### 14.1 O pipeline: Evento → Observação → Aprendizado → Conhecimento
+
+"Evento" é a `Hypothesis` que cada Diretor já calcula todo dia (`hypotheses.ts`, desde o Z2) —
+nunca persistido isoladamente. A partir daí, `organizationalMemory/learnings.ts` implementa o
+pipeline como uma máquina de estados sobre uma única entidade (`Learning`, mesmo espírito do
+`ActionPlan` de 6 estados desde o Z2, em vez de 4 tabelas separadas por estágio):
+
+```
+LearningStatus = "observacao" | "aprendizado" | "conhecimento" | "descartado"
+```
+
+- **Observação**: primeira ocorrência de uma hipótese (`deriveSignalKey` normaliza a descrição
+  numa chave determinística — nunca uma correspondência semântica/fuzzy). Carrega `expiresAt`
+  (14 dias, `OBSERVATION_EXPIRY_DAYS`) — sem reconfirmação real dentro do prazo, é esquecida
+  (removida de verdade, nunca só marcada — "não quero acumular lixo histórico", decisão do
+  usuário).
+- **Aprendizado**: promovida quando há confirmações suficientes (`MIN_CONFIRMATIONS_FOR_
+  APRENDIZADO = 3`) espalhadas por um período real (`MIN_DAYS_SPAN_FOR_APRENDIZADO = 3` dias —
+  nunca 3 confirmações no mesmo dia). A partir daqui, `expiresAt` fica `null`: só evidência
+  contrária muda o status, nunca a passagem do tempo (o mesmo princípio de "nunca promover sem
+  evidência" aplicado simetricamente a não-demover).
+- **Conhecimento**: promovida com `MIN_CONFIRMATIONS_FOR_CONHECIMENTO = 7` confirmações ao longo
+  de `MIN_DAYS_SPAN_FOR_CONHECIMENTO = 14` dias. Permanece indefinidamente (decisão do usuário:
+  "só conhecimentos consolidados permanecem indefinidamente").
+- **Descartado**: reservado para invalidação por evidência contrária real — nenhum mecanismo
+  automático usa este estado ainda (fica para quando houver um caso real, mesma disciplina do
+  `complementa` não implementado na seção 13.4).
+
+`nextStatus` (`learnings.ts`) é a única função que decide promoção — staged e explicável, mesmo
+espírito de `computePriority` (Z2): nunca uma pontuação, sempre um degrau por vez, nunca pulado
+sem os dois critérios (quantidade E tempo) simultaneamente.
+
+### 14.2 Os 4 tipos de memória
+
+| Tipo | Entidade | Tabela | Retenção |
+|---|---|---|---|
+| 1. Operacional | `DirectorDailySnapshot` | `director_daily_snapshots` | Curta — uma leitura por Diretor por dia, comparada por `computeMemoryNote` |
+| 2. Estratégica | `StrategicMemoryItem` | `strategic_memory_items` | Nunca expira |
+| 3. Organizacional | `Learning` | `director_learnings` | Só `"observacao"` expira (14 dias sem confirmação) |
+| 4. Conversacional | `ConversationalMemory` (Z3A) | — nunca persistida | Sessão |
+
+Nota de nomenclatura, para evitar confusão: a palavra "observação" aparece nos tipos 1 e 3 com
+sentidos diferentes — `DirectorDailySnapshot` é a leitura bruta do dia (tipo 1); `LearningStatus
+=== "observacao"` é o primeiro estágio do pipeline de conhecimento (tipo 3). São conceitos
+distintos que compartilham a palavra em português; por isso as entidades TS têm nomes técnicos
+diferentes (documentado em `organizationalMemory/types.ts`).
+
+**Memória Operacional** (`organizationalMemory/snapshot.ts`): `summarizeDirectorForSnapshot`
+escolhe o sinal mais relevante do dia (risco > oportunidade > hipótese principal > fato isolado
+com tendência real — nunca fatos "estável"/"indisponível") e grava no máximo uma leitura por
+Diretor por dia (upsert por `directorId` + `snapshotDate`, nunca duplicada). `computeMemoryNote`
+compara a leitura de hoje com o histórico e só produz uma nota ("já é o 3º dia consecutivo de
+queda em X") quando há pelo menos 2 dias consecutivos com a mesma métrica e direção — abaixo
+disso, `null`, honestamente. Populamos `DirectorReport.memoryNote` (reservado desde o Z1/Z2) pela
+primeira vez neste checkpoint.
+
+**Memória Estratégica** (`organizationalMemory/strategic.ts`): hoje só popula `kind: "meta"`, a
+partir do Fact real `goal_progress` (a única fonte estratégica real disponível, `db/schema/
+goals.ts`). "Projeto" e "objetivo" existem no tipo mas nunca são preenchidos — sem um módulo real
+de projetos/OKRs, seria inventar dado.
+
+**Crenças da empresa** (`organizationalMemory/beliefs.ts`): `SEED_BELIEFS` — os 4 exemplos dados
+literalmente pelo usuário ("qualidade acima da velocidade", "oferecer adicionais quando fizer
+sentido", "foco na experiência do cliente", "manter comunicação ativa com leads") mais os 4
+princípios não-negociáveis já documentados no contexto do cliente (CLAUDE.md: "nunca prometer o
+que não pode entregar", "sempre mostrar resultado real", "respeitar o carro do cliente como se
+fosse o nosso", "qualidade acima de volume") — nenhuma inventada, todas rastreáveis à origem
+exata via o campo `source`. `findRelevantBeliefs` liga uma crença a uma recomendação por
+sobreposição real de palavras-chave (tokenização + interseção de conjuntos) — nunca uma pontuação
+semântica ou de IA generativa. Seed idempotente via `statement` único: `npm run db:seed:
+organizational-beliefs` (aplicado no Neon: 8 crenças).
+
+### 14.3 "O que aprendemos recentemente?"
+
+`ConsolidatedReport` ganha um irmão: `runDiretoria` (`directors/diretoria.ts`) agora devolve
+`DiretoriaRunResult { consolidated, organizationalMemory }` em vez de só `ConsolidatedReport` —
+`consolidate()` (`estrategico.ts`) continua 100% puro/síncrono/sem I/O, exatamente como desde o
+Z1; quem lê/grava a Memória Organizacional é só o orquestrador, via `organizationalMemory/
+service.ts:recordDiretoriaRun`.
+
+```
+OrganizationalMemorySnapshot {
+  recentLearnings: Learning[];   // status "aprendizado"/"conhecimento" confirmados nos últimos 7 dias — nunca "observacao"
+  activeBeliefs: Belief[];
+  strategicItems: StrategicMemoryItem[];
+  expiredObservationsCount: number;   // transparência sobre o esquecimento desta execução
+  limitations: string[];
+}
+```
+
+Isso é o que basta para o futuro narrador do Executive Briefing responder "o que aprendemos
+recentemente?" em vez de só "o que aconteceu?" — a prosa final continua fora do escopo (mesma
+divisão de trabalho de `ExecutiveAdvice`/`ExecutiveDecisions` desde o Z2): aqui só estrutura e
+evidência, nunca texto pronto.
+
+### 14.4 Arquitetura de persistência
+
+Schema aditivo puro (`db/schema/organizationalMemory.ts`, migração `0013_parallel_sir_ram.sql`,
+aplicada e validada no Neon — 4 tabelas, 3 enums novos, nenhuma tabela existente tocada):
+`director_daily_snapshots`, `director_learnings`, `strategic_memory_items`,
+`organizational_beliefs`. Repositório único (`organizationalMemory/repository.ts` +
+`static-repository.ts` + `postgres-repository.ts` + `repository-factory.ts`) seguindo exatamente
+o padrão de 4 arquivos já usado em `src/lib/recipes/` e no restante do projeto — as 4 tabelas
+vivem sob um único `OrganizationalMemoryRepository` porque são sempre lidas/escritas juntas pelo
+mesmo `service.ts` a cada execução da Diretoria, não 4 domínios independentes. Ativado
+automaticamente por `getStorageMode()` (Postgres quando `DATABASE_URL` existe, memória caso
+contrário) — mesmo mecanismo desde a Sprint 1, sem exigir configuração nova.
+
+### 14.5 O que fica para depois
+
+- Integração ao chat vivo/narrador (`service.ts`, UI) — este checkpoint entrega arquitetura +
+  persistência real, testada e validada no Neon, mas `runDiretoria` continua sem nenhum caller em
+  produção (mesma situação desde o Z1) — a conexão ao chat é trabalho de um checkpoint futuro.
+- `status: "descartado"` (invalidação por evidência contrária) — o tipo existe, mas nenhum
+  mecanismo automático o usa ainda; fica para quando houver um padrão real de contradição entre
+  Diretores sobre um `Learning` já confirmado (hoje a Revisão Cruzada, Z3A, só atua sobre
+  hipóteses do dia, antes da consolidação — nunca sobre aprendizados já persistidos).
+- Diretor de Inteligência (`inteligencia.ts`) ainda não consome as tabelas novas — continua
+  declarando `INTELLIGENCE_SCOPE_LIMITATION` sobre não cruzar histórico/sazonalidade; ligar suas
+  correlações à Memória Organizacional é um upgrade natural, mas fora do pedido deste checkpoint.
+- `pruneSnapshotsOlderThan` existe no repositório mas ainda não é chamado por nenhuma rotina — sem
+  agendamento (cron) neste checkpoint, mesma decisão já tomada para o Briefing automático (seção
+  7.2): a mecânica existe, o gatilho fica para quando houver agendamento real no produto.

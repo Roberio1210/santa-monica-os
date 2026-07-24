@@ -20,7 +20,8 @@
     "db:seed:chart-of-accounts": "tsx src/db/seed/chart-of-accounts.ts",
     "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts",
     "db:seed:classification-rules": "tsx src/db/seed/classification-rules.ts",
-    "db:seed:goals-lavacao-julho-2026": "tsx src/db/seed/goals-lavacao-julho-2026.ts"
+    "db:seed:goals-lavacao-julho-2026": "tsx src/db/seed/goals-lavacao-julho-2026.ts",
+    "db:seed:organizational-beliefs": "tsx src/db/seed/organizational-beliefs.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",

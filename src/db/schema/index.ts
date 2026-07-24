@@ -7,3 +7,4 @@ export * from "./finance";
 export * from "./system";
 export * from "./accounting";
 export * from "./goals";
+export * from "./organizationalMemory";
