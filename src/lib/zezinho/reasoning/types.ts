@@ -1,14 +1,14 @@
-import type { ZezinhoIntent, ExtractedEntities } from "@/lib/zezinho/intent/types";
-import type { BusinessObjective } from "@/lib/zezinho/objective/types";
-import type { ReasoningSession } from "@/lib/zezinho/memory/types";
-import type { ToolCall, ToolId, ToolResult } from "@/lib/zezinho/tools/types";
-import type { ZezinhoLink } from "@/lib/zezinho/types";
+import type { ToolId } from "@/lib/zezinho/tools/types";
 
 /**
  * Motor de raciocínio (Etapa 4 — ver docs/zezinho-3.0-architecture.md, seção 7). Recebe fatos já
  * calculados pelas ferramentas (Z2) e produz achados, diagnóstico, confiança, lacunas e
  * recomendações — nunca um número novo, nunca IA generativa: tudo aqui é regra determinística
- * sobre o que as ferramentas já trouxeram.
+ * sobre o que as ferramentas já trouxeram. `ReasoningInput`/`ReasoningResult` (o envelope do
+ * antigo orquestrador de intenção única, `reasoning/reason.ts`) foram removidos na Sprint 4.0
+ * (Z4) — os tipos abaixo continuam vivos porque `reasoning/facts.ts`, `findings.ts`,
+ * `diagnose.ts`, `gaps.ts` e `recommend.ts` são reaproveitados diretamente por
+ * `planner/managerialPlan.ts` e, a partir da Sprint 5.0, por `directors/runDirector.ts`.
  */
 
 export type FactDirection = "aumento" | "queda" | "estavel" | "indisponivel";
@@ -63,26 +63,12 @@ export interface ToolTraceEntry {
   error: string | null;
 }
 
-export interface ReasoningInput {
-  intent: ZezinhoIntent;
-  objective: BusinessObjective | null;
-  entities: ExtractedEntities;
-  memory: ReasoningSession;
-  toolCalls: ToolCall[];
-  toolResults: ToolResult[];
-  toolTrace: ToolTraceEntry[];
-}
-
-export interface ReasoningResult {
-  intent: ZezinhoIntent;
-  objective: BusinessObjective | null;
-  facts: Fact[];
-  findings: Finding[];
-  diagnosis: Diagnosis | null;
-  confidence: ConfidenceLevel;
-  gaps: Gap[];
-  recommendations: Recommendation[];
-  links: ZezinhoLink[];
-  sources: string[];
-  toolTrace: ToolTraceEntry[];
+/**
+ * Afirmação evidenciada (risco ou oportunidade) — nasce em `reasoning/risksAndOpportunities.ts`,
+ * usada por `planner/managerialPlan.ts` e `directors/runDirector.ts`. Nunca existe sem
+ * `evidenceFactKeys` apontando para `Fact`s reais.
+ */
+export interface EvidencedClaim {
+  statement: string;
+  evidenceFactKeys: string[];
 }

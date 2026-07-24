@@ -25,7 +25,9 @@ export type Capability =
   | "inventory_status"
   | "agenda_summary"
   | "staffing_capacity"
-  | "marketing_summary";
+  | "marketing_summary"
+  | "dre_result"
+  | "jumppark_wash_packages";
 
 export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   situational_context: "situational_context",
@@ -43,6 +45,13 @@ export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   agenda_summary: "agenda_summary",
   staffing_capacity: "jumppark_period_summary",
   marketing_summary: "marketing_summary",
+  // Adicionadas na Sprint 5.0 (Z1) — os Diretores Financeiro e de Operações
+  // (`directors/registry.ts`) precisavam de DRE e distribuição Bronze/Silver/Gold, que existiam
+  // como ferramentas reais desde a Sprint 2.0/3.0 mas nunca tinham entrado no modelo de
+  // capacidades da Z3 (só `full_period_comparison` continua fora, por natureza — só faz sentido
+  // com dois períodos explícitos, nunca uma observação contínua de um Diretor).
+  dre_result: "dre_result",
+  jumppark_wash_packages: "jumppark_wash_packages",
 };
 
 /** Linha "status_check / business_health" do exemplo do checkpoint — a única lista genuinamente ampla. */
