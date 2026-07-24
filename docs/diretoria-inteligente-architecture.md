@@ -421,3 +421,127 @@ externas), exatamente como combinado.
 
 Nenhuma implementação foi iniciada. Aguardando sua aprovação desta arquitetura (e das decisões da
 seção 9) para começar pelo checkpoint Z1.
+
+---
+
+## 11. Checkpoint Z1 — implementado (commit `06c1b82`)
+
+Aprovado integralmente pelo usuário, com as decisões da seção 9 confirmadas: RH e Marketing
+entram desde já na arquitetura (honestos sobre a ausência de fonte real); memória operacional
+aprovada com o desenho da seção 4; Plano de Ação aprovado com os 6 estados da seção 6; Executive
+Briefing aprovado como forma de consolidação diária (não uma "reunião" explícita); novo **Diretor
+de Inteligência** acrescentado (correlações cruzadas entre Diretores, nunca inventadas, sempre
+com nível de confiança); KPIs/critérios objetivos de participação no Executive Briefing por
+Diretor.
+
+Entregue: `directors/types.ts`, `directors/registry.ts` (8 Diretores), `directors/runDirector.ts`
+(executor genérico), `directors/estrategico.ts` (consolidação simples), `directors/inteligencia.ts`
+(2 correlações reais: clima × movimento, CRM × ticket médio), `directors/diretoria.ts`
+(orquestração paralela). `EvidencedClaim`/`deriveRisksAndOpportunities` movidos para
+`reasoning/` para reaproveitamento. Nenhuma integração nova, nenhuma mudança no chat vivo
+(`service.ts`)/UI — fundação pura.
+
+---
+
+## 12. Checkpoint Z2 — Sistema Executivo de Decisão (implementado, evolução aprovada do usuário)
+
+O usuário evoluiu o escopo original do Z2 (que seria só "prioridade formal + `Recommendation.steps`")
+para um **Sistema Executivo de Decisão** completo. Esta seção documenta o que foi construído —
+substitui a descrição original do Z2 na seção 10, que ficou estreita demais depois da evolução.
+
+### 12.1 Estrutura obrigatória de 8 seções por Diretor
+
+Todo `DirectorReport` agora contém, sempre: **fatos observados** (`facts`), **diagnóstico**
+(`diagnosis` — leitura síntese em uma frase), **hipóteses** (`hypotheses`), **grau de confiança**
+(`confidence`, reaproveita `ContextQuality` da Sprint 4.0/Z3), **riscos** (`risks`),
+**oportunidades** (`opportunities`), **recomendações** (`recommendations`) e **plano de ação**
+(`actionPlans`). Nenhum Diretor devolve só indicadores — sempre há interpretação (diagnóstico +
+hipóteses) por trás dos números, nunca um achismo (toda hipótese carrega evidência).
+
+### 12.2 Hipóteses (`directors/hypotheses.ts`)
+
+Convertidas do `Diagnosis` que `reasoning/diagnose.ts` já produzia desde a Sprint 3.0 — nenhum
+cálculo novo, só uma forma mais rica de expor o que o motor de raciocínio já calculava:
+
+```
+Hypothesis {
+  description: string;
+  evidenceFactKeys: string[];   // rastreável, técnico
+  basis: string[];              // legível: "clima", "histórico", "operação", "financeiro"...
+  confidenceScore: number;      // 0-100, banda ilustrativa convertida do nível qualitativo
+  confidenceLevel: "alta" | "media" | "baixa";
+  limitations: string[];
+}
+```
+
+`confidenceScore` é uma banda fixa (alta=85, media=60, baixa=30), não uma probabilidade
+estatística real — existe só para atender ao formato pedido ("confiança: 82%"); a fonte de
+verdade para qualquer decisão continua sendo `confidenceLevel` (a mesma disciplina qualitativa da
+Sprint 4.0/Z4: nunca apresentar confiança com precisão que os dados não sustentam). Sem
+evidência suficiente, `hypotheses` fica vazio — nunca uma hipótese inventada para preencher
+espaço.
+
+### 12.3 Contradições / hipóteses cruzadas (`directors/estrategico.ts`)
+
+O mecanismo pedido pelo usuário para detectar inconsistências entre Diretores — tecnicamente
+implementado como hipóteses evidenciadas por **dois ou mais** Diretores diferentes, nunca uma "IA
+arbitrando" sem essa dupla evidência real:
+
+- **Gargalo de conversão** (exemplo do usuário: Financeiro + Operações + CRM): dispara quando o
+  ritmo da meta está abaixo do necessário (Financeiro, `goal_progress`), o movimento está abaixo
+  do padrão histórico (Operações, `historical_pattern`) e há clientes disponíveis para contato
+  sem retorno (Comercial, `crm_at_risk_count`) — os três ao mesmo tempo, nunca um sozinho.
+- **Problema de captura de leads** (exemplo do usuário: Marketing + CRM): implementado e testado
+  com dados sintéticos, mas **fica dormente hoje** — o Diretor de Marketing nunca tem fonte real
+  até a Fase B (Meta Ads/Instagram), então este padrão nunca dispara em produção ainda. O
+  mecanismo já está pronto para não precisar ser redesenhado quando a fonte chegar.
+
+### 12.4 Impacto operacional formal (`directors/priority.ts`)
+
+Substitui a heurística simples do Z1. Critérios exatamente os pedidos pelo usuário: impacto
+financeiro, impacto operacional, urgência, confiança dos dados, quantidade de Diretores
+envolvidos. Cada campo é classificado por regra explicável (mesmo espírito de
+`computeContextQuality`, Sprint 4.0/Z3) — nunca uma pontuação numérica arbitrária.
+`computePriority` roda em estágios: confiança baixa nunca sozinha vira prioridade alta, mesmo com
+vários sinais fortes (seção "Limitações" do pedido: "nunca responder com excesso de confiança").
+
+### 12.5 Plano de Ação (`directors/actionPlan.ts`)
+
+Estados exatamente como aprovado: `identificado → sugerido → aprovado → em_execucao → concluido →
+descartado`. Todo plano recém-gerado nasce `identificado` — as transições seguintes exigem uma
+decisão humana registrada em algum lugar, o que é trabalho de uma sprint futura (quando a
+persistência existir). Cada plano carrega prioridade, responsável (`null` — nenhum módulo de RH
+real existe), motivo, impacto esperado e prazo sugerido (`null` — nenhuma base real para estimar
+prazo, nunca inventado). Um `ActionPlan` por `Recommendation`, nunca menos informativo que a
+recomendação que o originou.
+
+### 12.6 Decisões — as três perguntas centrais (`computeExecutiveDecisions`)
+
+*"O que merece minha atenção hoje?"* (hipóteses cruzadas + riscos, no máximo 3 — mesma disciplina
+"no máximo 3 pontos" desde o Z4), *"O que eu faria primeiro?"* (a recomendação de maior
+prioridade entre todos os Diretores, ou honestamente `null` quando não há nenhuma), *"O que pode
+esperar?"* (oportunidades reais, mas não urgentes). Isso é o núcleo de `ConsolidatedReport`, como
+pedido.
+
+### 12.7 Executive Advice (`computeExecutiveAdvice`)
+
+Novo componente — "Meu conselho para hoje". Sempre derivado da mesma recomendação/risco de maior
+prioridade já calculado pelas Decisões, nunca uma opinião solta; sem nenhuma recomendação ou
+risco disponível, admite honestamente que não há dados suficientes para um conselho seguro. A
+prosa final ("Se eu estivesse administrando a empresa hoje, minha prioridade seria...") já está
+pronta na estrutura — a integração ao narrador do Executive Briefing é trabalho do Z4.
+
+### 12.8 O que fica para depois
+
+- **KPIs de participação por Diretor** além do critério padrão (`priority !== "baixa"`) — o
+  usuário pediu "critérios objetivos" por Diretor; o Z2 entrega o critério compartilhado e
+  explicável, mas limiares específicos por domínio (ex.: Estoque participar sempre que houver
+  item quase vazio, mesmo com prioridade geral baixa) ficam para quando o Z3/Z4 tiverem mais
+  Diretores reais rodando em produção para calibrar com dado de verdade.
+- **Deduplicação semântica fina** entre riscos/oportunidades individuais (para além dos dois
+  padrões nomeados na seção 12.3) continua um refinamento futuro.
+- **Persistência do Plano de Ação** (transições reais entre estados) depende da Memória
+  Operacional (Z3) ou de uma tabela própria — arquitetura pronta, sem banco ainda, como pedido
+  ("ainda não quero persistência, somente arquitetura").
+- Nenhuma mudança no chat vivo (`service.ts`)/UI nesta checkpoint — a Diretoria continua não
+  conectada a nada visível ao usuário, como no Z1.

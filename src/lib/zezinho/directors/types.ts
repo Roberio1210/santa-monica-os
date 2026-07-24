@@ -25,26 +25,98 @@ export type DirectorDataAvailability = "real" | "parcial" | "indisponivel";
 export type PriorityLevel = "alta" | "media" | "baixa";
 
 /**
+ * Hipótese (Sprint 5.0, Z2 — "Sistema Executivo de Decisão", decisão do usuário) — nunca um
+ * fato. É uma interpretação candidata sobre POR QUE os fatos são o que são, sempre presa a
+ * evidência real e a um nível de confiança explícito. Construída a partir do `Diagnosis`
+ * (`reasoning/diagnose.ts`, inalterado desde a Sprint 3.0) por `directors/hypotheses.ts` — nunca
+ * um cálculo novo, só uma forma mais rica de expor o que o motor de raciocínio já produzia.
+ * `confidenceScore` é numérico (0-100) só para uso estrutural/rastreável ("Ver fundamentos");
+ * a prosa final ao usuário (narrador, fora do escopo do Z2) continua seguindo a regra da Sprint
+ * 4.0/Z4: nunca um percentual solto sem explicação, sempre `confidenceLevel` + `basis` juntos.
+ */
+export interface Hypothesis {
+  description: string;
+  /** Chaves de `Fact` usadas — rastreável, técnico. */
+  evidenceFactKeys: string[];
+  /** Rótulos legíveis das fontes usadas (ex.: "clima", "histórico", "operação") — o que o usuário reconhece, não a chave interna. */
+  basis: string[];
+  confidenceScore: number;
+  confidenceLevel: ConfidenceLevel;
+  limitations: string[];
+}
+
+/**
+ * Avaliação de impacto (Sprint 5.0, Z2) — alimenta `computePriority` (`directors/priority.ts`).
+ * Cada campo é classificado por regra explicável (mesmo espírito de `computeContextQuality`),
+ * nunca uma pontuação arbitrária. `directorsInvolved` é 1 para um risco/oportunidade de um único
+ * domínio, e >1 quando vem de uma correlação (Diretor de Inteligência) ou hipótese cruzada
+ * (Diretor Estratégico) — "quantidade de Diretores envolvidos" é literalmente um dos critérios
+ * pedidos pelo usuário.
+ */
+export interface ImpactAssessment {
+  financialImpact: "alto" | "medio" | "baixo" | "indeterminado";
+  operationalImpact: "alto" | "medio" | "baixo" | "indeterminado";
+  urgency: "alta" | "media" | "baixa";
+  dataConfidence: ConfidenceLevel;
+  directorsInvolved: number;
+}
+
+/**
+ * Estados do Plano de Ação (Sprint 5.0, Z2, decisão do usuário) — só a arquitetura nesta
+ * checkpoint, nenhuma persistência ainda. Todo `ActionPlan` recém-gerado nasce `identificado`;
+ * as transições seguintes (sugerido/aprovado/em_execucao/concluido/descartado) exigem uma
+ * decisão humana registrada em algum lugar — isso é trabalho de uma sprint futura, quando a
+ * persistência (Memória Operacional, Z3, ou uma tabela própria) existir.
+ */
+export type ActionPlanStatus = "identificado" | "sugerido" | "aprovado" | "em_execucao" | "concluido" | "descartado";
+
+export interface ActionPlan {
+  id: string;
+  status: ActionPlanStatus;
+  action: string;
+  reason: string;
+  priority: PriorityLevel;
+  /** `null` até existir um módulo de RH/equipe real (mesma honestidade de `DirectorDataAvailability`). */
+  responsible: string | null;
+  expectedImpact: string;
+  /** `null` quando não há base real para estimar prazo — nunca um prazo inventado. */
+  suggestedDeadline: string | null;
+  evidenceFactKeys: string[];
+}
+
+/**
  * O que um Diretor produz ao ser executado — nunca texto pronto (isso é trabalho do narrador,
- * seção 2 do Z4), só material estruturado e evidenciado, no mesmo padrão de `ManagerialPlan`
- * (Sprint 4.0, Z3), só que escopado a um domínio.
+ * seção 2 do Z4), só material estruturado e evidenciado. A partir da Z2, todo relatório segue as
+ * 8 seções obrigatórias pedidas pelo usuário: fatos, diagnóstico, hipóteses, confiança, riscos,
+ * oportunidades, recomendações, plano de ação.
  */
 export interface DirectorReport {
   director: DirectorId;
   generatedAt: string;
   dataAvailability: DirectorDataAvailability;
+  /** 1. Fatos observados. */
   facts: Fact[];
-  risks: EvidencedClaim[];
-  opportunities: EvidencedClaim[];
-  recommendations: Recommendation[];
-  /** Prioridade preliminar do relatório como um todo — versão simples no Z1, formalizada em `computePriority` no Z2. */
-  priority: PriorityLevel;
+  /** 2. Diagnóstico — leitura síntese em uma frase (a hipótese principal, quando existir evidência para uma). */
+  diagnosis: string | null;
+  /** 3. Hipóteses — a principal (index 0, quando existir) + alternativas, nunca fatos disfarçados. */
+  hypotheses: Hypothesis[];
+  /** 4. Grau de confiança (reaproveita `ContextQuality`, Sprint 4.0/Z3 — nunca recalculado). */
   confidence: ContextQuality;
+  /** 5. Riscos. */
+  risks: EvidencedClaim[];
+  /** 6. Oportunidades. */
+  opportunities: EvidencedClaim[];
+  /** 7. Recomendações. */
+  recommendations: Recommendation[];
+  /** 8. Plano de ação — um `ActionPlan` por recomendação, nunca menos informativo que a recomendação que o originou. */
+  actionPlans: ActionPlan[];
+  /** Prioridade do relatório como um todo — Z2: `computePriority(impact)`, formal e explicável (`directors/priority.ts`). */
+  priority: PriorityLevel;
+  impact: ImpactAssessment;
   limitations: string[];
   /**
    * Nota de tendência entre dias/semanas ("já é o 3º dia de queda no ticket médio"). Sempre
-   * `null` no Z1 — a Memória Operacional (tabela `director_observations`, decisão aprovada do
-   * usuário) só existe a partir do checkpoint Z3.
+   * `null` até o checkpoint Z3 (Memória Operacional, decisão aprovada do usuário).
    */
   memoryNote: string | null;
   /** Já resolvido pelo `participationCriteria` do diretor (seção "KPIs de participação") — o narrador do Executive Briefing (Z4) só precisa filtrar por isto, nunca reavaliar critério. */
@@ -88,9 +160,38 @@ export interface Correlation {
 }
 
 /**
- * Saída do Diretor Estratégico (`directors/estrategico.ts`) — no Z1, consolidação simples
- * (concatenação + prioridade geral); a deduplicação semântica entre Diretores (seção "Diretor
- * Estratégico — a consolidação" do documento de arquitetura) é trabalho do Z2.
+ * As três perguntas centrais da tomada de decisão (Sprint 5.0, Z2, seção "Decisões" — decisão do
+ * usuário: "esse passa a ser o núcleo da tomada de decisão"). Cada resposta é derivada só do que
+ * já está em `ConsolidatedReport` — nunca uma pergunta respondida sem evidência correspondente.
+ */
+export interface ExecutiveDecisions {
+  /** 1. O que merece minha atenção hoje? — riscos/oportunidades/hipóteses de prioridade alta, limitado a 3 (mesma disciplina de "no máximo 3 pontos" desde o Z4). */
+  whatDeservesAttentionToday: EvidencedClaim[];
+  /** 2. O que eu faria primeiro? — a única recomendação de maior prioridade, ou `null` quando não há nenhuma recomendação sustentada. */
+  whatIWouldDoFirst: Recommendation | null;
+  /** 3. O que pode esperar? — itens de prioridade baixa, explicitamente despriorizados, nunca escondidos. */
+  whatCanWait: EvidencedClaim[];
+}
+
+/**
+ * Executive Advice (novo componente, Sprint 5.0, Z2, decisão do usuário) — "Meu conselho para
+ * hoje", sempre fundamentado nos mesmos dados de `ConsolidatedReport`, nunca opinião solta. A
+ * prosa final ("Se eu estivesse administrando a empresa hoje, minha prioridade seria...") é
+ * trabalho do narrador, fora do escopo do Z2 — aqui só a estrutura e a evidência por trás dela.
+ */
+export interface ExecutiveAdvice {
+  statement: string;
+  basedOnFactKeys: string[];
+  confidence: ConfidenceLevel;
+}
+
+/**
+ * Saída do Diretor Estratégico (`directors/estrategico.ts`). Z1: consolidação simples
+ * (concatenação + prioridade geral). Z2 (Sistema Executivo de Decisão, decisão do usuário):
+ * ganha hipóteses cruzadas entre Diretores (contradições/padrões, nunca inventadas), plano de
+ * ação agregado, as três Decisões e o Executive Advice. A deduplicação semântica fina entre
+ * riscos/oportunidades individuais de Diretores diferentes (para além dos padrões nomeados
+ * abaixo) continua um refinamento futuro, não bloqueia esta checkpoint.
  */
 export interface ConsolidatedReport {
   generatedAt: string;
@@ -99,7 +200,12 @@ export interface ConsolidatedReport {
   risks: EvidencedClaim[];
   opportunities: EvidencedClaim[];
   recommendations: Recommendation[];
+  actionPlans: ActionPlan[];
   correlations: Correlation[];
+  /** Hipóteses cruzadas entre Diretores (seção "Contradições" — o nome do usuário para o mecanismo; tecnicamente são hipóteses evidenciadas por >=2 Diretores, nunca uma "IA arbitrando"). */
+  crossDirectorHypotheses: Hypothesis[];
+  decisions: ExecutiveDecisions;
+  advice: ExecutiveAdvice;
   overallPriority: PriorityLevel;
   limitations: string[];
   /** Diretores cujo `participationCriteria` deu `true` — é exatamente a lista que o Executive Briefing (Z4) narra. */

@@ -1,29 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveCorrelations } from "@/lib/zezinho/directors/inteligencia";
-import type { DirectorReport } from "@/lib/zezinho/directors/types";
-import type { Fact } from "@/lib/zezinho/reasoning/types";
-
-function report(overrides: Partial<DirectorReport>): DirectorReport {
-  return {
-    director: "financeiro",
-    generatedAt: "2026-07-24T12:00:00.000Z",
-    dataAvailability: "real",
-    facts: [],
-    risks: [],
-    opportunities: [],
-    recommendations: [],
-    priority: "baixa",
-    confidence: { overallLevel: "high", availableSources: [], missingSources: [], staleSources: [], failedSources: [], sampleQuality: null, gaps: [], confidenceDrivers: [], confidenceReducers: [] },
-    limitations: [],
-    memoryNote: null,
-    shouldParticipateInBriefing: false,
-    ...overrides,
-  };
-}
-
-function fact(overrides: Partial<Fact>): Fact {
-  return { key: "x", label: "X", statement: "x.", direction: "indisponivel", source: "teste", isProxy: false, ...overrides };
-}
+import { testFact as fact, testReport as report } from "@/lib/zezinho/directors/testFixtures";
 
 describe("deriveCorrelations — Diretor de Inteligência (Sprint 5.0, Z1)", () => {
   it("clima × movimento: só correlaciona quando AMBOS os diretores têm o risco real, nunca com um só", () => {

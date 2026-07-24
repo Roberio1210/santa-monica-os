@@ -1,24 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DIRECTOR_REGISTRY, OBSERVER_DIRECTOR_IDS } from "@/lib/zezinho/directors/registry";
-import type { DirectorReport } from "@/lib/zezinho/directors/types";
-
-function report(overrides: Partial<DirectorReport>): DirectorReport {
-  return {
-    director: "financeiro",
-    generatedAt: "2026-07-24T12:00:00.000Z",
-    dataAvailability: "real",
-    facts: [],
-    risks: [],
-    opportunities: [],
-    recommendations: [],
-    priority: "baixa",
-    confidence: { overallLevel: "high", availableSources: [], missingSources: [], staleSources: [], failedSources: [], sampleQuality: null, gaps: [], confidenceDrivers: [], confidenceReducers: [] },
-    limitations: [],
-    memoryNote: null,
-    shouldParticipateInBriefing: false,
-    ...overrides,
-  };
-}
+import { testReport as report } from "@/lib/zezinho/directors/testFixtures";
 
 describe("DIRECTOR_REGISTRY — todos os 8 Diretores declarados (Sprint 5.0, Z1)", () => {
   it("declara exatamente os 8 diretores pedidos", () => {
