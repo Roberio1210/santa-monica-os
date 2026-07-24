@@ -54,6 +54,28 @@ export function isWeatherConfigured(): boolean {
   return getWeatherEnv() !== null;
 }
 
+export interface StoneEnv {
+  apiKey: string;
+  /** StoneCode/affiliationCode do estabelecimento. */
+  affiliationCode: string;
+}
+
+/**
+ * Autenticação Cliente Stone: API key do Portal Stone (não é OAuth, não é fluxo de parceiro
+ * conciliador) — ver docs/stone-integration-architecture.md, seção 1.1. Nunca loga o valor da
+ * chave.
+ */
+export function getStoneEnv(): StoneEnv | null {
+  const apiKey = process.env.STONE_API_KEY;
+  const affiliationCode = process.env.STONE_ACCOUNT_ID;
+  if (!apiKey || !affiliationCode) return null;
+  return { apiKey, affiliationCode };
+}
+
+export function isStoneConfigured(): boolean {
+  return getStoneEnv() !== null;
+}
+
 export type InventoryConsumptionMode = "disabled" | "preview_only" | "preview_and_confirm";
 
 const VALID_CONSUMPTION_MODES: InventoryConsumptionMode[] = ["disabled", "preview_only", "preview_and_confirm"];

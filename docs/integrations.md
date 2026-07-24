@@ -46,13 +46,29 @@
 - **Variáveis**: `MERCADOLIVRE_CLIENT_ID`, `MERCADOLIVRE_CLIENT_SECRET`
 - **Implementação**: `src/lib/integrations/mercadolivre/`
 
-## Stone (planejado)
+## Stone (Sprint 7.0, Z1 — arquitetura/provider prontos, ainda não conectado a nenhum Diretor/tool)
 
-- **Descrição**: conciliação financeira.
-- **Fonte**: Stone API
-- **Modo**: não conectado
-- **Variáveis**: `STONE_API_KEY`, `STONE_ACCOUNT_ID`
-- **Implementação**: `src/lib/integrations/stone/`
+- **Descrição**: conciliação financeira — vendas, recebimentos, antecipações, cancelamentos,
+  chargebacks, posição de carteira e PIX.
+- **Fonte**: Conciliação Cliente Stone —
+  https://conciliacao.stone.com.br/reference/overview-da-api-cliente-stone
+- **Modo**: somente leitura
+- **Base URL**: `https://conciliation.stone.com.br/v2` (sem sandbox — a doc oficial confirma que
+  não há ambiente de teste)
+- **Autenticação**: HTTP Basic (API key do Portal Stone como usuário, senha vazia) + header
+  `x-user-type: client`
+- **Endpoint principal**: `GET /merchant/{affiliationCode}/conciliation-file/{referenceDate}` —
+  arquivo diário único (XML gzip, Layout 2.2 ou 2.4), disponível só a partir de 5h do dia
+  seguinte. **Não é uma API REST granular** — não existem endpoints separados por métrica.
+- **PIX**: fluxo separado e assíncrono — `POST .../conciliation-file/pix/{referenceDate}` (202),
+  arquivo entregue depois via webhook (`POST /webhook` para cadastro, uma vez só).
+- **Rate limit**: 7 req/hora (arquivo principal, por StoneCode+data), 45 req/min (PIX).
+- **Variáveis de ambiente**: `STONE_API_KEY`, `STONE_ACCOUNT_ID` (mapeado para `affiliationCode`)
+- **Implementação**: `src/lib/integrations/stone/` (`types.ts`, `client.ts`, `xml.ts`, `cache.ts`,
+  `logger.ts`, `service.ts` — único ponto de entrada público)
+- **Riscos**: nenhum nesta fase (somente leitura, sem exposição de credencial). Saldo/agenda
+  futura NÃO são fornecidos prontos pela Stone — ver
+  docs/stone-integration-architecture.md, seção 3, para as decisões de arquitetura sobre isso.
 
 ## WhatsApp Business (planejado)
 
