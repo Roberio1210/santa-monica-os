@@ -1,6 +1,6 @@
 import type { ExtractedEntities } from "@/lib/zezinho/intent/types";
 import type { ReasoningSession } from "@/lib/zezinho/memory/types";
-import { resolvePeriods, type ResolvedPeriods } from "@/lib/zezinho/planner/selectTools";
+import { resolvePeriods, type ResolvedPeriods } from "@/lib/zezinho/planner/periods";
 import { CAPABILITY_TOOL, type Capability } from "@/lib/zezinho/planner/capabilities";
 import { executeToolsWithTrace } from "@/lib/zezinho/tools/executor";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
@@ -21,6 +21,8 @@ export interface OperationalContext {
   toolResults: ToolResult[];
   toolTrace: ToolTraceEntry[];
   periodResolved: boolean;
+  resolvedPeriodA: ResolvedPeriods["periodA"] | null;
+  resolvedPeriodB: ResolvedPeriods["periodB"] | null;
 }
 
 function dedupe<T>(items: T[]): T[] {
@@ -57,5 +59,14 @@ export async function buildOperationalContext(capabilities: Capability[], entiti
     if (result) byCapability[cap] = result;
   }
 
-  return { capabilities: uniqueCapabilities, byCapability, toolCalls, toolResults: results, toolTrace: trace, periodResolved: periods !== null };
+  return {
+    capabilities: uniqueCapabilities,
+    byCapability,
+    toolCalls,
+    toolResults: results,
+    toolTrace: trace,
+    periodResolved: periods !== null,
+    resolvedPeriodA: periods?.periodA ?? null,
+    resolvedPeriodB: periods?.periodB ?? null,
+  };
 }

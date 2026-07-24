@@ -17,19 +17,10 @@ import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grou
 import type { ZezinhoAnswer, ZezinhoQuestion } from "@/lib/zezinho/types";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
-import { classifyIntent } from "@/lib/zezinho/intent/classify";
-import { classifyManagerial } from "@/lib/zezinho/intent/managerial";
-import { inferObjective } from "@/lib/zezinho/objective/infer";
-import { selectTools } from "@/lib/zezinho/planner/selectTools";
-import { objectiveForPlan } from "@/lib/zezinho/planner/managerialPlan";
-import { executeToolsWithTrace } from "@/lib/zezinho/tools/executor";
-import { reason } from "@/lib/zezinho/reasoning/reason";
-import { narrate } from "@/lib/zezinho/narrator/narrate";
+import { buildManagerialPlan, objectiveForPlan } from "@/lib/zezinho/planner/managerialPlan";
+import { narrateManagerialPlan } from "@/lib/zezinho/narrator/narrateManagerialPlan";
 import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/memory/types";
 import { withActiveAnalysis, withExplainedMetric, withInsightSummary, withUsedOpener } from "@/lib/zezinho/memory/session";
-import type { IntentResult, ZezinhoIntent } from "@/lib/zezinho/intent/types";
-import { OBJECTIVE_DATA_AVAILABILITY, type ObjectiveResult } from "@/lib/zezinho/objective/types";
-import type { ReasoningResult } from "@/lib/zezinho/reasoning/types";
 
 /**
  * "Zézinho — Gerente Operacional": pipeline de raciocínio (intenção -> objetivo -> memória ->
@@ -53,59 +44,20 @@ function todayIso(): string {
   return saoPauloDateISO();
 }
 
+/** Pergunta sintética usada só para montar o contexto gerencial do resumo — nunca mostrada ao usuário. */
+const DAILY_SUMMARY_QUERY = "Como estamos hoje?";
+
 /**
- * Resumo automático do dia — cada frase só aparece quando há dado real por trás. Nunca inventa
- * fatos quando a fonte não está disponível.
+ * Resumo automático do dia (Sprint 4.0, Z4, seção 15) — usa o mesmo `ManagerialPlan`/narrador da
+ * conversa livre, não mais um texto fixo montado só de faturamento/caixa/contas: destaca situação
+ * geral, movimento, meta, alerta mais importante e prioridade, quando houver dado real. Cada
+ * frase só aparece quando há dado real por trás — nunca inventa fato nem comparação sem
+ * histórico suficiente.
  */
 export async function generateDailySummary(): Promise<string> {
-  const asOfDate = todayIso();
-  const overview = await fetchCentralOverview(asOfDate);
-  const now = new Date();
-  const lines: string[] = [`${greeting(now)}, Robério.`];
-
-  if (overview.jumppark.data) {
-    lines.push(`Hoje a empresa faturou ${formatCurrency(overview.jumppark.data.dailyRevenue)} em serviços (${overview.jumppark.data.vehicles} veículo(s)).`);
-  } else {
-    lines.push("Ainda não tenho dados suficientes sobre o faturamento operacional de hoje.");
-  }
-
-  if (overview.cashFlow.data) {
-    const { entradasHoje, saidasHoje } = overview.cashFlow.data.dashboard;
-    lines.push(`Entraram ${formatCurrency(entradasHoje)} no caixa e saíram ${formatCurrency(saidasHoje)}.`);
-  }
-
-  if (overview.accountsPayable.data) {
-    const overdue = overview.accountsPayable.data.items.filter((i) => i.computedStatus === "vencida");
-    if (overdue.length > 0) {
-      const total = Math.round(overdue.reduce((sum, i) => sum + i.outstandingAmount, 0) * 100) / 100;
-      lines.push(`Há ${overdue.length} conta(s) vencida(s), totalizando ${formatCurrency(total)}.`);
-    } else {
-      lines.push("Não há contas a pagar vencidas.");
-    }
-
-    const in7Days = sumOutstandingDueWithin(overview.accountsPayable.data.items, asOfDate, addDaysIso(asOfDate, 7));
-    if (in7Days > 0) lines.push(`Nos próximos 7 dias vencem ${formatCurrency(in7Days)} em contas a pagar.`);
-  }
-
-  if (overview.cashFlow.data) {
-    const negative = findFirstNegativeProjection(overview.cashFlow.data.projection, asOfDate);
-    if (negative) {
-      lines.push(`O saldo projetado ficará negativo a partir de ${formatDateBR(negative.date)} (${formatCurrency(negative.point.saldoProjetado)}), caso isso realmente ocorra.`);
-    }
-  }
-
-  if (!overview.jumpparkConfigured) {
-    lines.push("A agenda real ainda não está integrada — não é possível informar compromissos hoje.");
-  }
-
-  const alertCount =
-    (overview.accountsPayable.data?.alerts.length ?? 0) +
-    (overview.accountsReceivable.data?.alerts.length ?? 0) +
-    (overview.cashFlow.data?.alerts.length ?? 0) +
-    (overview.classificationPendingCount.data ?? 0);
-  lines.push(alertCount > 0 ? `Existem ${alertCount} alerta(s) que exigem atenção.` : "Não há alertas ativos no momento.");
-
-  return lines.join(" ");
+  const plan = await buildManagerialPlan(DAILY_SUMMARY_QUERY, EMPTY_REASONING_SESSION);
+  const { answer } = narrateManagerialPlan(plan, { greetingWord: greeting(new Date()), usedOpeners: [] });
+  return `${greeting(new Date())}, Robério. ${answer.text}`;
 }
 
 /**
@@ -802,169 +754,43 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
 }
 
 /**
- * Pipeline de raciocínio da Sprint 3.0 (Z4 — integração final): toda pergunta gerencial passa por
- * intenção -> objetivo -> memória -> planner -> ferramentas -> raciocínio -> narrador. O roteador
- * determinístico da 2.0 (`matchIntent`/`answerQuestion`) continua existindo, mas só como fallback
- * para perguntas factuais simples (`inform`) — nunca captura primeiro uma pergunta que a nova
- * arquitetura já reconhece. Ver docs/zezinho-3.0-architecture.md.
+ * Fluxo principal da conversa em texto livre (Sprint 4.0, Z4 — narrador consumindo o
+ * `ManagerialPlan` diretamente): mensagem -> `buildManagerialPlan` (classificação multi-intenção
+ * -> planner -> ferramentas -> `OperationalContextBuilder`) -> `narrateManagerialPlan` -> resposta
+ * final. Não existe mais bridge nem switch por intenção única no meio do caminho — ver
+ * docs/zezinho-4.0-architecture.md e o relatório do Z4. `matchIntent`/`answerQuestion` continuam
+ * existindo só para as perguntas rápidas pré-definidas da UI (um recurso à parte, não o
+ * narrador).
  */
 
-const GREETING_PATTERN = /^\s*(bom\s*dia|boa\s*tarde|boa\s*noite|oi|ol[áa]|e\s*a[íi])\b[\s,!.]*(z[eé]zinho)?[\s,!.]*/iu;
-
-function extractGreeting(freeText: string): { hasGreeting: boolean; rest: string } {
-  const match = freeText.match(GREETING_PATTERN);
-  if (!match) return { hasGreeting: false, rest: freeText.trim() };
-  return { hasGreeting: true, rest: freeText.slice(match[0].length).trim() };
-}
-
-/** Mensagens honestas quando o planner não conseguiu montar nenhuma ferramenta (sem período nem memória) — nunca inventa um padrão. */
-const NO_CONTEXT_MESSAGE: Record<string, string> = {
-  compare: "Ainda não consigo montar essa comparação — me diga um período, por exemplo \"compare esta semana com a passada\".",
-  recommend: "Ainda não tenho uma análise para basear uma recomendação. Peça algo como \"Compare esta semana com a passada\" primeiro.",
-  diagnose: "Ainda não tenho dados suficientes reunidos para diagnosticar isso — peça uma comparação de período primeiro.",
-  evaluate_decision: "Não tenho base suficiente ainda para avaliar isso com segurança.",
-  explain: "Não tenho uma análise anterior para explicar ainda — peça uma comparação primeiro.",
-  status_check: "Ainda não tenho dados suficientes para um panorama agora.",
-};
-
-/** Atualiza a memória da sessão após uma resposta — período/objetivo só mudam quando a mensagem atual traz um novo, nunca são redefinidos à toa. */
-function buildNextSession(session: ReasoningSession, intentResult: IntentResult, objectiveResult: ObjectiveResult, reasoningResult: ReasoningResult, openerUsed: string | null): ReasoningSession {
+/** Atualiza a memória da sessão a partir do `ManagerialPlan` — período/objetivo só mudam quando a mensagem atual traz um novo, nunca são redefinidos à toa. */
+function buildNextSessionFromPlan(session: ReasoningSession, plan: Awaited<ReturnType<typeof buildManagerialPlan>>, openerUsed: string | null): ReasoningSession {
   let next = session;
-  const { entities } = intentResult;
+  const { entities, context } = plan;
 
-  if (entities.comparison) {
-    next = withActiveAnalysis(next, { periodA: entities.comparison.periodA, periodB: entities.comparison.periodB, areaFilter: entities.areaFilter ?? next.activeAreaFilter, objective: objectiveResult.objective });
-  } else if (entities.singlePeriod) {
-    next = withActiveAnalysis(next, { periodA: entities.singlePeriod, periodB: null, areaFilter: entities.areaFilter ?? next.activeAreaFilter, objective: objectiveResult.objective });
+  if (context.resolvedPeriodA) {
+    const objective = objectiveForPlan(plan.businessIntents, entities);
+    next = withActiveAnalysis(next, { periodA: context.resolvedPeriodA, periodB: context.resolvedPeriodB, areaFilter: entities.areaFilter ?? next.activeAreaFilter, objective });
   } else {
-    next = { ...next, activeObjective: objectiveResult.objective ?? next.activeObjective, activeAreaFilter: entities.areaFilter ?? next.activeAreaFilter };
+    next = { ...next, activeAreaFilter: entities.areaFilter ?? next.activeAreaFilter };
+    if (plan.businessIntents.length > 0) next = { ...next, activeObjective: objectiveForPlan(plan.businessIntents, entities) };
   }
 
-  for (const fact of reasoningResult.facts) next = withExplainedMetric(next, fact.key);
-  if (reasoningResult.diagnosis?.mainHypothesis) next = withInsightSummary(next, reasoningResult.diagnosis.mainHypothesis.statement);
+  for (const fact of plan.facts) next = withExplainedMetric(next, fact.key);
+  if (plan.risks[0]) next = withInsightSummary(next, plan.risks[0].statement);
+  else if (plan.recommendations[0]) next = withInsightSummary(next, plan.recommendations[0].action);
   if (openerUsed) next = withUsedOpener(next, openerUsed);
 
   return next;
-}
-
-/**
- * Único ponto de entrada da conversa em texto livre. `inform` e perguntas genuinamente fora do
- * domínio gerencial (nenhum padrão da nova arquitetura nem palavra-chave do roteador antigo
- * reconhece) caem no fallback — mas nunca voltam à comparação semanal por engano: se
- * `matchIntent` não reconhece nenhuma palavra-chave específica, a pergunta é honestamente marcada
- * como fora do escopo, em vez de silenciosamente devolver o resumo do dia.
- */
-/**
- * Honestidade sobre conhecimento geral (Sprint 4.0, Z3, seção 11) — sem provedor de IA
- * generativa configurado (isso é auditado e decidido no Z4), o modo analítico local nunca finge
- * ter respondido a parte de conhecimento geral: acrescenta uma frase curta e honesta, nunca
- * rejeita a mensagem inteira por causa dela.
- */
-const GENERAL_KNOWLEDGE_LIMITATION = "Sobre a parte de conhecimento geral da sua pergunta: neste ambiente ainda não tenho um provedor de IA generativa configurado para responder isso — só consigo ajudar com dados reais da Sta Mônica.";
-
-function appendGeneralKnowledgeNote(answer: ZezinhoAnswer, generalAnswerRequired: boolean): ZezinhoAnswer {
-  if (!generalAnswerRequired) return answer;
-  return { ...answer, text: `${answer.text} ${GENERAL_KNOWLEDGE_LIMITATION}` };
 }
 
 export async function answerFreeText(freeText: string, session: ReasoningSession = EMPTY_REASONING_SESSION): Promise<{ answer: ZezinhoAnswer; nextContext: ReasoningSession }> {
   const trimmed = freeText.trim();
   if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: session };
 
-  const { hasGreeting, rest } = extractGreeting(trimmed);
-  const greetingText = hasGreeting ? `${greeting(new Date())}, Robério` : null;
+  const plan = await buildManagerialPlan(trimmed, session);
+  const { answer, openerUsed } = narrateManagerialPlan(plan, { greetingWord: greeting(new Date()), usedOpeners: session.usedNarrationOpeners });
+  const nextSession = buildNextSessionFromPlan(session, plan, openerUsed);
 
-  // Saudação pura ("Bom dia.") -> resumo do dia, nunca trava esperando mais contexto.
-  if (hasGreeting && rest.length === 0) {
-    const summary = await generateDailySummary();
-    return { answer: { text: summary, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: session };
-  }
-
-  const text = rest || trimmed;
-  const intentResult = classifyIntent(text, session);
-  // Classificação multi-intenção (Sprint 4.0, Z3) — nunca decide sozinha o roteamento das
-  // intenções já cobertas pelo pipeline existente (status_check/clarify_needed/pipeline de
-  // raciocínio abaixo, todos intocados). Só entra em ação no ponto exato do bug de produção: a
-  // mensagem cair no fallback "fora do escopo" do roteador legado mesmo tendo um pedaço de
-  // negócio reconhecível (seção 10) — e para nunca fingir ter respondido conhecimento geral
-  // (seção 11).
-  const managerial = classifyManagerial(text);
-  const withNote = (answer: ZezinhoAnswer) => appendGeneralKnowledgeNote(answer, managerial.generalAnswerRequired);
-
-  // status_check já tem uma função dedicada e testada (generateDailySummary) — reaproveitada, não recalculada pelo pipeline novo.
-  if (intentResult.intent === "status_check") {
-    const summary = await generateDailySummary();
-    const finalText = greetingText ? `${greetingText}! ${summary}` : summary;
-    return { answer: withNote({ text: finalText, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }), nextContext: session };
-  }
-
-  if (intentResult.intent === "clarify_needed") {
-    const { answer } = narrate({ intent: "clarify_needed", objective: null, facts: [], findings: [], diagnosis: null, confidence: "baixa", gaps: [], recommendations: [], links: [], sources: [], toolTrace: [] }, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners });
-    return { answer: withNote(answer), nextContext: session };
-  }
-
-  // "inform": roteador determinístico existente decide o fato específico. Quando nenhuma
-  // palavra-chave bate (matchIntent cai no próprio fallback interno "como_esta_o_dia"), a
-  // classificação multi-intenção (Z3) tem uma segunda chance de reconhecer um segmento de
-  // negócio (ex.: "Boa tarde Zézinho, como você está? Movimento hoje está bom?" — "movimento"
-  // nunca deveria cair no "foge do que consigo analisar" só porque nenhuma palavra-chave do
-  // roteador de 2.0 bateu). Só quando NENHUM dos dois reconhece nada de negócio é que a pergunta
-  // é honestamente marcada como fora do domínio gerencial.
-  if (intentResult.intent === "inform") {
-    const questionId = matchIntent(text);
-    if (questionId !== "como_esta_o_dia") {
-      const answer = await answerQuestion(questionId);
-      const finalAnswer = greetingText ? { ...answer, text: `${greetingText}! ${answer.text}` } : answer;
-      return { answer: withNote(finalAnswer), nextContext: session };
-    }
-
-    if (managerial.hasBusinessSegment) {
-      const bridgeIntent: ZezinhoIntent = managerial.businessIntents.includes("recommendation") ? "recommend" : "diagnose";
-      const objective = objectiveForPlan(managerial.businessIntents, intentResult.entities.topic);
-      const objectiveResult: ObjectiveResult = {
-        objective,
-        reused: false,
-        rationale: "Classificação multi-intenção (Z3) reconheceu um segmento de negócio dentro da mensagem, mesmo sem palavra-chave exata do roteador de 2.0.",
-        dataAvailability: objective ? OBJECTIVE_DATA_AVAILABILITY[objective] : null,
-      };
-      const plannerResult = selectTools(bridgeIntent, objective, intentResult.entities, session);
-
-      if (plannerResult.toolCalls.length === 0) {
-        const message = NO_CONTEXT_MESSAGE[bridgeIntent] ?? "Não tenho dados suficientes reunidos para responder isso com segurança agora.";
-        const prefix = greetingText ? `${greetingText}! ` : "";
-        return { answer: withNote({ text: `${prefix}${message}`, links: [] }), nextContext: session };
-      }
-
-      const { results: toolResults, trace: toolTrace } = await executeToolsWithTrace(plannerResult.toolCalls);
-      const reasoningResult = reason({ intent: bridgeIntent, objective, entities: intentResult.entities, memory: session, toolCalls: plannerResult.toolCalls, toolResults, toolTrace }, text);
-      const { answer, openerUsed } = narrate(reasoningResult, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners });
-      const bridgeIntentResult: IntentResult = { ...intentResult, intent: bridgeIntent };
-      const nextSession = buildNextSession(session, bridgeIntentResult, objectiveResult, reasoningResult, openerUsed);
-      return { answer: withNote(answer), nextContext: nextSession };
-    }
-
-    const prefix = greetingText ? `${greetingText}! ` : "";
-    return {
-      answer: withNote({ text: `${prefix}Isso foge do que consigo analisar sobre a operação da Sta Mônica — converso sobre clientes, equipe, estoque, financeiro, JumpPark, marketing, agenda e estacionamento.`, links: [] }),
-      nextContext: session,
-    };
-  }
-
-  // Pipeline de raciocínio: objetivo -> planner -> ferramentas -> raciocínio -> narrador.
-  const objectiveResult = inferObjective(intentResult.intent, intentResult.entities, session);
-  const plannerResult = selectTools(intentResult.intent, objectiveResult.objective, intentResult.entities, session);
-
-  if (plannerResult.toolCalls.length === 0) {
-    const message = NO_CONTEXT_MESSAGE[intentResult.intent] ?? "Não tenho dados suficientes reunidos para responder isso com segurança agora.";
-    const prefix = greetingText ? `${greetingText}! ` : "";
-    return { answer: withNote({ text: `${prefix}${message}`, links: [] }), nextContext: session };
-  }
-
-  const { results: toolResults, trace: toolTrace } = await executeToolsWithTrace(plannerResult.toolCalls);
-  const reasoningResult = reason({ intent: intentResult.intent, objective: objectiveResult.objective, entities: intentResult.entities, memory: session, toolCalls: plannerResult.toolCalls, toolResults, toolTrace }, text);
-  const dayMatchedNote = intentResult.entities.comparison?.dayMatched ? intentResult.entities.comparison.note : null;
-  const { answer, openerUsed } = narrate(reasoningResult, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners, dayMatchedNote });
-
-  const nextSession = buildNextSession(session, intentResult, objectiveResult, reasoningResult, openerUsed);
-  return { answer: withNote(answer), nextContext: nextSession };
+  return { answer, nextContext: nextSession };
 }

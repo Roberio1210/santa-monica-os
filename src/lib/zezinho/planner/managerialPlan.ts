@@ -1,6 +1,6 @@
 import { classifyManagerial, type ManagerialIntent, type QuestionScope } from "@/lib/zezinho/intent/managerial";
 import { extractEntities } from "@/lib/zezinho/intent/entities";
-import type { ExtractedEntities, ZezinhoTopic } from "@/lib/zezinho/intent/types";
+import type { ExtractedEntities } from "@/lib/zezinho/intent/types";
 import type { ReasoningSession } from "@/lib/zezinho/memory/types";
 import type { BusinessObjective } from "@/lib/zezinho/objective/types";
 import { capabilitiesForIntent, type Capability } from "@/lib/zezinho/planner/capabilities";
@@ -30,6 +30,8 @@ export interface EvidencedClaim {
 
 export interface ManagerialPlan {
   rawText: string;
+  /** Exposto para quem monta a memória de sessão (`service.ts`) reaproveitar tópico/filtro sem reextrair. */
+  entities: ExtractedEntities;
   conversationalContext: { greetingDetected: boolean; smallTalkDetected: boolean; farewellDetected: boolean };
   userIntents: ManagerialIntent[];
   businessIntents: ManagerialIntent[];
@@ -50,17 +52,21 @@ export interface ManagerialPlan {
 
 /**
  * Ponte intenção gerencial -> objetivo de negócio, só para reaproveitar `deriveRecommendations`
- * (Sprint 3.0) sem duplicar a lógica de recomendação por domínio. `recommendation` usa a mesma
- * ponte tópico->objetivo já usada em `objective/infer.ts` — não uma nova regra.
+ * (Sprint 3.0) sem duplicar a lógica de recomendação por domínio. Mesma precedência do antigo
+ * `objective/infer.ts` (removido na Z4): pacote citado (ex.: "Bronze") vence qualquer outra
+ * pista — "e se o cliente quiser só a Bronze?" é sobre mix de serviço mesmo contendo a palavra
+ * "cliente" — depois vem intenção dedicada (retenção/estoque/equipe/caixa), depois o tópico só
+ * para `recommendation` (mesma ponte tópico->objetivo do antigo `objective/infer.ts`).
  */
-export function objectiveForPlan(intents: ManagerialIntent[], topic: ZezinhoTopic | null): BusinessObjective | null {
+export function objectiveForPlan(intents: ManagerialIntent[], entities: Pick<ExtractedEntities, "topic" | "packageMentioned">): BusinessObjective | null {
+  if (entities.packageMentioned) return "improve_service_mix";
   if (intents.includes("client_retention") || intents.includes("unanswered_clients")) return "client_retention";
   if (intents.includes("inventory_status")) return "reduce_costs";
   if (intents.includes("staffing_capacity")) return "staffing_capacity";
   if (intents.includes("cash_position") || intents.includes("financial_status")) return "improve_cash_flow";
 
   if (intents.includes("recommendation")) {
-    switch (topic) {
+    switch (entities.topic) {
       case "mix":
         return "improve_service_mix";
       case "preco":
@@ -150,7 +156,7 @@ export async function buildManagerialPlan(rawText: string, memory: ReasoningSess
   const facts = extractFacts(context.toolResults);
   const findings = deriveFindings(facts);
   const diagnosis = buildDiagnosis(findings);
-  const objective = objectiveForPlan(classification.businessIntents, entities.topic);
+  const objective = objectiveForPlan(classification.businessIntents, entities);
   const gaps = deriveGaps(context.toolResults, objective);
   const recommendations = classification.businessIntents.length > 0 ? deriveRecommendations(facts, findings, objective, entities, normalize(rawText), diagnosis.mainHypothesis?.statement ?? null) : [];
   const { risks, opportunities } = deriveRisksAndOpportunities(context, facts);
@@ -163,6 +169,7 @@ export async function buildManagerialPlan(rawText: string, memory: ReasoningSess
 
   return {
     rawText,
+    entities,
     conversationalContext: {
       greetingDetected: classification.intents.includes("greeting"),
       smallTalkDetected: classification.intents.includes("small_talk"),

@@ -8,7 +8,7 @@ function meta(status: ToolResult["status"], limitations: string[] = []) {
 }
 
 function context(toolResults: ToolResult[]): OperationalContext {
-  return { capabilities: [], byCapability: {}, toolCalls: [], toolResults, toolTrace: [] as never[], periodResolved: true };
+  return { capabilities: [], byCapability: {}, toolCalls: [], toolResults, toolTrace: [] as never[], periodResolved: true, resolvedPeriodA: null, resolvedPeriodB: null };
 }
 
 describe("computeContextQuality — regras explicáveis, nunca uma média arbitrária (seção 7)", () => {

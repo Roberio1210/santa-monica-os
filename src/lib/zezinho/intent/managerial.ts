@@ -1,4 +1,4 @@
-import { normalize } from "@/lib/zezinho/date-parser";
+import { normalize, parseComparisonExpression } from "@/lib/zezinho/date-parser";
 
 /**
  * Classificação gerencial multi-intenção (Sprint 4.0, Z3 — ver instrução do checkpoint, seções
@@ -130,15 +130,52 @@ const STAFFING_CAPACITY_PATTERNS: RegExp[] = [/\bequipe\b/, /\bcontratar\b/, /\b
 
 const MARKETING_PERFORMANCE_PATTERNS: RegExp[] = [/\bmarketing\b/, /\bcampanha\b/, /\banuncio\b/, /\binstagram\b/];
 
+/**
+ * Cobre tanto "peça de recomendação" quanto "avaliação de decisão" (a antiga intenção
+ * `evaluate_decision` de `intent/classify.ts`, removida na Z4) — na nova taxonomia, as duas
+ * viram `recommendation`: "vale dar desconto?" e "o que você faria?" pedem a mesma coisa, uma
+ * opinião gerencial fundamentada, só a fonte da pergunta muda (decisão pontual vs. plano geral).
+ */
 const RECOMMENDATION_PATTERNS: RegExp[] = [
   /\bo que (voce )?faria\b/,
   /\bo que fazer\b/,
+  /\bque devemos fazer\b/,
   /\bvoce recomenda\b/,
+  /\bo que recomenda\b/,
   /\bsua sugestao\b/,
   /\bsua opiniao\b/,
   /\bcomo podemos melhorar\b/,
+  /\bcomo melhorar\b/,
+  /\bcomo elevar\b/,
+  /\belevar\w*\s+(esses|os|nossos)?\s*numeros\b/,
+  /\baumentar\w*\s+(esses|os|nossos)?\s*numeros\b/,
+  /\baumentar\w*\s+(o\s+)?ticket\s*medio\b/,
   /\bplano de acao\b/,
+  /\bde um plano\b/,
+  /\bplano para\b/,
   /\bqual (deve ser )?(o )?(nosso )?plano\b/,
+  /\bonde devemos agir\b/,
+  /\bmanter\s+(o|esse|esta)?\s*crescimento\b/,
+  /\bquem devemos ligar\b/,
+  /\bquem ligar\b/,
+  /\bquem devemos contatar\b/,
+  /\bquem priorizar\b/,
+  /\bem quem focar\b/,
+  /\bo que devemos\s+(tentar\s+)?vender mais\b/,
+  /\breverter a escolha\b/,
+  /\bse o cliente\b/,
+  /\bvale a pena\b/,
+  /\bvale aumentar\b/,
+  /\bvale reduzir\b/,
+  /\bvale contratar\b/,
+  /\bvale investir\b/,
+  /\bvale subir\b/,
+  /\bvale\s+(dar\s+)?desconto\b/,
+  /\bdevemos vender mais\b/,
+  /\bdevemos aumentar\b/,
+  /\bdevemos reduzir\b/,
+  /\bcompensa\s+(contratar|aumentar|reduzir|investir)\b/,
+  /\bfaz sentido\s+(contratar|aumentar|reduzir|investir)\b/,
 ];
 
 const OUTLOOK_PATTERNS: RegExp[] = [/\bo que espera\b/, /\bexpectativa\b/, /\bessa semana (vai|deve)\b/, /\bprevisao para a semana\b/, /\bcomo (voce )?espera\b/];
@@ -222,13 +259,22 @@ function classifyScope(normalized: string, businessIntents: ManagerialIntent[], 
  * Movimento hoje está bom?" perdia o pedaço de negócio para o roteador legado). Quando nada bate
  * e não há conteúdo suficiente, devolve só `clarification`.
  */
-export function classifyManagerial(text: string): ManagerialClassification {
+export function classifyManagerial(text: string, referenceDate: Date = new Date()): ManagerialClassification {
   const normalized = normalize(text);
   const segments: IntentSegment[] = [];
 
   for (const rule of RULES) {
     const matched = firstMatch(rule.patterns, normalized);
     if (matched) segments.push({ intent: rule.intent, matchedText: matched });
+  }
+
+  // Uma comparação de período reconhecida pelo interpretador de datas (ex.: "os 19 dias de
+  // julho em relação aos 19 dias de junho") é sempre um sinal de negócio, mesmo quando nenhum
+  // padrão textual acima bate — o antigo `intent/classify.ts` tratava isso via
+  // `entities.comparison !== null` direto na intenção `compare`; aqui vira `historical_performance`
+  // porque, na prática, toda comparação de período É uma pergunta de desempenho histórico.
+  if (!segments.some((s) => BUSINESS_INTENTS.has(s.intent)) && parseComparisonExpression(text, referenceDate)) {
+    segments.push({ intent: "historical_performance", matchedText: "" });
   }
 
   if (segments.length === 0) {

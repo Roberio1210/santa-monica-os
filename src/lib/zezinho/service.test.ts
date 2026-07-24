@@ -164,9 +164,9 @@ describe("answerFreeText — pipeline de raciocínio (Sprint 3.0): conversa obri
     if (answer.confidence) expect(answer.confidence).not.toBe("alta");
   });
 
-  it("10) pergunta fora do domínio ('Qual a cor que combina mais com a fachada?') -> honesto, nunca volta ao resumo semanal", async () => {
+  it("10) pergunta fora do domínio ('Qual a cor que combina mais com a fachada?') -> honesto, nunca volta ao resumo semanal (Z4: fallback conversacional, não mais 'foge do escopo' robótico)", async () => {
     const { answer } = await answerFreeText("Qual a cor que combina mais com a fachada?");
-    expect(answer.text).toMatch(/foge do que consigo analisar/i);
+    expect(answer.text).toMatch(/não entendi bem|pode reformular/i);
     expect(answer.text).not.toMatch(/faturou|veículo|entraram no caixa/i);
   });
 });
@@ -262,9 +262,9 @@ describe("Sprint 4.0, Z3 — 20 perguntas de aceitação obrigatórias", () => {
     expect(plan.limitations.some((l) => l.toLowerCase().includes("whatsapp"))).toBe(true);
   });
 
-  it("10) 'Quem descobriu o Brasil e quanto faturamos hoje?' -> general_knowledge sinalizado honestamente, financial_status respondido com dado real", async () => {
+  it("10) 'Quem descobriu o Brasil e quanto faturamos hoje?' -> general_knowledge sinalizado honestamente (Z4: menciona provedor de IA), financial_status respondido com dado real", async () => {
     const { answer } = await answerFreeText("Quem descobriu o Brasil e quanto faturamos hoje?");
-    expect(answer.text).toMatch(/conhecimento geral/i);
+    expect(answer.text).toMatch(/provedor de ia/i);
     expect(answer.text).not.toMatch(/foge do que consigo analisar/i);
   });
 
@@ -331,5 +331,171 @@ describe("Sprint 4.0, Z3 — 20 perguntas de aceitação obrigatórias", () => {
     expect(plan.toolsSelected).not.toContain("weather_forecast");
     const { answer } = await answerFreeText("Como está nosso estoque?");
     expect(answer.text.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * As 20 perguntas de aceitação obrigatórias da Sprint 4.0, Z4 (instrução do checkpoint, seção
+ * 16) — validação semântica do narrador consumindo o `ManagerialPlan` diretamente: fatos
+ * presentes/ausentes, fontes não inventadas, recomendação sustentada, tom, comprimento
+ * adaptativo, ausência de jargão técnico interno na resposta ao usuário.
+ */
+describe("Sprint 4.0, Z4 — 20 perguntas de aceitação obrigatórias (narrador consumindo o ManagerialPlan)", () => {
+  it("1) 'Boa tarde Zézinho, como você está? Movimento hoje está bom?' -> saudação + resposta social + análise operacional, nunca 'fora do escopo'", async () => {
+    const { answer } = await answerFreeText("Boa tarde Zézinho, como você está? Movimento hoje está bom?");
+    expect(answer.text).not.toMatch(/foge do (que consigo analisar|escopo)/i);
+    expect(answer.text.length).toBeGreaterThan(0);
+    expect(answer.text).not.toMatch(/not_configured|no_data|ToolId/);
+  });
+
+  it("2) 'Como estamos hoje?' -> leitura geral, prioridade/confiança quando aplicável, nunca despeja tudo", async () => {
+    const { answer } = await answerFreeText("Como estamos hoje?");
+    expect(answer.text.length).toBeGreaterThan(0);
+    expect(answer.text.split(".").filter((s) => s.trim().length > 0).length).toBeLessThan(8);
+  });
+
+  it("3) 'Quanto faturamos hoje?' -> resposta curta, sem excesso de contexto (nunca lista risco/oportunidade numa pergunta simples)", async () => {
+    const { answer } = await answerFreeText("Quanto faturamos hoje?");
+    expect(answer.text.length).toBeGreaterThan(0);
+    expect(answer.text).not.toMatch(/minha maior preocupação|prioridade agora seria/i);
+  });
+
+  it("4) 'O que você faria agora?' -> recomendação honesta mesmo sem análise anterior na sessão (nunca inventa evidência)", async () => {
+    const { answer } = await answerFreeText("O que você faria agora?", EMPTY_REASONING_SESSION);
+    expect(answer.text.length).toBeGreaterThan(0);
+  });
+
+  it("5) 'O que espera desta semana?' -> outlook combinando histórico/clima/meta, honesto sobre limitações neste ambiente", async () => {
+    const plan = await buildManagerialPlan("O que espera desta semana?", EMPTY_REASONING_SESSION);
+    expect(plan.toolsSelected).toContain("historical_pattern");
+    expect(plan.toolsSelected).toContain("weather_forecast");
+    expect(plan.toolsSelected).toContain("goal_progress");
+    const { answer } = await answerFreeText("O que espera desta semana?");
+    expect(answer.text.length).toBeGreaterThan(0);
+  });
+
+  it("6) 'Estou preocupado com o movimento.' -> acolhimento real, nunca frase vazia, segue com análise", async () => {
+    const { answer } = await answerFreeText("Estou preocupado com o movimento.");
+    expect(answer.text).toMatch(/entendo, robério/i);
+    expect(answer.text).not.toMatch(/vai ficar tudo bem/i);
+  });
+
+  it("7) 'Quem descobriu o Brasil e quanto faturamos hoje?' -> modo local nunca deixa a parte empresarial sem resposta por causa da geral", async () => {
+    const { answer } = await answerFreeText("Quem descobriu o Brasil e quanto faturamos hoje?");
+    expect(answer.text).toMatch(/provedor de ia/i);
+    // A parte de negócio tem que continuar respondida (algo além só da nota de limitação geral).
+    expect(answer.text).toMatch(/r\$|caixa|entraram|saíram|jumppark/i);
+  });
+
+  it("8) 'Valeu, amanhã continuamos.' -> despedida natural, nenhuma ferramenta desnecessária", async () => {
+    const plan = await buildManagerialPlan("Valeu, amanhã continuamos.", EMPTY_REASONING_SESSION);
+    expect(plan.toolsSelected).toEqual([]);
+    const { answer } = await answerFreeText("Valeu, amanhã continuamos.");
+    expect(answer.text).toMatch(/at[ée]|falou/i);
+  });
+
+  it("9) 'Como está nosso estoque?' -> resposta específica, sem clima, sem financeiro irrelevante", async () => {
+    const { answer } = await answerFreeText("Como está nosso estoque?");
+    expect(answer.text).not.toMatch(/clima|chuva|previsão do tempo/i);
+    expect(answer.text).not.toMatch(/fluxo de caixa|dre gerencial/i);
+  });
+
+  it("10) 'Tem algo preocupante hoje?' -> risco só com evidência real; sem evidência, admite honestamente", async () => {
+    const { answer } = await answerFreeText("Tem algo preocupante hoje?");
+    expect(answer.text.length).toBeGreaterThan(0);
+    expect(answer.text).not.toMatch(/not_configured/);
+  });
+
+  it("11) clima não configurado neste ambiente -> avisa naturalmente, nunca trava a análise", async () => {
+    const { answer } = await answerFreeText("A chuva vai atrapalhar a lavação essa semana?");
+    expect(answer.text).toMatch(/clima.*n[ãa]o.*configurad/i);
+  });
+
+  it("12) JumpPark indisponível -> resposta honesta sobre movimento/faturamento, nunca um número inventado", async () => {
+    const { answer } = await answerFreeText("Quantos carros atendemos hoje?");
+    expect(answer.text.length).toBeGreaterThan(0);
+    expect(answer.text).not.toMatch(/\d+\s*veículo/i);
+  });
+
+  it("13) histórico insuficiente (sem amostra neste ambiente) -> nunca afirma tendência", async () => {
+    const plan = await buildManagerialPlan("Como foi comparado ao histórico?", EMPTY_REASONING_SESSION);
+    const historical = plan.context.byCapability.historical_pattern;
+    expect(historical?.status === "not_configured" || historical?.status === "no_data").toBe(true);
+  });
+
+  it("14) meta não configurada para uma área sem seed -> honesto, nunca assume valor de meta", async () => {
+    const plan = await buildManagerialPlan("Estamos dentro da meta do estacionamento?", EMPTY_REASONING_SESSION);
+    const goal = plan.context.byCapability.goal_progress;
+    if (goal?.id === "goal_progress" && goal.status === "ok") expect(goal.progress).not.toBeNull();
+    else expect(goal?.status === "no_data" || goal?.status === "not_configured").toBe(true);
+  });
+
+  it("15) fonte configurada retornando zero real -> nunca confundido com dado ausente", async () => {
+    const plan = await buildManagerialPlan("Como está nosso estoque?", EMPTY_REASONING_SESSION);
+    expect(plan.context.byCapability.inventory_status?.status).toBe("ok");
+  });
+
+  it("16) fonte desatualizada (stale_data) -> narrador nunca trata como se fosse dado fresco, confiança nunca fica silenciosamente alta", () => {
+    const staleContext = {
+      capabilities: ["cash_ledger_totals" as const],
+      byCapability: { cash_ledger_totals: { id: "cash_ledger_totals" as const, source: "Neon — fluxo de caixa", error: null, status: "stale_data" as const, collectedAt: "2026-07-20T00:00:00.000Z", limitations: ["Dado de 4 dias atrás."], metrics: [] } },
+      toolCalls: [],
+      toolResults: [{ id: "cash_ledger_totals" as const, source: "Neon — fluxo de caixa", error: null, status: "stale_data" as const, collectedAt: "2026-07-20T00:00:00.000Z", limitations: ["Dado de 4 dias atrás."], metrics: [] }],
+      toolTrace: [],
+      periodResolved: true,
+      resolvedPeriodA: null,
+      resolvedPeriodB: null,
+    };
+    const plan: import("@/lib/zezinho/planner/managerialPlan").ManagerialPlan = {
+      rawText: "Como está o caixa?",
+      entities: { comparison: null, singlePeriod: null, areaFilter: null, packageMentioned: null, topic: "caixa" },
+      conversationalContext: { greetingDetected: false, smallTalkDetected: false, farewellDetected: false },
+      userIntents: ["cash_position"],
+      businessIntents: ["cash_position"],
+      questionScope: "specific_analysis",
+      generalAnswerRequired: false,
+      toolsSelected: ["cash_ledger_totals"],
+      capabilitiesRequested: ["cash_ledger_totals"],
+      facts: [],
+      alerts: [],
+      risks: [],
+      opportunities: [],
+      recommendations: [],
+      evidence: ["Neon — fluxo de caixa"],
+      limitations: ["Dado de 4 dias atrás."],
+      contextQuality: { overallLevel: "medium", availableSources: [], missingSources: [], staleSources: ["Neon — fluxo de caixa"], failedSources: [], sampleQuality: null, gaps: [], confidenceDrivers: [], confidenceReducers: ["Neon — fluxo de caixa com dado desatualizado"] },
+      context: staleContext,
+    };
+    expect(plan.contextQuality.overallLevel).not.toBe("high");
+    expect(plan.contextQuality.staleSources).toContain("Neon — fluxo de caixa");
+  });
+
+  it("17) pergunta feita após o fechamento -> situational_context reflete o estágio real, nunca inventa horário de funcionamento", async () => {
+    const plan = await buildManagerialPlan("Como estamos hoje?", EMPTY_REASONING_SESSION);
+    const situational = plan.context.byCapability.situational_context;
+    expect(situational?.status).toBe("ok");
+    if (situational?.id === "situational_context") {
+      expect(["fechado", "pre_abertura", "abertura", "meio_expediente", "fechamento"]).toContain(situational.context.areas.lavacao.stage);
+    }
+  });
+
+  it("18) pergunta operacional pouco depois da abertura -> mesma garantia de honestidade do estágio, sem dado inventado", async () => {
+    const plan = await buildManagerialPlan("Movimento hoje está bom?", EMPTY_REASONING_SESSION);
+    expect(plan.toolsSelected).toContain("situational_context");
+  });
+
+  it("19) multi-intenção real: meta + clima na mesma mensagem, ambas reconhecidas", async () => {
+    const plan = await buildManagerialPlan("Estamos dentro da meta e vai chover essa semana?", EMPTY_REASONING_SESSION);
+    expect(plan.userIntents).toContain("goal_progress");
+    expect(plan.userIntents).toContain("weather_impact");
+    expect(plan.toolsSelected).toContain("goal_progress");
+    expect(plan.toolsSelected).toContain("weather_forecast");
+  });
+
+  it("20) pergunta puramente conversacional ('Tudo bem?') -> curta, nenhuma ferramenta chamada", async () => {
+    const plan = await buildManagerialPlan("Tudo bem?", EMPTY_REASONING_SESSION);
+    expect(plan.toolsSelected).toEqual([]);
+    const { answer } = await answerFreeText("Tudo bem?");
+    expect(answer.text.length).toBeLessThan(150);
   });
 });

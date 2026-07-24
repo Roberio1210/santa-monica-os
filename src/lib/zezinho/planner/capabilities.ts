@@ -63,7 +63,11 @@ export const INTENT_CAPABILITIES: Partial<Record<ManagerialIntent, Capability[]>
   opportunity_analysis: BUSINESS_HEALTH_CAPABILITIES,
   operational_movement: ["situational_context", "jumppark_period_summary", "historical_pattern", "weather_forecast", "staffing_capacity"],
   historical_performance: ["historical_pattern", "jumppark_period_summary"],
-  financial_status: ["cash_ledger_totals", "accounts_receivable", "accounts_payable"],
+  // Correção Z4: "faturamento" é a receita operacional (JumpPark), não só o saldo de caixa —
+  // sem `jumppark_period_summary` aqui, "Quanto faturamos hoje?" nunca tinha um número real de
+  // faturamento para responder (só caixa/contas). `cash_ledger_totals`/AP/AR continuam, porque a
+  // pergunta também pode ser sobre resultado financeiro amplo, não só a receita operacional.
+  financial_status: ["jumppark_period_summary", "cash_ledger_totals", "accounts_receivable", "accounts_payable"],
   cash_position: ["cash_ledger_totals"],
   goal_progress: ["goal_progress", "jumppark_period_summary"],
   weather_impact: ["weather_forecast", "historical_pattern"],
