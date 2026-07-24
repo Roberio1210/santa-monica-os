@@ -12,6 +12,9 @@ const ALL_TOOL_IDS: ToolId[] = [
   "inventory_overview",
   "central_alerts",
   "full_period_comparison",
+  "weather_forecast",
+  "goal_progress",
+  "historical_pattern",
 ];
 
 describe("TOOL_REGISTRY — consistência do catálogo", () => {

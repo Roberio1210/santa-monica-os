@@ -38,8 +38,13 @@ export interface WeatherEnv {
 
 const DEFAULT_WEATHER_LOCATION = "Florianópolis,SC,BR";
 
+/**
+ * Aceita `OPENWEATHER_API_KEY` (nome atual, preferido) ou `WEATHER_API_KEY` (nome usado no
+ * checkpoint anterior) — compatibilidade segura para nunca quebrar um ambiente que já tenha
+ * cadastrado a chave com o nome antigo. Nunca loga nem expõe o valor da chave.
+ */
 export function getWeatherEnv(): WeatherEnv | null {
-  const apiKey = process.env.WEATHER_API_KEY;
+  const apiKey = process.env.OPENWEATHER_API_KEY || process.env.WEATHER_API_KEY;
   if (!apiKey) return null;
   const location = process.env.WEATHER_LOCATION || DEFAULT_WEATHER_LOCATION;
   return { apiKey, location };

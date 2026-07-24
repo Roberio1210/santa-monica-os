@@ -6,6 +6,7 @@ import type { InventorySummary } from "@/lib/inventory/service";
 import type { ConsolidatedAlert } from "@/lib/operations/central";
 import type { WeatherForecastResult } from "@/lib/integrations/weather/types";
 import type { GoalArea, GoalProgress } from "@/lib/goals/types";
+import type { HistoricalPatternResult } from "@/lib/integrations/jumppark/historical-pattern";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -23,7 +24,8 @@ export type ToolId =
   | "central_alerts"
   | "full_period_comparison"
   | "weather_forecast"
-  | "goal_progress";
+  | "goal_progress"
+  | "historical_pattern";
 
 export type ToolCostHint = "low" | "medium" | "high";
 
@@ -48,7 +50,24 @@ export interface ToolCall {
   goalArea?: GoalArea | null;
 }
 
-interface ToolResultBase {
+/**
+ * Diferencia claramente as razões pelas quais um resultado pode não trazer "ok" — o planner e o
+ * narrador nunca devem tratar "zero real" (`ok` com valores em zero), "dado ausente" (`no_data`),
+ * "integração não configurada" (`not_configured`), "falha temporária" (`temporary_failure`),
+ * "dado desatualizado" (`stale_data`) e "permissão insuficiente" (`insufficient_permission`) como
+ * a mesma coisa.
+ */
+export type ToolResultStatus = "ok" | "not_configured" | "temporary_failure" | "stale_data" | "insufficient_permission" | "no_data";
+
+/** Campos de rastreabilidade comuns a todo resultado de ferramenta — ver `executor.ts#meta()`. */
+export interface ToolMeta {
+  status: ToolResultStatus;
+  /** ISO — quando este resultado foi obtido (não quando a resposta final foi montada). */
+  collectedAt: string;
+  limitations: string[];
+}
+
+interface ToolResultBase extends ToolMeta {
   source: string;
   error: string | null;
 }
@@ -63,4 +82,5 @@ export type ToolResult =
   | (ToolResultBase & { id: "central_alerts"; alerts: ConsolidatedAlert[] })
   | (ToolResultBase & { id: "full_period_comparison"; report: ComparisonReport })
   | (ToolResultBase & { id: "weather_forecast"; forecast: WeatherForecastResult })
-  | (ToolResultBase & { id: "goal_progress"; progress: GoalProgress | null });
+  | (ToolResultBase & { id: "goal_progress"; progress: GoalProgress | null })
+  | (ToolResultBase & { id: "historical_pattern"; pattern: HistoricalPatternResult | null });

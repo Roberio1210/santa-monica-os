@@ -37,17 +37,23 @@ function resolvePeriods(entities: ExtractedEntities, memory: ReasoningSession): 
  * `client_retention` não busca JumpPark nem caixa: só CRM. `staffing_capacity` usa só o resumo
  * operacional como proxy (marcado `proxy_only` em objective/types.ts) — nenhum dado de equipe
  * real existe para buscar. `business_health` é o único objetivo genuinamente amplo.
+ *
+ * Clima (`weather_forecast`), meta (`goal_progress`) e padrão histórico (`historical_pattern`)
+ * entram SÓ nos objetivos ligados a operação/movimento/planejamento/faturamento (Sprint 4.0, Z2 —
+ * "faça a consulta ao clima seletiva no planejador"): nunca em `client_retention` (CRM isolado) ou
+ * `evaluate_pricing`/`reduce_costs`/`improve_service_mix` (perguntas específicas de precificação,
+ * custo ou mix não precisam de clima nem de padrão histórico para responder).
  */
 const OBJECTIVE_TOOLS: Record<BusinessObjective, ToolId[]> = {
   increase_ticket: ["jumppark_period_summary"],
   improve_service_mix: ["jumppark_period_summary", "jumppark_wash_packages"],
-  increase_revenue: ["jumppark_period_summary"],
+  increase_revenue: ["jumppark_period_summary", "goal_progress", "historical_pattern", "weather_forecast"],
   reduce_costs: ["cash_ledger_totals"],
   improve_cash_flow: ["cash_ledger_totals", "jumppark_period_summary"],
   evaluate_pricing: ["jumppark_period_summary"],
-  staffing_capacity: ["jumppark_period_summary"],
+  staffing_capacity: ["jumppark_period_summary", "historical_pattern", "weather_forecast"],
   client_retention: ["crm_customers"],
-  business_health: ["jumppark_period_summary", "cash_ledger_totals", "central_alerts"],
+  business_health: ["jumppark_period_summary", "cash_ledger_totals", "central_alerts", "goal_progress", "historical_pattern", "weather_forecast"],
 };
 
 /**

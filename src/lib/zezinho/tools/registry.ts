@@ -79,17 +79,16 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     costHint: "high",
   },
   /**
-   * Novas na Sprint 4.0 (Z1) — registradas no catálogo e já com executor funcional, mas ainda
-   * SEM entrada na tabela objetivo->ferramentas do planner (`objectives: []`): a seletividade
-   * (quando o clima/meta entram numa resposta) é trabalho do Z2, não deste checkpoint — mesma
-   * disciplina incremental já usada para `inventory_overview` na Sprint 3.0.
+   * `weather_forecast` e `goal_progress` entraram no catálogo na Sprint 4.0 (Z1); a Z2 conclui a
+   * seletividade real no planner (`planner/selectTools.ts` — só objetivos de operação/movimento/
+   * planejamento/faturamento). `historical_pattern` é novo na Z2.
    */
   weather_forecast: {
     id: "weather_forecast",
-    label: "Previsão do tempo (hoje/amanhã)",
+    label: "Previsão do tempo (condição atual, próximas horas e próximos dias)",
     source: "OpenWeatherMap",
-    reuses: "fetchWeatherForecast (src/lib/integrations/weather/service.ts)",
-    objectives: [],
+    reuses: "getWeatherForecast (src/lib/integrations/weather/service.ts)",
+    objectives: ["increase_revenue", "staffing_capacity", "business_health"],
     requiresPeriod: false,
     costHint: "low",
   },
@@ -97,8 +96,17 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     id: "goal_progress",
     label: "Progresso da meta (percentual, ritmo, projeção, faixas de prêmio)",
     source: "Metas (Neon)",
-    reuses: "fetchActiveGoal + computeGoalProgress (src/lib/goals/service.ts) + jumppark_period_summary para o valor atual",
-    objectives: [],
+    reuses: "fetchActiveGoal + computeGoalProgress (src/lib/goals/service.ts) + fetchOperationalOrders para o valor atual",
+    objectives: ["increase_revenue", "business_health"],
+    requiresPeriod: false,
+    costHint: "medium",
+  },
+  historical_pattern: {
+    id: "historical_pattern",
+    label: "Padrão histórico (mesmo dia da semana, até o mesmo horário)",
+    source: "JumpPark — padrão histórico",
+    reuses: "fetchOperationalOrders + computeHistoricalPattern (src/lib/integrations/jumppark/historical-pattern.ts)",
+    objectives: ["increase_revenue", "staffing_capacity", "business_health"],
     requiresPeriod: false,
     costHint: "medium",
   },

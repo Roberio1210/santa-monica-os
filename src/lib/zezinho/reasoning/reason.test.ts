@@ -11,6 +11,11 @@ function m(key: string, label: string, unit: "currency" | "count", a: number, b:
   return { key, label, unit, a, b, comparison: comparePeriods(a, b), source: "JumpPark" };
 }
 
+/** Campos comuns de rastreabilidade (`ToolMeta`) para os fixtures de `ToolResult` deste arquivo. */
+function okMeta(limitations: string[] = []) {
+  return { status: "ok" as const, collectedAt: "2026-07-20T12:00:00.000Z", limitations };
+}
+
 function entities(overrides: Partial<ExtractedEntities> = {}): ExtractedEntities {
   return { comparison: null, singlePeriod: null, areaFilter: null, packageMentioned: null, topic: null, ...overrides };
 }
@@ -61,6 +66,7 @@ describe("reason — fatos, achados e diagnóstico a partir de resultados reais 
         id: "jumppark_period_summary",
         source: "JumpPark",
         error: null,
+        ...okMeta(),
         jumpparkConfigured: true,
         metrics: [m("revenue", "Faturamento operacional", "currency", 12000, 10000), m("washCount", "Lavações", "count", 130, 100), m("avgTicket", "Ticket médio", "currency", 92, 100)],
         peakHourA: null,
@@ -76,7 +82,7 @@ describe("reason — fatos, achados e diagnóstico a partir de resultados reais 
   });
 
   it("propaga erro de fonte como lacuna, sem derrubar o raciocínio", () => {
-    const toolResults: ToolResult[] = [{ id: "cash_ledger_totals", source: "Neon — fluxo de caixa", error: "Não foi possível consultar o Fluxo de Caixa (Neon).", metrics: [] }];
+    const toolResults: ToolResult[] = [{ id: "cash_ledger_totals", source: "Neon — fluxo de caixa", error: "Não foi possível consultar o Fluxo de Caixa (Neon).", ...okMeta(), status: "temporary_failure", metrics: [] }];
     const result = reason(baseInput({ toolResults }), "como esta o caixa");
     expect(result.gaps.some((g) => g.description.includes("Fluxo de Caixa"))).toBe(true);
     expect(result.facts).toEqual([]);
@@ -85,7 +91,7 @@ describe("reason — fatos, achados e diagnóstico a partir de resultados reais 
 
 describe("reason — client_retention usa dados reais do CRM, nunca inventa cliente", () => {
   it("recomenda ligar para clientes reais em risco, com motivo e evidência", () => {
-    const toolResults: ToolResult[] = [{ id: "crm_customers", source: "CRM (JumpPark + Contas a Receber)", error: null, jumpparkConfigured: true, customers: [customer(), customer({ id: "c2", name: "João Pereira", daysSinceLastVisit: 60, statusReason: "Sem retorno há 60 dias" })] }];
+    const toolResults: ToolResult[] = [{ id: "crm_customers", source: "CRM (JumpPark + Contas a Receber)", error: null, ...okMeta(), jumpparkConfigured: true, customers: [customer(), customer({ id: "c2", name: "João Pereira", daysSinceLastVisit: 60, statusReason: "Sem retorno há 60 dias" })] }];
     const result = reason(baseInput({ intent: "recommend", objective: "client_retention", toolResults }), "quem devemos ligar hoje");
     expect(result.recommendations.length).toBeGreaterThan(0);
     expect(result.recommendations[0].action).toMatch(/Maria Silva|João Pereira/);
@@ -93,7 +99,7 @@ describe("reason — client_retention usa dados reais do CRM, nunca inventa clie
   });
 
   it("sem cliente em risco, admite honestamente — nunca inventa um nome", () => {
-    const toolResults: ToolResult[] = [{ id: "crm_customers", source: "CRM (JumpPark + Contas a Receber)", error: null, jumpparkConfigured: true, customers: [customer({ status: "ativo" })] }];
+    const toolResults: ToolResult[] = [{ id: "crm_customers", source: "CRM (JumpPark + Contas a Receber)", error: null, ...okMeta(), jumpparkConfigured: true, customers: [customer({ status: "ativo" })] }];
     const result = reason(baseInput({ intent: "recommend", objective: "client_retention", toolResults }), "quem devemos ligar hoje");
     expect(result.recommendations[0].action).toMatch(/Nenhuma/i);
   });
@@ -102,7 +108,7 @@ describe("reason — client_retention usa dados reais do CRM, nunca inventa clie
 describe("reason — staffing_capacity sempre rotula proxy, nunca afirma produtividade real", () => {
   it("confiança nunca alta quando o objetivo é proxy_only", () => {
     const toolResults: ToolResult[] = [
-      { id: "jumppark_period_summary", source: "JumpPark", error: null, jumpparkConfigured: true, metrics: [m("vehicles", "Veículos atendidos", "count", 82, 60), m("avgTicket", "Ticket médio", "currency", 90, 110)], peakHourA: null, peakHourB: null, topServicesA: [] },
+      { id: "jumppark_period_summary", source: "JumpPark", error: null, ...okMeta(), jumpparkConfigured: true, metrics: [m("vehicles", "Veículos atendidos", "count", 82, 60), m("avgTicket", "Ticket médio", "currency", 90, 110)], peakHourA: null, peakHourB: null, topServicesA: [] },
     ];
     const result = reason(baseInput({ intent: "evaluate_decision", objective: "staffing_capacity", toolResults }), "vale contratar mais alguem");
     expect(result.confidence).not.toBe("alta");
@@ -114,8 +120,8 @@ describe("reason — staffing_capacity sempre rotula proxy, nunca afirma produti
 describe("reason — reduce_costs/estoque usa o alerta real de receitas sem calibração (bug fix)", () => {
   it("recomenda calibrar receitas quando o alerta 'sem receita' está presente — nunca a genérica de acompanhar itens quase vazios", () => {
     const toolResults: ToolResult[] = [
-      { id: "inventory_overview", source: "Estoque", error: null, summary: { totalItems: 65, lowStockCount: 0, nearEmptyCount: 1, sealedCount: 24, totalStockValue: null, itemsWithoutMinimum: 65 } },
-      { id: "central_alerts", source: "Central de Operações", error: null, alerts: [{ severity: "atencao", title: "Serviços sem receita", description: "17 serviço(s) sem nenhuma receita cadastrada.", date: null, module: "Estoque", href: "/estoque/pendencias" }] },
+      { id: "inventory_overview", source: "Estoque", error: null, ...okMeta(), summary: { totalItems: 65, lowStockCount: 0, nearEmptyCount: 1, sealedCount: 24, totalStockValue: null, itemsWithoutMinimum: 65 } },
+      { id: "central_alerts", source: "Central de Operações", error: null, ...okMeta(), alerts: [{ severity: "atencao", title: "Serviços sem receita", description: "17 serviço(s) sem nenhuma receita cadastrada.", date: null, module: "Estoque", href: "/estoque/pendencias" }] },
     ];
     const result = reason(baseInput({ intent: "diagnose", objective: "reduce_costs", entities: entities({ topic: "estoque" }), toolResults }), "estamos desperdicando produto");
     expect(result.recommendations[0].action).toMatch(/[Cc]alibrar as receitas/);
@@ -137,6 +143,7 @@ describe("reason — links reaproveitam buildLinks/buildSources quando a ferrame
         id: "full_period_comparison",
         source: "JumpPark + Neon (fluxo de caixa + DRE)",
         error: null,
+        ...okMeta(),
         report: {
           periodA: { key: "week", from: "2026-07-13", to: "2026-07-19", label: "Semana atual" },
           periodB: { key: "custom", from: "2026-07-06", to: "2026-07-12", label: "semana passada" },

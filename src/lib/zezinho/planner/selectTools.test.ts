@@ -79,17 +79,17 @@ describe("selectTools — busca seletiva por objetivo (nunca 'tudo por garantia'
     expect(toolIds(result.toolCalls)).toEqual(["cash_ledger_totals", "jumppark_period_summary"]);
   });
 
-  it("staffing_capacity usa só o resumo operacional como proxy — sem período, não busca nada (nunca inventa proxy sem base)", () => {
+  it("staffing_capacity usa o resumo operacional como proxy + clima/padrão histórico (Z2) — sem período, só as que não dependem de período", () => {
     const withPeriod = selectTools("evaluate_decision", "staffing_capacity", entities({ topic: "equipe" }), SESSION_WITH_PERIODS);
-    expect(toolIds(withPeriod.toolCalls)).toEqual(["jumppark_period_summary"]);
+    expect(toolIds(withPeriod.toolCalls)).toEqual(["jumppark_period_summary", "historical_pattern", "weather_forecast"]);
 
     const withoutPeriod = selectTools("evaluate_decision", "staffing_capacity", entities({ topic: "equipe" }), EMPTY_REASONING_SESSION);
-    expect(withoutPeriod.toolCalls).toEqual([]);
+    expect(toolIds(withoutPeriod.toolCalls)).toEqual(["historical_pattern", "weather_forecast"]);
   });
 
-  it("business_health (único objetivo genuinamente amplo) busca resumo + caixa + alertas", () => {
+  it("business_health (único objetivo genuinamente amplo) busca resumo + caixa + alertas + meta/padrão histórico/clima (Z2)", () => {
     const result = selectTools("diagnose", "business_health", entities(), SESSION_WITH_PERIODS);
-    expect(toolIds(result.toolCalls)).toEqual(["jumppark_period_summary", "cash_ledger_totals", "central_alerts"]);
+    expect(toolIds(result.toolCalls)).toEqual(["jumppark_period_summary", "cash_ledger_totals", "central_alerts", "goal_progress", "historical_pattern", "weather_forecast"]);
   });
 });
 
