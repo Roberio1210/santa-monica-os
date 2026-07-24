@@ -11,8 +11,11 @@ import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
 import { buildComparisonReport, computePeakHour, metric, packageCounts, sumCashInRange, topServicesByRevenue, type ComparisonMetric, type PackageCounts } from "@/lib/zezinho/comparison-engine";
 import { getWeatherForecast } from "@/lib/integrations/weather/service";
 import { fetchActiveGoal, computeGoalProgress } from "@/lib/goals/service";
+import { fetchAccountsPayableOverview, fetchAccountsReceivableDashboard } from "@/lib/finance/service";
+import { computeSituationalContext } from "@/lib/zezinho/situational/stage";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
+import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
 
 /**
  * Dispatcher do catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção
@@ -237,6 +240,56 @@ async function runHistoricalPattern(call: ToolCall): Promise<ToolResult> {
   return { id: "historical_pattern", source, error: null, ...meta(status, pattern.limitations), pattern };
 }
 
+/** Contexto situacional — puro, sem I/O, sempre disponível (Sprint 4.0, Z1 construiu `computeSituationalContext`; Z3 finalmente o conecta ao catálogo de ferramentas). */
+async function runSituationalContext(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.situational_context.source;
+  const context = computeSituationalContext(new Date());
+  return { id: "situational_context", source, error: null, ...meta("ok"), context };
+}
+
+async function runAccountsPayable(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.accounts_payable.source;
+  try {
+    const { summary } = await fetchAccountsPayableOverview(saoPauloDateISO());
+    return { id: "accounts_payable", source, error: null, ...meta("ok"), summary };
+  } catch {
+    return { id: "accounts_payable", source, error: "Não foi possível consultar Contas a Pagar.", ...meta("temporary_failure"), summary: null };
+  }
+}
+
+async function runAccountsReceivable(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.accounts_receivable.source;
+  try {
+    const dashboard = await fetchAccountsReceivableDashboard(saoPauloDateISO());
+    return { id: "accounts_receivable", source, error: null, ...meta("ok"), dashboard };
+  } catch {
+    return { id: "accounts_receivable", source, error: "Não foi possível consultar Contas a Receber.", ...meta("temporary_failure"), dashboard: null };
+  }
+}
+
+/** Integração de mensageria (WhatsApp) ainda não existe — nunca inventa contagem, sempre honesto sobre a ausência. */
+async function runUnansweredClients(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.unanswered_clients.source;
+  return {
+    id: "unanswered_clients",
+    source,
+    error: "Integração de mensagens (WhatsApp) ainda não implementada.",
+    ...meta("not_configured", ["Quando implementada, autorizado apenas metadados (quantidade de conversas, tempo médio de resposta) — nunca o conteúdo das mensagens."]),
+  };
+}
+
+/** `/agenda` hoje exibe só dado ilustrativo (mock) — nunca tratado como real nas respostas do Zézinho. */
+async function runAgendaSummary(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.agenda_summary.source;
+  return { id: "agenda_summary", source, error: "Agenda real ainda não integrada neste ambiente.", ...meta("not_configured", ["A página /agenda mostra dados ilustrativos (mock), não usados aqui."]) };
+}
+
+/** Meta Ads/Instagram (Fase B) ainda não implementado — nunca inventa métrica de marketing. */
+async function runMarketingSummary(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.marketing_summary.source;
+  return { id: "marketing_summary", source, error: "Integração de marketing (Meta Ads/Instagram) ainda não implementada.", ...meta("not_configured") };
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -262,10 +315,39 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runGoalProgress(call);
     case "historical_pattern":
       return runHistoricalPattern(call);
+    case "situational_context":
+      return runSituationalContext();
+    case "accounts_payable":
+      return runAccountsPayable();
+    case "accounts_receivable":
+      return runAccountsReceivable();
+    case "unanswered_clients":
+      return runUnansweredClients();
+    case "agenda_summary":
+      return runAgendaSummary();
+    case "marketing_summary":
+      return runMarketingSummary();
   }
 }
 
 /** Executa várias ferramentas em paralelo (seção 6 do documento: nunca serial quando independentes). */
 export async function executeTools(calls: ToolCall[]): Promise<ToolResult[]> {
   return Promise.all(calls.map(executeTool));
+}
+
+/**
+ * Executa ferramentas em paralelo medindo a duração de cada uma — usado por `service.ts`
+ * (pipeline de raciocínio single-intent) e por `planner/contextBuilder.ts` (Sprint 4.0, Z3).
+ * Movido para cá na Z3 para não duplicar a mesma lógica em dois lugares.
+ */
+export async function executeToolsWithTrace(calls: ToolCall[]): Promise<{ results: ToolResult[]; trace: ToolTraceEntry[] }> {
+  const timed = await Promise.all(
+    calls.map(async (call) => {
+      const start = Date.now();
+      const result = await executeTool(call);
+      const trace: ToolTraceEntry = { id: call.id, durationMs: Date.now() - start, error: result.error };
+      return { result, trace };
+    }),
+  );
+  return { results: timed.map((t) => t.result), trace: timed.map((t) => t.trace) };
 }

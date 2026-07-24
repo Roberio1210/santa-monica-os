@@ -18,16 +18,18 @@ import type { ZezinhoAnswer, ZezinhoQuestion } from "@/lib/zezinho/types";
 import type { EligibleOrder } from "@/lib/orders/types";
 import type { ConsumptionPreview } from "@/lib/orders/preview";
 import { classifyIntent } from "@/lib/zezinho/intent/classify";
+import { classifyManagerial } from "@/lib/zezinho/intent/managerial";
 import { inferObjective } from "@/lib/zezinho/objective/infer";
 import { selectTools } from "@/lib/zezinho/planner/selectTools";
-import { executeTool } from "@/lib/zezinho/tools/executor";
+import { objectiveForPlan } from "@/lib/zezinho/planner/managerialPlan";
+import { executeToolsWithTrace } from "@/lib/zezinho/tools/executor";
 import { reason } from "@/lib/zezinho/reasoning/reason";
 import { narrate } from "@/lib/zezinho/narrator/narrate";
 import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/memory/types";
 import { withActiveAnalysis, withExplainedMetric, withInsightSummary, withUsedOpener } from "@/lib/zezinho/memory/session";
-import type { IntentResult } from "@/lib/zezinho/intent/types";
-import type { ObjectiveResult } from "@/lib/zezinho/objective/types";
-import type { ReasoningResult, ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
+import type { IntentResult, ZezinhoIntent } from "@/lib/zezinho/intent/types";
+import { OBJECTIVE_DATA_AVAILABILITY, type ObjectiveResult } from "@/lib/zezinho/objective/types";
+import type { ReasoningResult } from "@/lib/zezinho/reasoning/types";
 
 /**
  * "Zézinho — Gerente Operacional": pipeline de raciocínio (intenção -> objetivo -> memória ->
@@ -825,19 +827,6 @@ const NO_CONTEXT_MESSAGE: Record<string, string> = {
   status_check: "Ainda não tenho dados suficientes para um panorama agora.",
 };
 
-/** Executa as ferramentas do planner em paralelo, medindo a duração de cada uma (seção "Desempenho" do pedido). */
-async function executeToolsWithTrace(calls: Awaited<ReturnType<typeof selectTools>>["toolCalls"]) {
-  const timed = await Promise.all(
-    calls.map(async (call) => {
-      const start = Date.now();
-      const result = await executeTool(call);
-      const trace: ToolTraceEntry = { id: call.id, durationMs: Date.now() - start, error: result.error };
-      return { result, trace };
-    }),
-  );
-  return { results: timed.map((t) => t.result), trace: timed.map((t) => t.trace) };
-}
-
 /** Atualiza a memória da sessão após uma resposta — período/objetivo só mudam quando a mensagem atual traz um novo, nunca são redefinidos à toa. */
 function buildNextSession(session: ReasoningSession, intentResult: IntentResult, objectiveResult: ObjectiveResult, reasoningResult: ReasoningResult, openerUsed: string | null): ReasoningSession {
   let next = session;
@@ -865,6 +854,19 @@ function buildNextSession(session: ReasoningSession, intentResult: IntentResult,
  * `matchIntent` não reconhece nenhuma palavra-chave específica, a pergunta é honestamente marcada
  * como fora do escopo, em vez de silenciosamente devolver o resumo do dia.
  */
+/**
+ * Honestidade sobre conhecimento geral (Sprint 4.0, Z3, seção 11) — sem provedor de IA
+ * generativa configurado (isso é auditado e decidido no Z4), o modo analítico local nunca finge
+ * ter respondido a parte de conhecimento geral: acrescenta uma frase curta e honesta, nunca
+ * rejeita a mensagem inteira por causa dela.
+ */
+const GENERAL_KNOWLEDGE_LIMITATION = "Sobre a parte de conhecimento geral da sua pergunta: neste ambiente ainda não tenho um provedor de IA generativa configurado para responder isso — só consigo ajudar com dados reais da Sta Mônica.";
+
+function appendGeneralKnowledgeNote(answer: ZezinhoAnswer, generalAnswerRequired: boolean): ZezinhoAnswer {
+  if (!generalAnswerRequired) return answer;
+  return { ...answer, text: `${answer.text} ${GENERAL_KNOWLEDGE_LIMITATION}` };
+}
+
 export async function answerFreeText(freeText: string, session: ReasoningSession = EMPTY_REASONING_SESSION): Promise<{ answer: ZezinhoAnswer; nextContext: ReasoningSession }> {
   const trimmed = freeText.trim();
   if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: session };
@@ -880,32 +882,70 @@ export async function answerFreeText(freeText: string, session: ReasoningSession
 
   const text = rest || trimmed;
   const intentResult = classifyIntent(text, session);
+  // Classificação multi-intenção (Sprint 4.0, Z3) — nunca decide sozinha o roteamento das
+  // intenções já cobertas pelo pipeline existente (status_check/clarify_needed/pipeline de
+  // raciocínio abaixo, todos intocados). Só entra em ação no ponto exato do bug de produção: a
+  // mensagem cair no fallback "fora do escopo" do roteador legado mesmo tendo um pedaço de
+  // negócio reconhecível (seção 10) — e para nunca fingir ter respondido conhecimento geral
+  // (seção 11).
+  const managerial = classifyManagerial(text);
+  const withNote = (answer: ZezinhoAnswer) => appendGeneralKnowledgeNote(answer, managerial.generalAnswerRequired);
 
   // status_check já tem uma função dedicada e testada (generateDailySummary) — reaproveitada, não recalculada pelo pipeline novo.
   if (intentResult.intent === "status_check") {
     const summary = await generateDailySummary();
     const finalText = greetingText ? `${greetingText}! ${summary}` : summary;
-    return { answer: { text: finalText, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }, nextContext: session };
+    return { answer: withNote({ text: finalText, links: [{ label: "Ver Central de Operações", href: "/dashboard" }] }), nextContext: session };
   }
 
   if (intentResult.intent === "clarify_needed") {
     const { answer } = narrate({ intent: "clarify_needed", objective: null, facts: [], findings: [], diagnosis: null, confidence: "baixa", gaps: [], recommendations: [], links: [], sources: [], toolTrace: [] }, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners });
-    return { answer, nextContext: session };
+    return { answer: withNote(answer), nextContext: session };
   }
 
   // "inform": roteador determinístico existente decide o fato específico. Quando nenhuma
   // palavra-chave bate (matchIntent cai no próprio fallback interno "como_esta_o_dia"), a
-  // pergunta é honestamente fora do domínio gerencial — nunca devolve o resumo do dia por engano.
+  // classificação multi-intenção (Z3) tem uma segunda chance de reconhecer um segmento de
+  // negócio (ex.: "Boa tarde Zézinho, como você está? Movimento hoje está bom?" — "movimento"
+  // nunca deveria cair no "foge do que consigo analisar" só porque nenhuma palavra-chave do
+  // roteador de 2.0 bateu). Só quando NENHUM dos dois reconhece nada de negócio é que a pergunta
+  // é honestamente marcada como fora do domínio gerencial.
   if (intentResult.intent === "inform") {
     const questionId = matchIntent(text);
     if (questionId !== "como_esta_o_dia") {
       const answer = await answerQuestion(questionId);
       const finalAnswer = greetingText ? { ...answer, text: `${greetingText}! ${answer.text}` } : answer;
-      return { answer: finalAnswer, nextContext: session };
+      return { answer: withNote(finalAnswer), nextContext: session };
     }
+
+    if (managerial.hasBusinessSegment) {
+      const bridgeIntent: ZezinhoIntent = managerial.businessIntents.includes("recommendation") ? "recommend" : "diagnose";
+      const objective = objectiveForPlan(managerial.businessIntents, intentResult.entities.topic);
+      const objectiveResult: ObjectiveResult = {
+        objective,
+        reused: false,
+        rationale: "Classificação multi-intenção (Z3) reconheceu um segmento de negócio dentro da mensagem, mesmo sem palavra-chave exata do roteador de 2.0.",
+        dataAvailability: objective ? OBJECTIVE_DATA_AVAILABILITY[objective] : null,
+      };
+      const plannerResult = selectTools(bridgeIntent, objective, intentResult.entities, session);
+
+      if (plannerResult.toolCalls.length === 0) {
+        const message = NO_CONTEXT_MESSAGE[bridgeIntent] ?? "Não tenho dados suficientes reunidos para responder isso com segurança agora.";
+        const prefix = greetingText ? `${greetingText}! ` : "";
+        return { answer: withNote({ text: `${prefix}${message}`, links: [] }), nextContext: session };
+      }
+
+      const { results: toolResults, trace: toolTrace } = await executeToolsWithTrace(plannerResult.toolCalls);
+      const reasoningResult = reason({ intent: bridgeIntent, objective, entities: intentResult.entities, memory: session, toolCalls: plannerResult.toolCalls, toolResults, toolTrace }, text);
+      const { answer, openerUsed } = narrate(reasoningResult, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners });
+      const bridgeIntentResult: IntentResult = { ...intentResult, intent: bridgeIntent };
+      const nextSession = buildNextSession(session, bridgeIntentResult, objectiveResult, reasoningResult, openerUsed);
+      return { answer: withNote(answer), nextContext: nextSession };
+    }
+
     const prefix = greetingText ? `${greetingText}! ` : "";
     return {
-      answer: { text: `${prefix}Isso foge do que consigo analisar sobre a operação da Sta Mônica — converso sobre clientes, equipe, estoque, financeiro, JumpPark, marketing, agenda e estacionamento.`, links: [] },
+      answer: withNote({ text: `${prefix}Isso foge do que consigo analisar sobre a operação da Sta Mônica — converso sobre clientes, equipe, estoque, financeiro, JumpPark, marketing, agenda e estacionamento.`, links: [] }),
       nextContext: session,
     };
   }
@@ -917,7 +957,7 @@ export async function answerFreeText(freeText: string, session: ReasoningSession
   if (plannerResult.toolCalls.length === 0) {
     const message = NO_CONTEXT_MESSAGE[intentResult.intent] ?? "Não tenho dados suficientes reunidos para responder isso com segurança agora.";
     const prefix = greetingText ? `${greetingText}! ` : "";
-    return { answer: { text: `${prefix}${message}`, links: [] }, nextContext: session };
+    return { answer: withNote({ text: `${prefix}${message}`, links: [] }), nextContext: session };
   }
 
   const { results: toolResults, trace: toolTrace } = await executeToolsWithTrace(plannerResult.toolCalls);
@@ -926,5 +966,5 @@ export async function answerFreeText(freeText: string, session: ReasoningSession
   const { answer, openerUsed } = narrate(reasoningResult, { greeting: greetingText, usedOpeners: session.usedNarrationOpeners, dayMatchedNote });
 
   const nextSession = buildNextSession(session, intentResult, objectiveResult, reasoningResult, openerUsed);
-  return { answer, nextContext: nextSession };
+  return { answer: withNote(answer), nextContext: nextSession };
 }

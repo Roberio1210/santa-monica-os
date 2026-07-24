@@ -2,10 +2,29 @@ import type { ToolDefinition, ToolId } from "@/lib/zezinho/tools/types";
 
 /**
  * Registro estático do catálogo de ferramentas — dado puro, versionado em código (decisão do
- * usuário, item 2). O planejador (`planner/selectTools.ts`) consulta isto para decidir o que
- * chamar; o dispatcher (`executor.ts`) usa o `id` para saber qual service real invocar.
+ * usuário, item 2). O planejador (`planner/selectTools.ts`, `planner/contextBuilder.ts`) consulta
+ * isto para decidir o que chamar; o dispatcher (`executor.ts`) usa o `id` para saber qual service
+ * real invocar. Os metadados `relevance`/`latencyHint`/`freshnessRequirement`/`optional`/
+ * `fallbackAllowed` foram adicionados na Sprint 4.0 (Z3, seção 5) para orientar seletividade —
+ * nenhuma ferramenta nova aqui inventa dado: `unanswered_clients`, `agenda_summary` e
+ * `marketing_summary` sempre retornam `not_configured` porque a integração real (WhatsApp,
+ * agenda, Meta Ads/Instagram) ainda não existe (Fase B, não iniciada).
  */
 export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
+  situational_context: {
+    id: "situational_context",
+    label: "Contexto situacional (horário de funcionamento, estágio do dia)",
+    source: "Contexto situacional",
+    reuses: "computeSituationalContext (src/lib/zezinho/situational/stage.ts)",
+    objectives: ["business_health", "staffing_capacity"],
+    requiresPeriod: false,
+    costHint: "low",
+    relevance: "high",
+    latencyHint: "instant",
+    freshnessRequirement: "realtime",
+    optional: false,
+    fallbackAllowed: false,
+  },
   jumppark_period_summary: {
     id: "jumppark_period_summary",
     label: "Resumo operacional (JumpPark)",
@@ -14,6 +33,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["increase_ticket", "improve_service_mix", "increase_revenue", "evaluate_pricing", "staffing_capacity", "improve_cash_flow", "business_health"],
     requiresPeriod: true,
     costHint: "medium",
+    relevance: "high",
+    latencyHint: "medium",
+    freshnessRequirement: "realtime",
+    optional: false,
+    fallbackAllowed: true,
   },
   jumppark_wash_packages: {
     id: "jumppark_wash_packages",
@@ -23,6 +47,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["improve_service_mix"],
     requiresPeriod: true,
     costHint: "medium",
+    relevance: "medium",
+    latencyHint: "medium",
+    freshnessRequirement: "realtime",
+    optional: true,
+    fallbackAllowed: true,
   },
   cash_ledger_totals: {
     id: "cash_ledger_totals",
@@ -32,6 +61,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["reduce_costs", "improve_cash_flow", "business_health"],
     requiresPeriod: true,
     costHint: "low",
+    relevance: "high",
+    latencyHint: "fast",
+    freshnessRequirement: "realtime",
+    optional: false,
+    fallbackAllowed: true,
   },
   dre_result: {
     id: "dre_result",
@@ -41,6 +75,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["business_health"],
     requiresPeriod: true,
     costHint: "medium",
+    relevance: "medium",
+    latencyHint: "medium",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
   },
   crm_customers: {
     id: "crm_customers",
@@ -50,6 +89,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["client_retention"],
     requiresPeriod: false,
     costHint: "medium",
+    relevance: "high",
+    latencyHint: "medium",
+    freshnessRequirement: "recent",
+    optional: false,
+    fallbackAllowed: true,
   },
   inventory_overview: {
     id: "inventory_overview",
@@ -59,6 +103,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: [],
     requiresPeriod: false,
     costHint: "low",
+    relevance: "high",
+    latencyHint: "fast",
+    freshnessRequirement: "recent",
+    optional: false,
+    fallbackAllowed: true,
   },
   central_alerts: {
     id: "central_alerts",
@@ -68,6 +117,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["business_health"],
     requiresPeriod: false,
     costHint: "high",
+    relevance: "high",
+    latencyHint: "slow",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
   },
   full_period_comparison: {
     id: "full_period_comparison",
@@ -77,12 +131,12 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: [],
     requiresPeriod: true,
     costHint: "high",
+    relevance: "high",
+    latencyHint: "slow",
+    freshnessRequirement: "realtime",
+    optional: false,
+    fallbackAllowed: false,
   },
-  /**
-   * `weather_forecast` e `goal_progress` entraram no catálogo na Sprint 4.0 (Z1); a Z2 conclui a
-   * seletividade real no planner (`planner/selectTools.ts` — só objetivos de operação/movimento/
-   * planejamento/faturamento). `historical_pattern` é novo na Z2.
-   */
   weather_forecast: {
     id: "weather_forecast",
     label: "Previsão do tempo (condição atual, próximas horas e próximos dias)",
@@ -91,6 +145,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["increase_revenue", "staffing_capacity", "business_health"],
     requiresPeriod: false,
     costHint: "low",
+    relevance: "medium",
+    latencyHint: "medium",
+    freshnessRequirement: "any",
+    optional: true,
+    fallbackAllowed: true,
   },
   goal_progress: {
     id: "goal_progress",
@@ -100,6 +159,11 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["increase_revenue", "business_health"],
     requiresPeriod: false,
     costHint: "medium",
+    relevance: "high",
+    latencyHint: "medium",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
   },
   historical_pattern: {
     id: "historical_pattern",
@@ -109,5 +173,80 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     objectives: ["increase_revenue", "staffing_capacity", "business_health"],
     requiresPeriod: false,
     costHint: "medium",
+    relevance: "medium",
+    latencyHint: "medium",
+    freshnessRequirement: "any",
+    optional: true,
+    fallbackAllowed: true,
+  },
+  accounts_payable: {
+    id: "accounts_payable",
+    label: "Contas a Pagar (pendente, vencido, próximos vencimentos)",
+    source: "Neon — Contas a Pagar",
+    reuses: "fetchAccountsPayableOverview (src/lib/finance/service.ts)",
+    objectives: ["improve_cash_flow", "business_health"],
+    requiresPeriod: false,
+    costHint: "low",
+    relevance: "medium",
+    latencyHint: "fast",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
+  },
+  accounts_receivable: {
+    id: "accounts_receivable",
+    label: "Contas a Receber (a receber hoje/semana/mês, atraso)",
+    source: "Neon — Contas a Receber",
+    reuses: "fetchAccountsReceivableDashboard (src/lib/finance/service.ts)",
+    objectives: ["improve_cash_flow", "business_health"],
+    requiresPeriod: false,
+    costHint: "low",
+    relevance: "medium",
+    latencyHint: "fast",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
+  },
+  unanswered_clients: {
+    id: "unanswered_clients",
+    label: "Conversas sem resposta (WhatsApp) — ainda não configurado",
+    source: "Mensageria (WhatsApp)",
+    reuses: "nenhum — integração planejada para Fase B, não iniciada",
+    objectives: [],
+    requiresPeriod: false,
+    costHint: "low",
+    relevance: "low",
+    latencyHint: "instant",
+    freshnessRequirement: "any",
+    optional: true,
+    fallbackAllowed: true,
+  },
+  agenda_summary: {
+    id: "agenda_summary",
+    label: "Agenda do dia — ainda não integrada (hoje só há dado ilustrativo)",
+    source: "Agenda",
+    reuses: "nenhum — /agenda hoje usa dado mock, nunca usado nas respostas do Zézinho",
+    objectives: [],
+    requiresPeriod: false,
+    costHint: "low",
+    latencyHint: "instant",
+    relevance: "low",
+    freshnessRequirement: "any",
+    optional: true,
+    fallbackAllowed: true,
+  },
+  marketing_summary: {
+    id: "marketing_summary",
+    label: "Desempenho de marketing (Meta Ads/Instagram) — ainda não configurado",
+    source: "Marketing (Meta Ads/Instagram)",
+    reuses: "nenhum — integração planejada para Fase B, não iniciada",
+    objectives: [],
+    requiresPeriod: false,
+    costHint: "low",
+    relevance: "low",
+    latencyHint: "instant",
+    freshnessRequirement: "any",
+    optional: true,
+    fallbackAllowed: true,
   },
 };

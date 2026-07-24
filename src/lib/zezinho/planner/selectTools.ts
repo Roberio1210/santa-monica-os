@@ -19,13 +19,17 @@ export interface PlannerResult {
   periodResolved: boolean;
 }
 
-interface ResolvedPeriods {
+export interface ResolvedPeriods {
   periodA: PeriodRange;
   periodB: PeriodRange | null;
 }
 
-/** Resolve os períodos a usar: entidade nova da mensagem atual > memória da sessão > nenhum (honesto, nunca um padrão inventado). */
-function resolvePeriods(entities: ExtractedEntities, memory: ReasoningSession): ResolvedPeriods | null {
+/**
+ * Resolve os períodos a usar: entidade nova da mensagem atual > memória da sessão > nenhum
+ * (honesto, nunca um padrão inventado). Exportada para `planner/contextBuilder.ts` (Sprint 4.0,
+ * Z3) reaproveitar exatamente a mesma regra, em vez de duplicá-la.
+ */
+export function resolvePeriods(entities: ExtractedEntities, memory: ReasoningSession): ResolvedPeriods | null {
   if (entities.comparison) return { periodA: entities.comparison.periodA, periodB: entities.comparison.periodB };
   if (entities.singlePeriod) return { periodA: entities.singlePeriod, periodB: null };
   if (memory.activePeriodA) return { periodA: memory.activePeriodA, periodB: memory.activePeriodB };

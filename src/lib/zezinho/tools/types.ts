@@ -7,6 +7,8 @@ import type { ConsolidatedAlert } from "@/lib/operations/central";
 import type { WeatherForecastResult } from "@/lib/integrations/weather/types";
 import type { GoalArea, GoalProgress } from "@/lib/goals/types";
 import type { HistoricalPatternResult } from "@/lib/integrations/jumppark/historical-pattern";
+import type { SituationalContext } from "@/lib/zezinho/situational/types";
+import type { AccountsPayableSummary, AccountsReceivableDashboard } from "@/lib/finance/service";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -25,9 +27,19 @@ export type ToolId =
   | "full_period_comparison"
   | "weather_forecast"
   | "goal_progress"
-  | "historical_pattern";
+  | "historical_pattern"
+  | "situational_context"
+  | "accounts_payable"
+  | "accounts_receivable"
+  | "unanswered_clients"
+  | "agenda_summary"
+  | "marketing_summary";
 
 export type ToolCostHint = "low" | "medium" | "high";
+export type ToolRelevance = "high" | "medium" | "low";
+export type ToolLatencyHint = "instant" | "fast" | "medium" | "slow";
+/** Quão "fresco" o dado precisa ser para a ferramenta valer a pena — `realtime` nunca é servido de cache antigo, `any` tolera dado de minutos/horas atrás (ex.: clima). */
+export type ToolFreshnessRequirement = "realtime" | "recent" | "any";
 
 export interface ToolDefinition {
   id: ToolId;
@@ -39,6 +51,14 @@ export interface ToolDefinition {
   objectives: BusinessObjective[];
   requiresPeriod: boolean;
   costHint: ToolCostHint;
+  /** Metadados de seletividade (Sprint 4.0, Z3, seção 5) — orientam o planner sobre quando vale a pena chamar esta ferramenta. */
+  relevance: ToolRelevance;
+  latencyHint: ToolLatencyHint;
+  freshnessRequirement: ToolFreshnessRequirement;
+  /** `true` quando a ausência desta ferramenta nunca deve travar a resposta — a resposta segue sem ela. */
+  optional: boolean;
+  /** `true` quando, se esta ferramenta falhar, o planner pode responder mesmo assim usando as demais. */
+  fallbackAllowed: boolean;
 }
 
 export interface ToolCall {
@@ -83,4 +103,13 @@ export type ToolResult =
   | (ToolResultBase & { id: "full_period_comparison"; report: ComparisonReport })
   | (ToolResultBase & { id: "weather_forecast"; forecast: WeatherForecastResult })
   | (ToolResultBase & { id: "goal_progress"; progress: GoalProgress | null })
-  | (ToolResultBase & { id: "historical_pattern"; pattern: HistoricalPatternResult | null });
+  | (ToolResultBase & { id: "historical_pattern"; pattern: HistoricalPatternResult | null })
+  | (ToolResultBase & { id: "situational_context"; context: SituationalContext })
+  | (ToolResultBase & { id: "accounts_payable"; summary: AccountsPayableSummary | null })
+  | (ToolResultBase & { id: "accounts_receivable"; dashboard: AccountsReceivableDashboard | null })
+  /** Integração de mensageria (WhatsApp) ainda não existe — este resultado é sempre `not_configured`, nunca inventa dado. */
+  | (ToolResultBase & { id: "unanswered_clients" })
+  /** `/agenda` hoje só mostra dados ilustrativos (mock) — este resultado é sempre `not_configured` até haver integração real. */
+  | (ToolResultBase & { id: "agenda_summary" })
+  /** Meta Ads/Instagram (Fase B) ainda não implementado — este resultado é sempre `not_configured`. */
+  | (ToolResultBase & { id: "marketing_summary" });
