@@ -16,6 +16,8 @@ import { computeSituationalContext } from "@/lib/zezinho/situational/stage";
 import { buildReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
 import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financialScheduleService";
 import { reconcileStoneWithJumpparkForPeriod } from "@/lib/integrations/stone/jumpparkReconciliationService";
+import { buildDivergencesSummary } from "@/lib/integrations/stone/divergencesSummary";
+import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
 import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
@@ -332,6 +334,22 @@ async function runStoneJumpparkReconciliation(call: ToolCall): Promise<ToolResul
   return { id: "stone_jumppark_reconciliation", source, error: result.error, ...meta(result.status, result.limitations), result };
 }
 
+/** Resumo de divergências já persistidas (Sprint 7.0, Z4) — nunca recalcula, só lê `stone_divergences`. */
+async function runStoneDivergencesSummary(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.stone_divergences_summary.source;
+  const summary = await buildDivergencesSummary();
+  return { id: "stone_divergences_summary", source, error: summary.error, ...meta(summary.status, summary.limitations), summary };
+}
+
+/** Status/saúde real da integração (Sprint 7.0, Z4) — deriva de `stone_import_runs`, nunca de uma suposição. */
+async function runStoneIntegrationHealth(): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.stone_integration_health.source;
+  const report = await getStoneIntegrationHealth();
+  const status: ToolResultStatus = report.configured ? "ok" : "not_configured";
+  const error = report.configured ? null : "Integração Stone Conciliação não configurada neste ambiente.";
+  return { id: "stone_integration_health", source, error, ...meta(status), report };
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -375,6 +393,10 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runStoneFinancialSchedule(call);
     case "stone_jumppark_reconciliation":
       return runStoneJumpparkReconciliation(call);
+    case "stone_divergences_summary":
+      return runStoneDivergencesSummary();
+    case "stone_integration_health":
+      return runStoneIntegrationHealth();
   }
 }
 

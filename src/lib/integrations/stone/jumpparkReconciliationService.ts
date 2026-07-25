@@ -21,7 +21,8 @@ export interface JumpparkReconciliationResult {
   divergences: Divergence[];
 }
 
-function datesBetween(fromIso: string, toIso: string): string[] {
+/** Exportado (Z4) — reaproveitado por `persistence/importRun.ts` para não duplicar a construção do intervalo de datas. */
+export function datesBetween(fromIso: string, toIso: string): string[] {
   const dates: string[] = [];
   let cursor = fromIso;
   let guard = 0;

@@ -13,6 +13,8 @@ import { getStoneEnv } from "@/lib/config/env";
 const BASE_URL = "https://conciliation.stone.com.br/v2";
 const FILE_TIMEOUT_MS = 15_000;
 const PIX_TIMEOUT_MS = 10_000;
+/** Limite defensivo do arquivo descompactado (Sprint 7.0, Z4, seção 15 — "limite de tamanho") — bem acima de qualquer arquivo diário real, só para nunca deixar uma resposta anômala esgotar memória. */
+const MAX_DECOMPRESSED_FILE_BYTES = 100 * 1024 * 1024;
 
 export class StoneNotConfiguredError extends Error {
   constructor() {
@@ -90,8 +92,13 @@ async function fetchConciliationFile(affiliationCode: string, referenceDate: str
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  const xml = gunzipSync(buffer).toString("utf-8");
-  return { status: response.status, xml };
+  let decompressed: Buffer;
+  try {
+    decompressed = gunzipSync(buffer, { maxOutputLength: MAX_DECOMPRESSED_FILE_BYTES });
+  } catch {
+    throw new StoneRequestError(0, "Stone conciliation file exceeded the maximum expected decompressed size or is not valid gzip.");
+  }
+  return { status: response.status, xml: decompressed.toString("utf-8") };
 }
 
 export interface PixFileRequestResponse {

@@ -13,18 +13,17 @@ import packageJson from "../../../../package.json";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
 import { mercadoLivreIntegration } from "@/lib/integrations/mercadolivre";
-import { stoneIntegration } from "@/lib/integrations/stone";
 import { whatsappIntegration } from "@/lib/integrations/whatsapp";
 import { camerasIntegration } from "@/lib/integrations/cameras";
 import type { IntegrationMeta } from "@/lib/integrations/types";
 
 export const dynamic = "force-dynamic";
 
+/** Stone Conciliação saiu desta lista de "planejadas" — está implementada (Sprint 7.0, Z1-Z4) e tem seu próprio cartão em /configuracoes. */
 const plannedIntegrations: IntegrationMeta[] = [
   metaIntegration,
   googleIntegration,
   mercadoLivreIntegration,
-  stoneIntegration,
   whatsappIntegration,
   camerasIntegration,
 ];

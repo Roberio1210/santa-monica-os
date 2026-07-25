@@ -12,6 +12,8 @@ import type { AccountsPayableSummary, AccountsReceivableDashboard } from "@/lib/
 import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
 import type { FinancialScheduleResult } from "@/lib/integrations/stone/financialScheduleService";
 import type { JumpparkReconciliationResult } from "@/lib/integrations/stone/jumpparkReconciliationService";
+import type { StoneDivergencesSummary } from "@/lib/integrations/stone/divergencesSummary";
+import type { StoneIntegrationHealthReport } from "@/lib/integrations/stone/healthStatus";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -39,7 +41,9 @@ export type ToolId =
   | "marketing_summary"
   | "stone_reconciliation_summary"
   | "stone_financial_schedule"
-  | "stone_jumppark_reconciliation";
+  | "stone_jumppark_reconciliation"
+  | "stone_divergences_summary"
+  | "stone_integration_health";
 
 export type ToolCostHint = "low" | "medium" | "high";
 export type ToolRelevance = "high" | "medium" | "low";
@@ -124,4 +128,8 @@ export type ToolResult =
   /** Agenda Financeira própria do Diretor Financeiro (Sprint 7.0, Z3) — a Stone só forneceu os fatos-base. */
   | (ToolResultBase & { id: "stone_financial_schedule"; result: FinancialScheduleResult })
   /** Conciliação Stone × JumpPark (Sprint 7.0, Z3) — resultados de correspondência + divergências, nunca uma correção automática. */
-  | (ToolResultBase & { id: "stone_jumppark_reconciliation"; result: JumpparkReconciliationResult });
+  | (ToolResultBase & { id: "stone_jumppark_reconciliation"; result: JumpparkReconciliationResult })
+  /** Resumo das divergências já persistidas (Sprint 7.0, Z4) — lê `stone_divergences`, nunca recalcula. */
+  | (ToolResultBase & { id: "stone_divergences_summary"; summary: StoneDivergencesSummary })
+  /** Status/saúde real da integração (Sprint 7.0, Z4) — histórico de `stone_import_runs`, nunca uma suposição. */
+  | (ToolResultBase & { id: "stone_integration_health"; report: StoneIntegrationHealthReport });

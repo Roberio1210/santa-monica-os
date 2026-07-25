@@ -88,7 +88,11 @@ describe("runDirector — Diretores reais reaproveitam o motor de raciocínio j�
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) }));
       const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
       expect(report.director).toBe("financeiro");
-      expect(report.facts.some((f) => f.key.startsWith("stone_"))).toBe(false);
+      // Fatos que dependem do arquivo do dia (Z2/Z3) nunca aparecem quando a Stone falha — mas
+      // `stone_integration_health` (Z4) é sobre o histórico de importação, não sobre o arquivo do
+      // dia: continua honestamente reportando o status "credentials_pending" (nenhuma importação
+      // bem-sucedida ainda neste ambiente de teste), nunca inventando um dado do dia.
+      expect(report.facts.some((f) => f.key === "stone_transaction_count" || f.key === "stone_gross_amount_total" || f.key === "stone_schedule_pending_count" || f.key === "stone_jumppark_divergence_count")).toBe(false);
     });
 
     it("teste 34 — JumpPark indisponível na conciliação Stone×JumpPark nunca inventa uma divergência", async () => {

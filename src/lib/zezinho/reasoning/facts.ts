@@ -252,6 +252,27 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
         }
         break;
       }
+
+      // Sprint 7.0 (Z4) — resumo das divergências já persistidas (nunca recalcula).
+      case "stone_divergences_summary": {
+        if (result.status !== "ok") break;
+        const s = result.summary;
+        const source = result.source;
+        facts.push({ key: "stone_divergences_open_count", label: "Divergências Stone em aberto", statement: `Existem ${s.openCount} divergência(s) em aberto entre Stone e JumpPark.`, direction: s.openCount > 0 ? "queda" : "estavel", source, isProxy: false });
+        if (s.highPriorityOpenCount > 0) {
+          facts.push({ key: "stone_divergences_high_priority", label: "Divergências Stone de alta prioridade", statement: `${s.highPriorityOpenCount} divergência(s) em aberto são de alta prioridade.`, direction: "queda", source, isProxy: false });
+        }
+        break;
+      }
+
+      // Sprint 7.0 (Z4) — status/saúde real da integração (histórico de importação, nunca uma suposição).
+      case "stone_integration_health": {
+        if (result.status !== "ok") break;
+        const { report } = result;
+        const source = result.source;
+        facts.push({ key: "stone_integration_health_status", label: "Saúde da integração Stone", statement: `A integração Stone Conciliação está com status "${report.health}".`, direction: report.health === "healthy" || report.health === "connected" ? "estavel" : "indisponivel", source, isProxy: false });
+        break;
+      }
     }
   }
 

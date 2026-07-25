@@ -36,6 +36,19 @@ describe("DIRECTOR_REGISTRY — todos os 8 Diretores declarados (Sprint 5.0, Z1)
     expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).not.toContain("weather_forecast");
     expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).not.toContain("crm_summary");
   });
+
+  it("Financeiro possui stone_divergences_summary e stone_integration_health (Sprint 7.0, Z4)", () => {
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_divergences_summary");
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_integration_health");
+  });
+
+  it("Nenhum outro Diretor possui capacidades Stone (Sprint 7.0, Z4) — exclusivas do Financeiro", () => {
+    const stoneCapabilities = ["stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary", "stone_integration_health"];
+    for (const [id, director] of Object.entries(DIRECTOR_REGISTRY)) {
+      if (id === "financeiro") continue;
+      for (const capability of stoneCapabilities) expect(director.ownedCapabilities).not.toContain(capability);
+    }
+  });
 });
 
 describe("participationCriteria — critérios objetivos de participação no Executive Briefing", () => {

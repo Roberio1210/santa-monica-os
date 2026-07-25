@@ -30,7 +30,9 @@ export type Capability =
   | "jumppark_wash_packages"
   | "stone_reconciliation_summary"
   | "stone_financial_schedule"
-  | "stone_jumppark_reconciliation";
+  | "stone_jumppark_reconciliation"
+  | "stone_divergences_summary"
+  | "stone_integration_health";
 
 export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   situational_context: "situational_context",
@@ -56,11 +58,16 @@ export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   dre_result: "dre_result",
   jumppark_wash_packages: "jumppark_wash_packages",
   // Sprint 7.0 (Z2/Z3) — capacidades financeiras baseadas na Stone, exclusivas do Diretor
-  // Financeiro (directors/registry.ts); nunca aparecem em INTENT_CAPABILITIES (decisão do
-  // usuário: nada de chat/CEO Virtual/Reflection Engine/Observer ainda nestes checkpoints).
+  // Financeiro (directors/registry.ts). A partir do Z4 (decisão do usuário, seção 11), as três
+  // primeiras entram seletivamente em INTENT_CAPABILITIES para financial_status/cash_position —
+  // nunca em intenções sem relação financeira (estoque, clientes, clima, agenda, RH, marketing).
   stone_reconciliation_summary: "stone_reconciliation_summary",
   stone_financial_schedule: "stone_financial_schedule",
   stone_jumppark_reconciliation: "stone_jumppark_reconciliation",
+  stone_divergences_summary: "stone_divergences_summary",
+  // stone_integration_health nunca aparece em INTENT_CAPABILITIES — é um dado operacional da
+  // integração (Configurações + Diretor Financeiro), não uma pergunta que o chat responde.
+  stone_integration_health: "stone_integration_health",
 };
 
 /** Linha "status_check / business_health" do exemplo do checkpoint — a única lista genuinamente ampla. */
@@ -85,8 +92,11 @@ export const INTENT_CAPABILITIES: Partial<Record<ManagerialIntent, Capability[]>
   // sem `jumppark_period_summary` aqui, "Quanto faturamos hoje?" nunca tinha um número real de
   // faturamento para responder (só caixa/contas). `cash_ledger_totals`/AP/AR continuam, porque a
   // pergunta também pode ser sobre resultado financeiro amplo, não só a receita operacional.
-  financial_status: ["jumppark_period_summary", "cash_ledger_totals", "accounts_receivable", "accounts_payable"],
-  cash_position: ["cash_ledger_totals"],
+  // Sprint 7.0, Z4 (decisão do usuário, seção 11): perguntas financeiras passam a consultar a
+  // Stone seletivamente — nunca clima/CRM/estoque, e nunca quando a integração não está
+  // configurada (a ferramenta devolve `not_configured` honesto, sem derrubar a resposta).
+  financial_status: ["jumppark_period_summary", "cash_ledger_totals", "accounts_receivable", "accounts_payable", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary"],
+  cash_position: ["cash_ledger_totals", "stone_reconciliation_summary", "stone_financial_schedule"],
   goal_progress: ["goal_progress", "jumppark_period_summary"],
   weather_impact: ["weather_forecast", "historical_pattern"],
   client_retention: ["crm_summary"],

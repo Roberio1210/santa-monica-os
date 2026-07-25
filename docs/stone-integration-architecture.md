@@ -227,7 +227,7 @@ Primeira funcionalidade Stone real e visível ao Diretor Financeiro:
   disponível").
 - 20 cenários de teste nomeados + fixture oficial anonimizada (`__fixtures__/official-sample.ts`).
 
-## 9. Checkpoint Z3 (concluído, commit pendente nesta sessão) — Agenda Financeira e Conciliação Stone × JumpPark
+## 9. Checkpoint Z3 (concluído, commit `b0749ba`) — Agenda Financeira e Conciliação Stone × JumpPark
 
 Objetivo do Z3: transformar os fatos normalizados da Stone (Z1/Z2) em inteligência financeira útil,
 sem tocar em tela, chat, CEO Virtual, sincronização agendada ou correção automática de nada — só
@@ -400,3 +400,182 @@ Tela da Stone, chat/CEO Virtual, Executive State, Observer, sincronização agen
 Pix público, importação automática, correção automática de divergências, baixa automática,
 alteração de lançamentos financeiros, integração bancária real, nova API externa, qualquer dado
 fictício em produção, e as tabelas de persistência descritas na seção 9.8 (propostas, não criadas).
+
+## 10. Checkpoint Z4 (concluído) — persistência, importação real e entrega visível
+
+Objetivo do Z4: transformar a arquitetura/cálculo dos checkpoints anteriores numa funcionalidade
+real, persistente e visível — a primeira sprint que entrega Stone "de verdade" ao usuário final.
+Retomado exatamente do commit `b0749ba`, sem refazer Z1/Z2/Z3.
+
+### 10.1 Fluxo real confirmado (reaudição contra a documentação ao vivo)
+
+Reconfirmado sem mudanças: `GET /v2/merchant/{affiliationCode}/conciliation-file/{referenceDate}`,
+Basic Auth (chave do Portal como usuário, senha vazia) + `x-user-type: client`, gzip, sem sandbox,
+arquivo do dia D publicado a partir das 5h do dia D+1. Achado novo: a Stone pode responder **307**
+com `Location` para arquivo já cacheado — o `fetch` do Node já segue redirects automaticamente,
+nenhuma mudança em `client.ts`.
+
+**Webhook Pix reaudicionado ao vivo** (`/reference/cadastro-de-webhook`,
+`/reference/notificação-via-webhook`): cadastro via `POST /v2/webhook` com `{url, headers}`; a
+notificação (`{type:"pix", url, document, referenceDate}`) **não tem assinatura, HMAC nem
+proteção contra replay documentada**. Decisão (seção 13 do pedido do usuário, fallback
+pré-autorizado): **nenhuma rota pública publicada neste checkpoint** — só contrato/tipos/serviço
+interno (`pix.ts`), com status `"aguardando_configuracao"`. O único mecanismo de autenticação
+verificável disponível é um segredo próprio anexado ao campo `headers` do cadastro (a Stone ecoa
+esse header em toda notificação futura) — implementado e testado, mas nunca ligado a uma rota.
+
+### 10.2 Credenciais e gap de autorização (decisão registrada)
+
+Credenciais continuam `STONE_API_KEY`/`STONE_ACCOUNT_ID`, só em variável de ambiente — nunca no
+banco (mesmo padrão de todas as integrações do projeto; satisfaz "nunca sem criptografia" por
+nunca tocar o banco). Auditoria confirmou: **não existe sistema real de sessão/papel em nenhum
+lugar do app** (`getAuthStatus().fullAuthConfigured` é sempre `false`; nenhuma Server Action
+financeira existente valida papel de usuário). As ações da Stone Conciliação recebem exatamente a
+mesma proteção que toda outra ação financeira do sistema — o gate Basic Auth de `middleware.ts`
+(`APP_ACCESS_ENABLED`), que cobre `/financeiro/stone-conciliacao`, `/api/stone/*` e as Server
+Actions. Autorização por papel fica para quando existir autenticação completa — não é reinventada
+seletivamente aqui.
+
+### 10.3 Persistência (`src/db/schema/stone.ts`, migration `0014_illegal_mongoose.sql`)
+
+Quatro tabelas aditivas, todas com enums mirrorados (nunca importados) dos tipos já aprovados em
+Z1-Z3:
+
+- **`stone_import_runs`** — uma linha por dia realmente buscado. Único por
+  (`reference_date`, `layout`) via `onConflictDoUpdate` — reprocessar o mesmo dia nunca cria uma
+  segunda linha, só atualiza. `failure_status` guarda o `StoneResultStatus` estruturado da falha
+  (nunca precisa casar texto de erro para saber se foi permissão vs. falha temporária).
+- **`stone_normalized_transactions`** — uma linha por parcela, única por `external_key`
+  (`identity.ts`, Z2). Upsert: campos factuais (estado, liquidação) são atualizados; identificação
+  nunca muda depois de criada.
+- **`stone_reconciliation_results`** / **`stone_divergences`** — únicas por `natural_key`
+  (montada em código, `persistence/types.ts`, nunca uma coluna composta com `NULL`, que o Postgres
+  trataria como sempre distinto). Divergências: reprocessar **nunca sobrescreve** `status`/
+  `assignee`/`resolution_note` de uma linha já revisada por humano — só os campos factuais
+  (`evidence`, `financial_impact`, `recommendation`). Nova divergência sempre nasce `"open"`.
+
+Nenhum XML bruto é armazenado — só `file_hash` (SHA-256 do conteúdo já normalizado, não do
+gzip bruto, decisão registrada em `mapping.ts`: imune a diferenças de codificação do transporte).
+
+### 10.4 Idempotência e concorrência
+
+Import runs e transações usam `INSERT ... ON CONFLICT DO UPDATE` sobre índice único real — nunca
+"ler antes de escrever" para decidir insert/update (evita condição de corrida em importação
+concorrente do mesmo dia). Testado em `importRun.test.ts` com chamadas sobrepostas
+(`Promise.all`) para o mesmo dia: nunca duplica. Reconciliação/divergências usam a mesma
+estratégia por `natural_key`.
+
+### 10.5 Pipeline de importação (`persistence/importRun.ts`)
+
+`syncStonePeriod(fromDate, toDate, origin)`: busca o período uma única vez (`multiDay.ts`, Z3,
+cache de `service.ts`, Z1) → para cada dia, abre `stone_import_runs` → normaliza → persiste
+transações → fecha a execução. Depois, chama `reconcileStoneWithJumpparkForPeriod` (Z3, já
+existente — reaproveita o cache em vez de buscar de novo) e persiste resultados/divergências. A
+Agenda Financeira **nunca é persistida** — continua um cálculo puro sob demanda (Z3), recalculado
+a partir dos arquivos já cacheados/persistidos sempre que a tela é aberta.
+
+### 10.6 Status e saúde (`healthStatus.ts`) — 11 valores
+
+`not_configured` / `credentials_pending` (configurado, nunca sincronizado) / `access_pending`
+(falha de permissão sem nunca ter tido dado real — aguardando liberação do lado Stone) /
+`auth_error` (falha de permissão depois de já ter tido dado real — credencial revogada) /
+`syncing` / `temporary_failure` / `no_data` / `connected` / `stale_data` (>48h sem dado real) /
+`degraded` / `healthy`. Toda distinção vem de um sinal real do histórico de `stone_import_runs`
+— nunca uma suposição (`access_pending` vs. `auth_error` é honestamente derivado do histórico
+"já teve sucesso antes?", não do código HTTP bruto, que `service.ts` já colapsa em
+`insufficient_permission` desde o Z1).
+
+### 10.7 Interface
+
+- **`/financeiro/stone-conciliacao`** — Resumo (Z2), Posição Financeira (honesta, seção 3.1),
+  Agenda Financeira (Z3), Conciliação com revisão manual, Divergências com revisão manual
+  (nunca corrige nada sozinho), histórico de importações com reprocessamento com confirmação.
+- **Configurações > Integrações** — cartão dedicado (`StoneIntegrationCard`): status real, última
+  sincronização, último arquivo, período coberto, registros, última falha, ações
+  testar/sincronizar/reprocessar. Nunca mostra credencial. Stone saiu da lista genérica
+  "Integrações planejadas" de `/configuracoes/status` — não é mais planejada, é real.
+- **Upload manual**: não implementado — a integração oficial busca o arquivo diretamente (a
+  própria Stone), então a seção 6 do pedido do usuário não se aplica ("não permitir upload
+  arbitrário... se a integração oficial puder buscar o arquivo diretamente").
+
+### 10.8 Diretor Financeiro e Zézinho
+
+Duas capacidades novas — `stone_divergences_summary`, `stone_integration_health` — somam-se às
+três do Z2/Z3, todas exclusivas do Financeiro (`directors/registry.ts`, testado: nenhum outro
+Diretor as possui). A partir do Z4, três das cinco capacidades Stone (`stone_reconciliation_summary`,
+`stone_financial_schedule`, `stone_jumppark_reconciliation`, mais `stone_divergences_summary` em
+`financial_status`) entram seletivamente em `INTENT_CAPABILITIES` para `financial_status`/
+`cash_position` — nunca em intenções sem relação financeira (testado explicitamente: estoque,
+clientes, clima, marketing, agenda nunca ganham capacidade Stone). `stone_integration_health`
+nunca entra no chat — é dado operacional (Configurações + Diretor Financeiro), não uma pergunta
+que o Zézinho responde. Quando não configurada, a ferramenta devolve `not_configured` honesto —
+nunca derruba a resposta do Zézinho (mesmo padrão desde a Sprint 3.0).
+
+### 10.9 Segurança
+
+- **XXE**: `xml.ts` usa `fast-xml-parser` (Z1) — não implementa expansão de `DOCTYPE`/`ENTITY`
+  externa por construção (não é uma limitação configurável, é uma propriedade estrutural da
+  biblioteca), portanto não é explorável para XXE.
+- **Limite de tamanho**: `client.ts` agora limita a descompressão gzip a 100MB
+  (`gunzipSync(buffer, { maxOutputLength })`) — nunca deixa uma resposta anômala esgotar memória.
+- **Logs**: `stoneLogger` nunca recebe a API key; `errorSanitized` persistido vem sempre de
+  mensagens já sanitizadas (`service.ts:mapError`, decisão desde o Z1).
+- **Transações de banco**: todo upsert em lote roda dentro de `db.transaction()`
+  (`postgres-repository.ts`).
+- **Segredos**: só em variável de ambiente, nunca no banco, nunca no cliente (todo módulo
+  `server-only`).
+- **CSRF**: Server Actions do Next.js validam `Origin` automaticamente — nenhuma proteção manual
+  adicional necessária.
+- **Autorização administrativa**: ver seção 10.2 — mesma proteção de toda ação financeira do
+  sistema (gate de app), autorização por papel ainda não existe no projeto.
+
+### 10.10 Testes (66 novos, todos reais — nenhum mockado além do HTTP da Stone/JumpPark)
+
+`persistence/mapping.test.ts` (11), `healthStatus.test.ts` (12), `persistence/memory-repository.test.ts`
+(13, idempotência/preservação de revisão), `persistence/importRun.test.ts` (9, pipeline completo
+incluindo concorrência e período misto), `divergencesSummary.test.ts` (4), `pix.test.ts` (12,
+autenticação por segredo/validação de payload), mais 5 testes adicionais em `registry.test.ts`/
+`capabilities.test.ts` (exclusividade das capacidades Stone) e a atualização do "teste 33" de
+`runDirector.test.ts` (ver seção 10.11). Total do projeto: **935 testes / 86 arquivos**.
+
+Itens do checklist de 62 do usuário que **não se aplicam honestamente** a este projeto, em vez de
+simulados:
+
+- **Testes de UI (estados de carregamento/vazio/erro/conectado)** — este projeto nunca teve
+  testes de componente/DOM (`vitest.config.ts`: `environment: "node"`, `include` só cobre
+  `*.test.ts`, nunca `*.test.tsx`; nenhum `@testing-library` instalado, em nenhum checkpoint desde
+  a Sprint 2.0). Verificado por leitura de código e pelo build de produção bem-sucedido, não por
+  teste automatizado — mesmo padrão de toda UI já entregue neste projeto.
+- **"Usuário sem permissão"/"usuário sem autorização"** — não existe sistema de papel para testar
+  (seção 10.2); testar isso simularia um sistema que não existe.
+- **Assinatura Pix válida/inválida, replay, evento duplicado** — não há rota pública para testar
+  contra (seção 10.1); `pix.test.ts` cobre a validação de segredo/payload que EXISTE (contrato),
+  não uma rota que não existe.
+
+### 10.11 Correção de teste existente (Z2/Z3, justificada)
+
+`runDirector.test.ts`, "teste 33" (Z2): antes verificava que **nenhum** fato `stone_` aparecia
+quando a Stone falhava com 500. Isso deixou de ser verdade com a nova capacidade
+`stone_integration_health` (Z4) — que existe justamente para reportar o histórico de importação
+mesmo quando a chamada ao vivo falha. Corrigido para verificar que os fatos que dependem do
+arquivo do dia (`stone_transaction_count`, `stone_schedule_pending_count`, etc.) continuam
+ausentes, enquanto `stone_integration_health_status` honestamente reporta o estado real
+(`credentials_pending` no ambiente de teste, sem nenhuma importação bem-sucedida ainda).
+
+### 10.12 Migration aplicada e validada no Neon real
+
+`0014_illegal_mongoose.sql` aplicado com sucesso no banco Neon deste ambiente (`npm run db:migrate`)
+— 4 tabelas + 9 enums criados, confirmados por consulta direta a `information_schema`. Idempotência
+validada com uma linha de teste (upsert 2x → 1 linha, removida logo em seguida). Rollback validado
+em modo dry-run (`BEGIN` → `DROP TABLE`/`DROP TYPE` de todos os objetos novos → confirmado que os
+4 objetos somem → `ROLLBACK`, nunca commitado) — a migration é puramente aditiva (nenhuma tabela
+existente alterada), então o rollback é mecânico: `DROP TABLE stone_normalized_transactions,
+stone_reconciliation_results, stone_divergences, stone_import_runs` seguido de `DROP TYPE` dos 9
+enums novos, nessa ordem (FKs antes dos tipos).
+
+### 10.13 O que fica fora do Z4 (explícito)
+
+Rota pública de webhook Pix, sincronização agendada/cron (arquitetura pronta para receber, nunca
+criada), autorização por papel (não existe no projeto), correção automática de qualquer
+divergência, importação automática sem ação do usuário, integração bancária real, nova API
+externa, upload manual de XML (desnecessário — a Stone é buscada diretamente).

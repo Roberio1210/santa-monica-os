@@ -42,6 +42,29 @@ describe("INTENT_CAPABILITIES — matriz intenção -> capacidades (seção 4)",
       expect.arrayContaining(["situational_context", "jumppark_period_summary", "historical_pattern", "goal_progress", "weather_forecast", "central_alerts", "cash_ledger_totals"]),
     );
   });
+
+  it("financial_status e cash_position incluem as capacidades Stone seletivamente (Sprint 7.0, Z4)", () => {
+    expect(INTENT_CAPABILITIES.financial_status).toEqual(
+      expect.arrayContaining(["stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary"]),
+    );
+    expect(INTENT_CAPABILITIES.cash_position).toEqual(expect.arrayContaining(["stone_reconciliation_summary", "stone_financial_schedule"]));
+  });
+
+  it("stone_integration_health nunca aparece em nenhuma intenção do chat — é dado operacional, não uma pergunta respondida (Sprint 7.0, Z4)", () => {
+    for (const capabilities of Object.values(INTENT_CAPABILITIES)) {
+      expect(capabilities).not.toContain("stone_integration_health");
+    }
+  });
+
+  it("intenções sem relação financeira nunca incluem capacidades Stone (Sprint 7.0, Z4)", () => {
+    const stoneCapabilities = ["stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary", "stone_integration_health"];
+    const unrelatedIntents = ["inventory_status", "client_retention", "weather_impact", "marketing_performance", "unanswered_clients", "staffing_capacity"] as const;
+    for (const intent of unrelatedIntents) {
+      for (const capability of stoneCapabilities) {
+        expect(INTENT_CAPABILITIES[intent]).not.toContain(capability);
+      }
+    }
+  });
 });
 
 describe("capabilitiesForRecommendation — domínio primeiro, fontes depois (seção 4)", () => {

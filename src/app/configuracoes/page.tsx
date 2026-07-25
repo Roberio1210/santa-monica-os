@@ -3,12 +3,13 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StoneIntegrationCard } from "@/components/configuracoes/stone-integration-card";
 import { isJumpParkConfigured } from "@/lib/config/env";
+import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
 import { agentProfiles } from "@/data/mock/agents";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
 import { mercadoLivreIntegration } from "@/lib/integrations/mercadolivre";
-import { stoneIntegration } from "@/lib/integrations/stone";
 import { whatsappIntegration } from "@/lib/integrations/whatsapp";
 import { camerasIntegration } from "@/lib/integrations/cameras";
 import type { IntegrationMeta } from "@/lib/integrations/types";
@@ -17,7 +18,6 @@ const integrations: IntegrationMeta[] = [
   metaIntegration,
   googleIntegration,
   mercadoLivreIntegration,
-  stoneIntegration,
   whatsappIntegration,
   camerasIntegration,
 ];
@@ -34,8 +34,11 @@ const statusLabel: Record<IntegrationMeta["status"], string> = {
   ativo: "Ativo",
 };
 
-export default function ConfiguracoesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function ConfiguracoesPage() {
   const jumpparkConfigured = isJumpParkConfigured();
+  const stoneHealth = await getStoneIntegrationHealth();
 
   return (
     <div className="space-y-6">
@@ -83,6 +86,14 @@ export default function ConfiguracoesPage() {
                 <Link href="/configuracoes/status">Ver status da integração</Link>
               </Button>
             </div>
+            <StoneIntegrationCard
+              initial={{
+                health: stoneHealth.health,
+                configured: stoneHealth.configured,
+                lastImportRun: stoneHealth.lastImportRun,
+                lastSuccessfulImportRun: stoneHealth.lastSuccessfulImportRun,
+              }}
+            />
             {integrations.map((integration) => (
               <div key={integration.id} className="rounded-lg border border-border-subtle p-3">
                 <div className="flex items-center justify-between">
