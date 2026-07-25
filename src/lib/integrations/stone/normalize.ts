@@ -32,6 +32,8 @@ export function formatStoneDate(compact: string): string {
 
 export interface NormalizedCancellation {
   operationKey: string;
+  /** `null` em cancelamento total (todas as parcelas) — só preenchido em cancelamento parcial. */
+  installmentNumber: number | null;
   amount: number;
   occurredAt: string;
 }
@@ -57,6 +59,7 @@ export interface NormalizedSaleTransaction {
 export interface NormalizedChargeback {
   id: string;
   saleExternalReference: string;
+  installmentNumber: number;
   amount: number;
   occurredAt: string;
 }
@@ -64,6 +67,7 @@ export interface NormalizedChargeback {
 export interface NormalizedChargebackRefund {
   id: string;
   saleExternalReference: string;
+  installmentNumber: number;
   amount: number;
   occurredAt: string;
 }
@@ -72,6 +76,9 @@ export interface NormalizedChargebackRefund {
 export interface NormalizedExpectedPayment {
   saleExternalReference: string;
   installmentNumber: number;
+  /** Valor bruto da parcela (`Installment.GrossAmount`) — Z3, aditivo, usado pela Agenda Financeira. */
+  grossAmount: number;
+  /** Valor líquido oficial já informado pela Stone — nunca recalculado como bruto-taxas (o dado oficial sempre prevalece, seção 11 da decisão do usuário). */
   amount: number;
   expectedPaymentDate: string | null;
 }
@@ -91,6 +98,22 @@ export interface NormalizedAdvance {
   advanceFeeAmount: number;
   originalExpectedPaymentDate: string | null;
   settledPaymentDate: string;
+}
+
+/**
+ * Liquidação de uma parcela específica — todo o container `FinancialTransactionsAccounts`
+ * (Sprint 7.0, Z3, extensão aditiva sobre o que o Z2 já buscava; `advances` continua existindo
+ * inalterado, agora como um subconjunto filtrado deste mesmo container). É o sinal real de "esta
+ * parcela específica foi paga, e quando" — usado por `receivableState.ts` para nunca confundir
+ * "ainda não vencido" com "vencido e não pago". Renomeado de `PaymentDate` para
+ * `settledPaymentDate`, nunca "saldo".
+ */
+export interface NormalizedSettlement {
+  saleExternalReference: string;
+  installmentNumber: number;
+  netAmount: number;
+  settledPaymentDate: string;
+  isAdvance: boolean;
 }
 
 /**
@@ -115,6 +138,8 @@ export interface NormalizedConciliation {
   expectedPayments: NormalizedExpectedPayment[];
   realizedPayments: NormalizedRealizedPayment[];
   advances: NormalizedAdvance[];
+  /** Todas as liquidações por parcela do dia (Z3) — nunca só as antecipadas (isso continua em `advances`). */
+  settlements: NormalizedSettlement[];
   /** Vazio quando o arquivo não tem o container (Layout 2.2, ou dia sem posição registrada). */
   financialPositions: NormalizedFinancialPosition[];
   /** Distintos, coletados de `Poi.SerialNumber` — "estabelecimentos ou terminais, quando disponíveis". */
@@ -135,7 +160,7 @@ function normalizeSale(tx: StoneTransaction): NormalizedSaleTransaction {
     feeAmount: Math.max(0, tx.capturedAmount - netAmount),
     brandId: tx.brandId,
     terminalSerialNumber: tx.poi.serialNumber,
-    cancellations: tx.cancellations.map((c) => ({ operationKey: c.operationKey, amount: c.returnedAmount, occurredAt: formatStoneDate(c.cancellationDateTime) })),
+    cancellations: tx.cancellations.map((c) => ({ operationKey: c.operationKey, installmentNumber: c.installmentNumber, amount: c.returnedAmount, occurredAt: formatStoneDate(c.cancellationDateTime) })),
     raw: tx,
   };
 }
@@ -143,19 +168,20 @@ function normalizeSale(tx: StoneTransaction): NormalizedSaleTransaction {
 function chargebacksFromTransaction(tx: StoneTransaction): NormalizedChargeback[] {
   return tx.installments
     .filter((i) => i.chargeback !== null)
-    .map((i) => ({ id: i.chargeback!.id, saleExternalReference: tx.acquirerTransactionKey, amount: i.chargeback!.amount, occurredAt: formatStoneDate(i.chargeback!.date) }));
+    .map((i) => ({ id: i.chargeback!.id, saleExternalReference: tx.acquirerTransactionKey, installmentNumber: i.installmentNumber, amount: i.chargeback!.amount, occurredAt: formatStoneDate(i.chargeback!.date) }));
 }
 
 function chargebackRefundsFromTransaction(tx: StoneTransaction): NormalizedChargebackRefund[] {
   return tx.installments
     .filter((i) => i.chargebackRefund !== null)
-    .map((i) => ({ id: i.chargebackRefund!.id, saleExternalReference: tx.acquirerTransactionKey, amount: i.chargebackRefund!.amount, occurredAt: formatStoneDate(i.chargebackRefund!.date) }));
+    .map((i) => ({ id: i.chargebackRefund!.id, saleExternalReference: tx.acquirerTransactionKey, installmentNumber: i.installmentNumber, amount: i.chargebackRefund!.amount, occurredAt: formatStoneDate(i.chargebackRefund!.date) }));
 }
 
 function expectedPaymentsFromTransaction(tx: StoneTransaction): NormalizedExpectedPayment[] {
   return tx.installments.map((i) => ({
     saleExternalReference: tx.acquirerTransactionKey,
     installmentNumber: i.installmentNumber,
+    grossAmount: i.grossAmount,
     amount: i.netAmount,
     expectedPaymentDate: i.previsionPaymentDate ? formatStoneDate(i.previsionPaymentDate) : null,
   }));
@@ -171,6 +197,16 @@ function advancesFromAccountTransaction(tx: StoneAccountTransaction): Normalized
       originalExpectedPaymentDate: i.advancedReceivableOriginalPaymentDate ? formatStoneDate(i.advancedReceivableOriginalPaymentDate) : null,
       settledPaymentDate: formatStoneDate(i.paymentDate),
     }));
+}
+
+function settlementsFromAccountTransaction(tx: StoneAccountTransaction): NormalizedSettlement[] {
+  return tx.installments.map((i) => ({
+    saleExternalReference: tx.acquirerTransactionKey,
+    installmentNumber: i.installmentNumber,
+    netAmount: i.netAmount,
+    settledPaymentDate: formatStoneDate(i.paymentDate),
+    isAdvance: i.advanceRateAmount !== null,
+  }));
 }
 
 export function normalizeConciliation(file: StoneConciliationFile): NormalizedConciliation {
@@ -194,6 +230,7 @@ export function normalizeConciliation(file: StoneConciliationFile): NormalizedCo
         bankAccount: p.favoredBankAccount ? { bankCode: p.favoredBankAccount.bankCode, bankBranch: p.favoredBankAccount.bankBranch, accountNumber: p.favoredBankAccount.bankAccountNumber } : null,
       })),
     advances: file.financialTransactionsAccounts.flatMap(advancesFromAccountTransaction),
+    settlements: file.financialTransactionsAccounts.flatMap(settlementsFromAccountTransaction),
     financialPositions: file.walletPositions.map((w) => ({ amount: w.amount, category: w.category, walletTypeId: w.walletTypeId })),
     terminalSerialNumbers,
   };

@@ -83,6 +83,24 @@ describe("runDirector — Diretores reais reaproveitam o motor de raciocínio j�
       expect(positionFact?.statement).toMatch(/última posição financeira processada é de R\$ 5000\.00, referente a 2026-07-22/);
       expect(positionFact?.statement.toLowerCase()).not.toContain("saldo disponível");
     });
+
+    it("teste 33 — falha da Stone (500) nunca derruba o Diretor Financeiro — relatório continua sendo produzido", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) }));
+      const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
+      expect(report.director).toBe("financeiro");
+      expect(report.facts.some((f) => f.key.startsWith("stone_"))).toBe(false);
+    });
+
+    it("teste 34 — JumpPark indisponível na conciliação Stone×JumpPark nunca inventa uma divergência", async () => {
+      const original = process.env.JUMPPARK_API_TOKEN;
+      delete process.env.JUMPPARK_API_TOKEN;
+      try {
+        const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
+        expect(report.facts.some((f) => f.key === "stone_jumppark_divergence_count")).toBe(false);
+      } finally {
+        if (original !== undefined) process.env.JUMPPARK_API_TOKEN = original;
+      }
+    });
   });
 
   it("Operações honestamente reporta JumpPark não configurado neste ambiente, nunca inventa veículo/faturamento", async () => {

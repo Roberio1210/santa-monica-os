@@ -14,6 +14,8 @@ import { fetchActiveGoal, computeGoalProgress } from "@/lib/goals/service";
 import { fetchAccountsPayableOverview, fetchAccountsReceivableDashboard } from "@/lib/finance/service";
 import { computeSituationalContext } from "@/lib/zezinho/situational/stage";
 import { buildReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
+import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financialScheduleService";
+import { reconcileStoneWithJumpparkForPeriod } from "@/lib/integrations/stone/jumpparkReconciliationService";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
 import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
@@ -304,6 +306,32 @@ async function runStoneReconciliationSummary(call: ToolCall): Promise<ToolResult
   return { id: "stone_reconciliation_summary", source, error: summary.error, ...meta(summary.status, summary.limitations), summary };
 }
 
+/**
+ * Agenda Financeira (Sprint 7.0, Z3) — nunca toca `client.ts`/XML/gzip diretamente, só
+ * `buildFinancialScheduleForToday` (já normalizado e agregado). Sempre ancorada em "hoje"
+ * (`periodA.to` como override quando presente).
+ */
+async function runStoneFinancialSchedule(call: ToolCall): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.stone_financial_schedule.source;
+  const todayIso = call.periodA?.to ?? saoPauloDateISO();
+  const result = await buildFinancialScheduleForToday(todayIso);
+  return { id: "stone_financial_schedule", source, error: result.error, ...meta(result.status, result.limitations), result };
+}
+
+/**
+ * Conciliação Stone × JumpPark (Sprint 7.0, Z3) — nunca consulta clima/CRM/nenhuma integração
+ * fora de Stone e JumpPark. Sem período explícito, usa "ontem" (mesmo default honesto de
+ * `stone_reconciliation_summary`, já que o arquivo Stone de hoje ainda não existe).
+ */
+async function runStoneJumpparkReconciliation(call: ToolCall): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.stone_jumppark_reconciliation.source;
+  const yesterday = addDaysIso(saoPauloDateISO(), -1);
+  const fromIso = call.periodA?.from ?? yesterday;
+  const toIso = call.periodA?.to ?? yesterday;
+  const result = await reconcileStoneWithJumpparkForPeriod(fromIso, toIso);
+  return { id: "stone_jumppark_reconciliation", source, error: result.error, ...meta(result.status, result.limitations), result };
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -343,6 +371,10 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runMarketingSummary();
     case "stone_reconciliation_summary":
       return runStoneReconciliationSummary(call);
+    case "stone_financial_schedule":
+      return runStoneFinancialSchedule(call);
+    case "stone_jumppark_reconciliation":
+      return runStoneJumpparkReconciliation(call);
   }
 }
 

@@ -28,7 +28,9 @@ export type Capability =
   | "marketing_summary"
   | "dre_result"
   | "jumppark_wash_packages"
-  | "stone_reconciliation_summary";
+  | "stone_reconciliation_summary"
+  | "stone_financial_schedule"
+  | "stone_jumppark_reconciliation";
 
 export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   situational_context: "situational_context",
@@ -53,10 +55,12 @@ export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   // com dois períodos explícitos, nunca uma observação contínua de um Diretor).
   dre_result: "dre_result",
   jumppark_wash_packages: "jumppark_wash_packages",
-  // Sprint 7.0 (Z2) — primeira capacidade financeira baseada na Stone, exclusiva do Diretor
-  // Financeiro (directors/registry.ts); nunca aparece em INTENT_CAPABILITIES ainda (decisão do
-  // usuário: nada de chat/CEO Virtual neste checkpoint).
+  // Sprint 7.0 (Z2/Z3) — capacidades financeiras baseadas na Stone, exclusivas do Diretor
+  // Financeiro (directors/registry.ts); nunca aparecem em INTENT_CAPABILITIES (decisão do
+  // usuário: nada de chat/CEO Virtual/Reflection Engine/Observer ainda nestes checkpoints).
   stone_reconciliation_summary: "stone_reconciliation_summary",
+  stone_financial_schedule: "stone_financial_schedule",
+  stone_jumppark_reconciliation: "stone_jumppark_reconciliation",
 };
 
 /** Linha "status_check / business_health" do exemplo do checkpoint — a única lista genuinamente ampla. */

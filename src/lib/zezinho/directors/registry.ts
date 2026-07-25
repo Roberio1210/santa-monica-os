@@ -28,11 +28,11 @@ export const DIRECTOR_REGISTRY: Record<DirectorId, Director> = {
   financeiro: {
     id: "financeiro",
     label: "Diretor Financeiro",
-    // "stone_reconciliation_summary" (Sprint 7.0, Z2) — primeira capacidade nova desde a criação
-    // deste registro (as demais já existiam desde a Sprint 2.0/3.0). Só o Financeiro a possui;
-    // nunca aparece em INTENT_CAPABILITIES (planner/capabilities.ts) — decisão do usuário de não
-    // conectar ao chat/CEO Virtual ainda neste checkpoint.
-    ownedCapabilities: ["cash_ledger_totals", "accounts_payable", "accounts_receivable", "goal_progress", "dre_result", "stone_reconciliation_summary"],
+    // "stone_reconciliation_summary" (Z2), "stone_financial_schedule"/"stone_jumppark_reconciliation"
+    // (Z3, Sprint 7.0) — capacidades financeiras novas, só do Financeiro. Nunca aparecem em
+    // INTENT_CAPABILITIES (planner/capabilities.ts) — decisão do usuário de não conectar ao chat/
+    // CEO Virtual/Reflection Engine/Observer ainda nestes checkpoints.
+    ownedCapabilities: ["cash_ledger_totals", "accounts_payable", "accounts_receivable", "goal_progress", "dre_result", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation"],
     dataAvailability: "real",
     defaultObjective: "improve_cash_flow",
     defaultTopic: "caixa",

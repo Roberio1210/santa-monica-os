@@ -26,6 +26,16 @@ describe("DIRECTOR_REGISTRY — todos os 8 Diretores declarados (Sprint 5.0, Z1)
   it("Financeiro possui a capacidade stone_reconciliation_summary (Sprint 7.0, Z2)", () => {
     expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_reconciliation_summary");
   });
+
+  it("Financeiro possui stone_financial_schedule e stone_jumppark_reconciliation (Sprint 7.0, Z3)", () => {
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_financial_schedule");
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_jumppark_reconciliation");
+  });
+
+  it("Financeiro nunca possui clima/CRM entre suas capacidades — nenhuma integração desnecessária é acionada por ele (Sprint 7.0, Z3)", () => {
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).not.toContain("weather_forecast");
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).not.toContain("crm_summary");
+  });
 });
 
 describe("participationCriteria — critérios objetivos de participação no Executive Briefing", () => {

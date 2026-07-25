@@ -10,6 +10,8 @@ import type { HistoricalPatternResult } from "@/lib/integrations/jumppark/histor
 import type { SituationalContext } from "@/lib/zezinho/situational/types";
 import type { AccountsPayableSummary, AccountsReceivableDashboard } from "@/lib/finance/service";
 import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
+import type { FinancialScheduleResult } from "@/lib/integrations/stone/financialScheduleService";
+import type { JumpparkReconciliationResult } from "@/lib/integrations/stone/jumpparkReconciliationService";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -35,7 +37,9 @@ export type ToolId =
   | "unanswered_clients"
   | "agenda_summary"
   | "marketing_summary"
-  | "stone_reconciliation_summary";
+  | "stone_reconciliation_summary"
+  | "stone_financial_schedule"
+  | "stone_jumppark_reconciliation";
 
 export type ToolCostHint = "low" | "medium" | "high";
 export type ToolRelevance = "high" | "medium" | "low";
@@ -116,4 +120,8 @@ export type ToolResult =
   /** Meta Ads/Instagram (Fase B) ainda não implementado — este resultado é sempre `not_configured`. */
   | (ToolResultBase & { id: "marketing_summary" })
   /** Conciliação financeira Stone (Sprint 7.0, Z2) — `summary` já normalizado, nunca o XML/gzip bruto (ver `integrations/stone/reconciliationSummary.ts`). */
-  | (ToolResultBase & { id: "stone_reconciliation_summary"; summary: StoneReconciliationSummary });
+  | (ToolResultBase & { id: "stone_reconciliation_summary"; summary: StoneReconciliationSummary })
+  /** Agenda Financeira própria do Diretor Financeiro (Sprint 7.0, Z3) — a Stone só forneceu os fatos-base. */
+  | (ToolResultBase & { id: "stone_financial_schedule"; result: FinancialScheduleResult })
+  /** Conciliação Stone × JumpPark (Sprint 7.0, Z3) — resultados de correspondência + divergências, nunca uma correção automática. */
+  | (ToolResultBase & { id: "stone_jumppark_reconciliation"; result: JumpparkReconciliationResult });

@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { extractFacts } from "@/lib/zezinho/reasoning/facts";
 import type { ToolResult } from "@/lib/zezinho/tools/types";
 import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
+import type { FinancialScheduleResult } from "@/lib/integrations/stone/financialScheduleService";
+import type { JumpparkReconciliationResult } from "@/lib/integrations/stone/jumpparkReconciliationService";
+import type { FinancialSchedule } from "@/lib/integrations/stone/financialSchedule";
 
 function meta(status: ToolResult["status"], limitations: string[] = []) {
   return { status, collectedAt: "2026-07-24T12:00:00.000Z", limitations };
@@ -40,6 +43,95 @@ function stoneSummary(overrides: Partial<StoneReconciliationSummary> = {}): Ston
     ...overrides,
   };
 }
+
+function emptySchedule(overrides: Partial<FinancialSchedule> = {}): FinancialSchedule {
+  return {
+    dataAvailableThroughDate: "2026-07-24",
+    daily: [],
+    curves: [
+      { label: "hoje", windowStart: "2026-07-24", windowEnd: "2026-07-24", grossAmountExpected: 0, netAmountExpected: 0, settledAmount: 0, pendingAmount: 0, overdueAmount: 0, feesExpected: 0, receivableCount: 0, pendingCount: 0, settledCount: 0 },
+      { label: "proximos_7_dias", windowStart: "2026-07-24", windowEnd: "2026-07-31", grossAmountExpected: 0, netAmountExpected: 700, settledAmount: 0, pendingAmount: 700, overdueAmount: 0, feesExpected: 0, receivableCount: 3, pendingCount: 3, settledCount: 0 },
+      { label: "proximos_30_dias", windowStart: "2026-07-24", windowEnd: "2026-08-23", grossAmountExpected: 0, netAmountExpected: 3000, settledAmount: 0, pendingAmount: 3000, overdueAmount: 0, feesExpected: 0, receivableCount: 10, pendingCount: 10, settledCount: 0 },
+      { label: "mes_atual", windowStart: "2026-07-01", windowEnd: "2026-07-31", grossAmountExpected: 0, netAmountExpected: 0, settledAmount: 0, pendingAmount: 0, overdueAmount: 0, feesExpected: 0, receivableCount: 0, pendingCount: 0, settledCount: 0 },
+    ],
+    limitations: [],
+    ...overrides,
+  };
+}
+
+function scheduleResult(overrides: Partial<FinancialScheduleResult> = {}): FinancialScheduleResult {
+  return { status: "ok", error: null, limitations: [], schedule: emptySchedule(), ...overrides };
+}
+
+function reconciliationServiceResult(overrides: Partial<JumpparkReconciliationResult> = {}): JumpparkReconciliationResult {
+  return { status: "ok", error: null, limitations: [], results: [], divergences: [], ...overrides };
+}
+
+describe("extractFacts — stone_financial_schedule (Sprint 7.0, Z3, decisão do usuário)", () => {
+  it("status ok produz as frases exatas pedidas pelo usuário", () => {
+    const result: ToolResult = {
+      id: "stone_financial_schedule",
+      source: "Stone",
+      error: null,
+      ...meta("ok"),
+      result: scheduleResult({
+        schedule: emptySchedule({
+          daily: [
+            { date: "2026-07-20", grossAmountExpected: 0, feesExpected: 0, netAmountExpected: 0, settledAmount: 500, pendingAmount: 0, overdueAmount: 0, paymentCount: 1, installmentCount: 1, earlySettledCount: 0, overdueCount: 0, pendingCount: 0, settledCount: 1, differenceExpectedVsSettled: 0 },
+            { date: "2026-07-25", grossAmountExpected: 700, feesExpected: 0, netAmountExpected: 700, settledAmount: 0, pendingAmount: 700, overdueAmount: 0, paymentCount: 3, installmentCount: 3, earlySettledCount: 0, overdueCount: 0, pendingCount: 13, settledCount: 0, differenceExpectedVsSettled: 0 },
+          ],
+        }),
+      }),
+    };
+    const facts = extractFacts([result]);
+
+    expect(facts.find((f) => f.key === "stone_schedule_net_expected_7d")?.statement).toBe("Há R$ 700.00 líquidos previstos para os próximos sete dias.");
+    expect(facts.find((f) => f.key === "stone_schedule_net_expected_30d")?.statement).toBe("Há R$ 3000.00 líquidos previstos para os próximos trinta dias.");
+    expect(facts.find((f) => f.key === "stone_schedule_settled_period")?.statement).toBe("R$ 500.00 já foram liquidados no período.");
+    expect(facts.find((f) => f.key === "stone_schedule_pending_count")?.statement).toBe("Existem 13 recebível(is) pendente(s).");
+  });
+
+  it("status not_configured/no_data nunca produz Fact — nunca um zero inventado", () => {
+    const result: ToolResult = { id: "stone_financial_schedule", source: "Stone", error: "x", ...meta("not_configured"), result: scheduleResult({ status: "not_configured", schedule: null }) };
+    expect(extractFacts([result])).toEqual([]);
+  });
+});
+
+describe("extractFacts — stone_jumppark_reconciliation (Sprint 7.0, Z3, decisão do usuário)", () => {
+  it("status ok produz as frases exatas pedidas pelo usuário", () => {
+    const result: ToolResult = {
+      id: "stone_jumppark_reconciliation",
+      source: "Stone × JumpPark",
+      error: null,
+      ...meta("ok"),
+      result: reconciliationServiceResult({
+        results: [
+          { type: "exact_match", confidence: "high", heuristicScore: 100, favorableSignals: [], contrarySignals: [], limitations: [], ruleApplied: "", comparedFields: [], jumpparkOrder: null, stoneSale: null },
+          { type: "probable_match", confidence: "medium", heuristicScore: 60, favorableSignals: [], contrarySignals: [], limitations: [], ruleApplied: "", comparedFields: [], jumpparkOrder: null, stoneSale: null },
+          { type: "pending_processing", confidence: "low", heuristicScore: 0, favorableSignals: [], contrarySignals: [], limitations: [], ruleApplied: "", comparedFields: [], jumpparkOrder: null, stoneSale: null },
+        ],
+        divergences: [{ type: "diferenca_de_valor", priority: "alta", evidence: [], financialImpact: 10, involvedRecords: { jumpparkOrderRef: null, stoneSaleRef: null }, confidence: "medium", reviewRecommendation: "conferir", status: "identificado" }],
+      }),
+    };
+    const facts = extractFacts([result]);
+
+    expect(facts.find((f) => f.key === "stone_jumppark_exact_matches")?.statement).toBe("Foram encontradas 1 correspondência(s) exata(s) entre Stone e JumpPark.");
+    expect(facts.find((f) => f.key === "stone_jumppark_divergence_count")?.statement).toBe("Existem 1 divergência(s) que precisam de conferência.");
+    expect(facts.find((f) => f.key === "stone_jumppark_pending_processing")?.statement).toBe("1 venda(s) permanece(m) como processamento pendente e ainda não deve(m) ser tratada(s) como erro.");
+    expect(facts.find((f) => f.key === "stone_jumppark_probable_matches")?.statement.toLowerCase()).toContain("nunca tratadas como certeza");
+  });
+
+  it("teste 34 — status not_configured (JumpPark indisponível) nunca produz Fact, nunca inventa divergência", () => {
+    const result: ToolResult = { id: "stone_jumppark_reconciliation", source: "Stone × JumpPark", error: "JumpPark não configurado.", ...meta("not_configured"), result: reconciliationServiceResult({ status: "not_configured", error: "JumpPark não configurado." }) };
+    expect(extractFacts([result])).toEqual([]);
+  });
+
+  it("teste 33 — status temporary_failure (falha da Stone) nunca produz Fact, nunca lança", () => {
+    const result: ToolResult = { id: "stone_jumppark_reconciliation", source: "Stone × JumpPark", error: "falha", ...meta("temporary_failure"), result: reconciliationServiceResult({ status: "temporary_failure", error: "falha" }) };
+    expect(() => extractFacts([result])).not.toThrow();
+    expect(extractFacts([result])).toEqual([]);
+  });
+});
 
 describe("extractFacts — ferramentas da Z2 (clima, meta, padrão histórico) agora viram Fact (Sprint 4.0, Z3)", () => {
   it("weather_forecast ok com condição atual vira um Fact — nunca quando not_configured", () => {

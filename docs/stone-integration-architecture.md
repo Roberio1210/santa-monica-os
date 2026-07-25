@@ -208,3 +208,195 @@ Financeiro calcula; a Stone só fornece.
   `weather/service.test.ts`.
 - Fluxo de webhook PIX: tipagem do payload pronta, registro/rota receptora ficam para o Z4 (exige
   uma decisão de infraestrutura — endpoint público — que ainda não foi confirmada).
+
+## 8. Checkpoint Z2 (concluído, commit `2796c44`) — resumo
+
+Primeira funcionalidade Stone real e visível ao Diretor Financeiro:
+
+- `normalize.ts` — camada intermediária **Stone XML → tipos normalizados internos** (nomes
+  legíveis, ex.: `WalletPosition.Amount` → `NormalizedFinancialPosition`), separada dos tipos XML
+  brutos (Z1) e dos fatos financeiros (camada seguinte). Nenhum cálculo de negócio nesta camada —
+  só tradução/normalização de nomes e formatos.
+- `identity.ts` — chave externa determinística por parcela (`buildTransactionExternalKey`, SHA-256
+  sobre NSU + código de autorização + identificador do cliente + terminal + data de captura +
+  parcela + valor) — nunca valor+data isolados, que colidem entre vendas diferentes no mesmo dia.
+  Preparada desde já para servir de índice único numa futura tabela (ver seção 9.8).
+- `reconciliationSummary.ts` — primeira capacidade real: `stone_reconciliation_summary`, no
+  Diretor Financeiro, com fatos cents-safe (vendas brutas, valor líquido, cancelamentos,
+  chargebacks, `stone_financial_position` respeitando a regra da seção 3.1 — nunca "saldo
+  disponível").
+- 20 cenários de teste nomeados + fixture oficial anonimizada (`__fixtures__/official-sample.ts`).
+
+## 9. Checkpoint Z3 (concluído, commit pendente nesta sessão) — Agenda Financeira e Conciliação Stone × JumpPark
+
+Objetivo do Z3: transformar os fatos normalizados da Stone (Z1/Z2) em inteligência financeira útil,
+sem tocar em tela, chat, CEO Virtual, sincronização agendada ou correção automática de nada — só
+cálculo e apresentação de fatos ao Diretor Financeiro. Retomado exatamente do commit `2796c44`, sem
+alterar nenhuma decisão do Z1/Z2.
+
+### 9.1 Agenda Financeira própria (`financialSchedule.ts`)
+
+Ativo do Santa Monica OS, **nunca uma dependência da Stone** (decisão da seção 3.2, agora
+implementada): opera só sobre `NormalizedConciliation[]` já buscados (nenhuma projeção além dos
+recebíveis realmente presentes nos arquivos processados). Liga cada parcela prevista
+(`expectedPayments`, de `FinancialTransactions`) à sua liquidação real quando existir
+(`settlements`, de `FinancialTransactionsAccounts` — no Z3 sem o filtro de antecipação usado no Z2,
+para cobrir toda liquidação, não só antecipada) e aos sinalizadores de cancelamento/chargeback.
+
+Saídas, todas em `R$` (centavos internamente, nunca float impreciso):
+
+- **`daily: DailyScheduleBucket[]`** — um bucket por `expectedPaymentDate`, com bruto previsto,
+  taxas previstas, líquido previsto, valor liquidado, valor pendente, valor em atraso, contagem de
+  vendas/parcelas/liquidadas-antecipadas/atrasadas/pendentes, e a diferença
+  `settledAmount - netAmountExpected` — **sempre exposta, mesmo pequena**, nunca escondida.
+- **`curves: FinancialScheduleCurve[]`** — quatro janelas fixas: `hoje`, `proximos_7_dias`,
+  `proximos_30_dias`, `mes_atual`. Cada uma agrega os buckets diários dentro da janela — nenhuma
+  curva de caixa projetada além do que os arquivos realmente contêm.
+- **`limitations`** — sempre declara que a cobertura é limitada aos arquivos já processados, e
+  sinaliza explicitamente quando nenhum recebível foi encontrado.
+
+### 9.2 Estados do recebível (`receivableState.ts`) — 9 valores, ordem de precedência fixa
+
+`chargeback` → `cancelled`/`reversed` (reversed se já havia liquidação registrada antes do
+chargeback/cancelamento) → `unknown` (sem `expectedPaymentDate`) → `settled_early` /
+`settled_on_time` → `overdue` / `due_today` / `scheduled` (comparados contra
+`dataAvailableThroughDate`, nunca contra o relógio de parede — evita "atraso" falso durante a
+defasagem de publicação do arquivo diário da Stone, de até 29h).
+
+Simplificação deliberada e documentada: a taxonomia de 9 estados não tem um 10º estado
+"liquidado com atraso" — uma parcela liquidada depois do previsto conta como `settled_on_time`,
+com o atraso numérico preservado em `differenceExpectedVsSettled` (seção 9.1), em vez de inventar
+um estado não pedido pelo usuário.
+
+### 9.3 Conciliação Stone × JumpPark (`jumpparkReconciliation.ts`)
+
+Motor de correspondência puro, sem I/O. Escopo **só cartão (débito/crédito)** — dinheiro e Pix são
+estruturalmente excluídos do lado JumpPark, porque o arquivo de conciliação da Stone só cobre
+transações de adquirência; incluir dinheiro/Pix geraria divergência falsa por rail diferente, não
+por erro real.
+
+Achado honesto documentado no código: o modelo real de dados do JumpPark (`OperationalOrder`) não
+tem NSU, código de autorização, bandeira, número de parcelas nem terminal — então `exact_match`
+(via identificadores fortes) só é alcançável, na prática, através de um vínculo não confirmado
+entre `InitiatorTransactionKey` (Stone) e `serviceOrderCode`/`serviceOrderId` (JumpPark), um
+detalhe de configuração de POS que este checkpoint não pode confirmar. O caminho está implementado
+e testado via fixtures sintéticas — pronto, mas dormente até essa configuração ser confirmada. O
+mecanismo real de correspondência hoje é o `probable_match`, por pontuação combinada de sinais
+(valor, horário, método de pagamento).
+
+12 tipos de resultado (`ReconciliationMatchType`): `exact_match`, `probable_match`, `ambiguous`,
+`unmatched_jumppark`, `unmatched_stone`, `value_mismatch`, `payment_method_mismatch`,
+`installment_mismatch`, `date_mismatch`, `duplicate`, `reversed`, `pending_processing`.
+
+- **Confiança** é sempre qualitativa (`high`/`medium`/`low`) — a fonte de verdade apresentável.
+  Existe também um `heuristicScore` numérico interno, usado só para ordenar candidatos durante o
+  matching; é explicitamente documentado e testado como **nunca uma probabilidade**, e nunca
+  exposto como tal ao Diretor Financeiro.
+- **`probable_match` e `ambiguous` nunca são apresentados como certeza** — regra do usuário,
+  refletida tanto no nome dos tipos quanto nos textos de fato gerados (seção 9.5).
+- **Janela de processamento** (`FILE_PROCESSING_LAG_HOURS = 29`, mesma defasagem da seção 9.2):
+  uma venda JumpPark sem correspondente Stone só vira `unmatched_jumppark` depois que a janela de
+  processamento do arquivo do dia já deveria ter passado; antes disso, é `pending_processing` —
+  nunca tratada como erro.
+
+Algoritmo em estágios: (1) correspondência por identificador forte → (2) pontuação combinada de
+sinais, com ramificação para ambíguo/estornado/divergente → (3) vendas Stone restantes sem par →
+(4) detecção de duplicidade.
+
+### 9.4 Divergências estruturadas (`divergences.ts`)
+
+Mapeia um subconjunto de 8 dos 12 `ReconciliationMatchType` para os 11 `DivergenceType` pedidos
+(o código documenta explicitamente por que `date_mismatch` e `pending_processing` nunca geram
+divergência — o primeiro é tolerado dentro da janela de liquidação esperada, o segundo é uma
+ausência de dado temporária, não um erro). Chargeback/estorno são derivados diretamente dos dados
+Stone (independente do matching com JumpPark), e `arquivo_stone_ausente_ou_defasado` é derivado de
+falhas de busca por dia.
+
+Toda divergência nasce com `status: "identificado"` (mesma convenção do `ActionPlanStatus` da
+Diretoria Inteligente) — **nunca cria conta, lançamento ou correção automaticamente**. Cada
+divergência carrega tipo, prioridade, evidências, impacto financeiro, registros envolvidos,
+confiança e recomendação.
+
+### 9.5 Três novas capacidades no Diretor Financeiro
+
+`stone_financial_schedule` e `stone_jumppark_reconciliation` somam-se a `stone_reconciliation_summary`
+(Z2) em `directors/registry.ts`. **Nenhum novo Diretor foi criado** — ambas vivem no Financeiro,
+como pedido. Nenhuma das três foi adicionada a `planner/capabilities.ts`'s `INTENT_CAPABILITIES`
+— Sprint 7.0 continua fora do chat/CEO Virtual, por decisão do usuário.
+
+Frases reais produzidas em `reasoning/facts.ts` (nunca inventadas — só geradas quando
+`status === "ok"`):
+
+- "Há R$ X líquidos previstos para os próximos sete dias."
+- "Há R$ X líquidos previstos para os próximos trinta dias."
+- "R$ X já foram liquidados no período."
+- "Existem N recebível(is) pendente(s)."
+- "Existem N recebível(is) em atraso."
+- "Foram encontradas N correspondência(s) exata(s) entre Stone e JumpPark."
+- "Foram encontradas N correspondência(s) provável(is) entre Stone e JumpPark — nunca tratadas como certeza."
+- "Existem N divergência(s) que precisam de conferência."
+- "N venda(s) permanece(m) como processamento pendente e ainda não deve(m) ser tratada(s) como erro."
+
+### 9.6 Regra de valor oficial
+
+Quando o valor líquido calculado pela Agenda Financeira diverge do valor oficial informado pela
+Stone para a mesma parcela, **o dado oficial da Stone prevalece** — a diferença nunca é
+"corrigida" silenciosamente, é sinalizada como divergência para auditoria humana (seção 9.4,
+`diferenca_de_valor`, derivada de um resultado de conciliação `value_mismatch`).
+
+### 9.7 O que o Z3 nunca inventa (lista de honestidade, reforçada)
+
+Saldo em tempo real, extrato bancário, Pix direto da Conta Stone, transferência, boleto, pagamento
+de despesa, disponibilidade para saque, agenda "pronta" da Stone, venda futura. Ausência de arquivo
+nunca vira R$ 0,00 — vira `no_data`/lista de limitações.
+
+### 9.8 Persistência — decisão do checkpoint
+
+Auditados `src/lib/finance/` (repositórios memory/postgres já existentes) e
+`src/db/schema/finance.ts` antes de decidir. Achado relevante: já existe uma tabela
+`reconciliation_records` (comentário no schema: "Preparado para conciliação futura — ex.: extrato
+Stone/banco x cash_movements. Nenhuma integração real foi implementada"), mas seu modelo
+(`matched`/`unmatched`/`partial`, ligada a `cash_movement_id`) é para uma conciliação **Stone ×
+livro-caixa interno**, um problema diferente da conciliação **Stone × JumpPark** construída neste
+checkpoint (o par de comparação e a granularidade dos estados são outros). Reaproveitá-la sem
+adaptação seria uma escolha errada, não uma economia.
+
+**Decisão: o Z3 não persiste nada.** Agenda Financeira, conciliação e divergências continuam
+sendo cálculos puros e sem estado, executados sobre janelas de arquivos Stone já buscados
+(`multiDay.ts`, reaproveitando o cache do Z1) e sobre dados JumpPark já buscados no momento da
+chamada. Isso é seguro porque:
+
+1. Os arquivos-fonte da Stone já são cacheados (Z1) e imutáveis por data de referência — reprocessar
+   os mesmos dias sempre produz o mesmo resultado.
+2. `identity.ts` (Z2) já gera uma chave externa determinística por parcela, pronta para virar índice
+   único numa tabela futura sem nenhum redesenho.
+3. Nenhuma capacidade do Z3 precisa de histórico além da janela de busca (`DEFAULT_LOOKBACK_DAYS =
+   30`) — não há necessidade de acumular estado entre execuções para este checkpoint.
+
+**Plano de idempotência para o Z4**, caso a persistência se torne necessária (ex.: auditoria de
+divergências ao longo do tempo, ou Agenda Financeira além de 30 dias sem re-buscar tudo):
+
+- `stone_import_runs` — uma linha por tentativa de busca de arquivo diário (`referenceDate`,
+  `status`, hash SHA-256 do arquivo bruto recebido, `importedAt`, erro sanitizado) — permite saber
+  se um dia já foi processado sem repetir a chamada à Stone.
+- `stone_reconciliation_results` / `stone_divergences` — append-only, chave primária/índice único
+  na `buildTransactionExternalKey` (`identity.ts`) combinada com a data de referência — garante que
+  reprocessar o mesmo arquivo nunca duplica um resultado ou uma divergência.
+- Nenhuma dessas tabelas foi criada nesta sessão — ficam propostas para quando o Z4 (ou um
+  checkpoint futuro) precisar delas de fato.
+
+### 9.9 Testes
+
+34 cenários nomeados obrigatórios (15 "AGENDA FINANCEIRA" + 19 "CONCILIAÇÃO", cobrindo os 12 tipos
+de resultado e os limites do algoritmo), mais verificações de honestidade adicionais: clima/CRM
+nunca são consultados pelo Financeiro, nenhuma integração desnecessária é acionada,
+`probable_match`/`ambiguous` nunca viram certeza, ausência de arquivo nunca vira R$ 0,00, falha da
+Stone (500) nunca derruba o `DirectorReport`, e JumpPark indisponível nunca inventa uma
+divergência. Total do arquivo: 869 testes / 80 arquivos, `tsc --noEmit` limpo.
+
+### 9.10 O que fica fora do Z3 (explícito)
+
+Tela da Stone, chat/CEO Virtual, Executive State, Observer, sincronização agendada/cron, webhook
+Pix público, importação automática, correção automática de divergências, baixa automática,
+alteração de lançamentos financeiros, integração bancária real, nova API externa, qualquer dado
+fictício em produção, e as tabelas de persistência descritas na seção 9.8 (propostas, não criadas).

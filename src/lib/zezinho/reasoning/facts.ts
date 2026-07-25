@@ -213,6 +213,45 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
         }
         break;
       }
+
+      // Sprint 7.0 (Z3) — Agenda Financeira própria do Diretor Financeiro. A Stone só forneceu os
+      // fatos-base; toda leitura aqui já veio calculada por financialSchedule.ts (Diretor
+      // Financeiro), nunca um cálculo novo neste arquivo.
+      case "stone_financial_schedule": {
+        if (result.status !== "ok" || !result.result.schedule) break;
+        const schedule = result.result.schedule;
+        const source = result.source;
+        const curve7 = schedule.curves.find((c) => c.label === "proximos_7_dias");
+        const curve30 = schedule.curves.find((c) => c.label === "proximos_30_dias");
+        const totalSettled = schedule.daily.reduce((sum, d) => sum + d.settledAmount, 0);
+        const totalPending = schedule.daily.reduce((sum, d) => sum + d.pendingCount, 0);
+        const totalOverdue = schedule.daily.reduce((sum, d) => sum + d.overdueCount, 0);
+
+        if (curve7) facts.push({ key: "stone_schedule_net_expected_7d", label: "Previsto para os próximos 7 dias (Stone)", statement: `Há R$ ${curve7.netAmountExpected.toFixed(2)} líquidos previstos para os próximos sete dias.`, direction: "indisponivel", source, isProxy: false });
+        if (curve30) facts.push({ key: "stone_schedule_net_expected_30d", label: "Previsto para os próximos 30 dias (Stone)", statement: `Há R$ ${curve30.netAmountExpected.toFixed(2)} líquidos previstos para os próximos trinta dias.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_schedule_settled_period", label: "Liquidado no período (Stone)", statement: `R$ ${totalSettled.toFixed(2)} já foram liquidados no período.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_schedule_pending_count", label: "Recebíveis pendentes (Stone)", statement: `Existem ${totalPending} recebível(is) pendente(s).`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_schedule_overdue_count", label: "Recebíveis atrasados (Stone)", statement: `Existem ${totalOverdue} recebível(is) em atraso.`, direction: totalOverdue > 0 ? "queda" : "estavel", source, isProxy: false });
+        break;
+      }
+
+      // Sprint 7.0 (Z3) — Conciliação Stone × JumpPark. Nunca cria/corrige nada, só sinaliza.
+      case "stone_jumppark_reconciliation": {
+        if (result.status !== "ok") break;
+        const { results, divergences } = result.result;
+        const source = result.source;
+        const exactCount = results.filter((r) => r.type === "exact_match").length;
+        const probableCount = results.filter((r) => r.type === "probable_match").length;
+        const pendingCount = results.filter((r) => r.type === "pending_processing").length;
+
+        facts.push({ key: "stone_jumppark_exact_matches", label: "Correspondências exatas Stone × JumpPark", statement: `Foram encontradas ${exactCount} correspondência(s) exata(s) entre Stone e JumpPark.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_jumppark_probable_matches", label: "Correspondências prováveis Stone × JumpPark", statement: `Foram encontradas ${probableCount} correspondência(s) provável(is) entre Stone e JumpPark — nunca tratadas como certeza.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_jumppark_divergence_count", label: "Divergências Stone × JumpPark", statement: `Existem ${divergences.length} divergência(s) que precisam de conferência.`, direction: divergences.length > 0 ? "queda" : "estavel", source, isProxy: false });
+        if (pendingCount > 0) {
+          facts.push({ key: "stone_jumppark_pending_processing", label: "Vendas em processamento pendente (Stone × JumpPark)", statement: `${pendingCount} venda(s) permanece(m) como processamento pendente e ainda não deve(m) ser tratada(s) como erro.`, direction: "indisponivel", source, isProxy: false });
+        }
+        break;
+      }
     }
   }
 
