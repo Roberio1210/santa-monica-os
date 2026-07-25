@@ -1,9 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { extractFacts } from "@/lib/zezinho/reasoning/facts";
 import type { ToolResult } from "@/lib/zezinho/tools/types";
+import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
 
 function meta(status: ToolResult["status"], limitations: string[] = []) {
   return { status, collectedAt: "2026-07-24T12:00:00.000Z", limitations };
+}
+
+function stoneSummary(overrides: Partial<StoneReconciliationSummary> = {}): StoneReconciliationSummary {
+  return {
+    status: "ok",
+    error: null,
+    limitations: [],
+    referenceDate: "2026-07-23",
+    generationDateTime: "2026-07-24T05:30:00",
+    processedAt: "2026-07-24T12:00:00.000Z",
+    establishmentCode: "900000001",
+    terminalSerialNumbers: ["TERM-ANON-01"],
+    transactionCount: 12,
+    grossAmountTotal: 5000,
+    netAmountTotal: 4750,
+    feesTotal: 250,
+    debitTransactionCount: 5,
+    creditTransactionCount: 7,
+    installmentSaleCount: 2,
+    installmentCount: 15,
+    expectedPaymentsCount: 15,
+    expectedPaymentsAmountTotal: 4750,
+    realizedPaymentsCount: 1,
+    realizedPaymentsAmountTotal: 4750,
+    cancellationCount: 3,
+    refundCount: 0,
+    chargebackCount: 0,
+    advanceCount: 1,
+    pixIncluded: false,
+    pixNote: "PIX não está incluído no arquivo diário de conciliação — é um arquivo/fluxo assíncrono separado.",
+    financialPosition: { status: "ok", amount: 12345.67, referenceDate: "2026-07-23", processedAt: "2026-07-24T12:00:00.000Z", origin: "Stone — arquivo de conciliação diário", limitation: "Esta é a última posição financeira processada pela Stone, não um saldo em tempo real." },
+    transactionExternalKeys: [],
+    ...overrides,
+  };
 }
 
 describe("extractFacts — ferramentas da Z2 (clima, meta, padrão histórico) agora viram Fact (Sprint 4.0, Z3)", () => {
@@ -92,5 +127,90 @@ describe("extractFacts — novas ferramentas da Z3 (situacional, contas a pagar/
     };
     const fact = extractFacts([result]).find((f) => f.key === "accounts_receivable");
     expect(fact?.direction).toBe("estavel");
+  });
+});
+
+describe("extractFacts — stone_reconciliation_summary (Sprint 7.0, Z2, decisão do usuário — DirectorReport estruturado)", () => {
+  it("status ok produz um Fact por item pedido, com as frases exatas do exemplo do usuário", () => {
+    const result: ToolResult = { id: "stone_reconciliation_summary", source: "Stone — Conciliação Cliente Stone", error: null, ...meta("ok"), summary: stoneSummary() };
+    const facts = extractFacts([result]);
+
+    const grossFact = facts.find((f) => f.key === "stone_gross_amount_total");
+    expect(grossFact?.statement).toContain("R$ 5000.00 em vendas brutas");
+
+    const feesFact = facts.find((f) => f.key === "stone_fees_total");
+    expect(feesFact?.statement).toContain("R$ 250.00 em taxas");
+
+    const netFact = facts.find((f) => f.key === "stone_net_amount_total");
+    expect(netFact?.statement).toContain("R$ 4750.00");
+
+    const cancellationFact = facts.find((f) => f.key === "stone_cancellation_count");
+    expect(cancellationFact?.statement).toContain("Existem 3 cancelamento(s)");
+    expect(cancellationFact?.direction).toBe("queda");
+
+    const positionFact = facts.find((f) => f.key === "stone_financial_position");
+    expect(positionFact?.statement).toContain("R$ 12345.67");
+    expect(positionFact?.statement).toContain("2026-07-23");
+    expect(positionFact?.statement.toLowerCase()).not.toContain("saldo disponível");
+  });
+
+  it("produz um Fact separado para cada item pedido — nunca combina dois números numa frase só", () => {
+    const result: ToolResult = { id: "stone_reconciliation_summary", source: "Stone — Conciliação Cliente Stone", error: null, ...meta("ok"), summary: stoneSummary() };
+    const keys = extractFacts([result]).map((f) => f.key);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "stone_file_period",
+        "stone_processed_at",
+        "stone_transaction_count",
+        "stone_gross_amount_total",
+        "stone_net_amount_total",
+        "stone_fees_total",
+        "stone_debit_transaction_count",
+        "stone_credit_transaction_count",
+        "stone_installment_sale_count",
+        "stone_installment_count",
+        "stone_expected_payments",
+        "stone_realized_payments",
+        "stone_cancellation_count",
+        "stone_advance_count",
+        "stone_pix_included",
+        "stone_financial_position",
+        "stone_terminal_count",
+      ]),
+    );
+  });
+
+  it("sem chargeback/estorno neste dia, o Fact ainda é criado com um zero real — nunca escondido, nunca tratado como ausência de dado", () => {
+    const result: ToolResult = { id: "stone_reconciliation_summary", source: "Stone", error: null, ...meta("ok"), summary: stoneSummary({ chargebackCount: 0, refundCount: 0 }) };
+    const facts = extractFacts([result]);
+    const chargebackFact = facts.find((f) => f.key === "stone_chargeback_count");
+    const refundFact = facts.find((f) => f.key === "stone_refund_count");
+    expect(chargebackFact?.statement).toContain("Existem 0 chargeback(s)");
+    expect(chargebackFact?.direction).toBe("estavel");
+    expect(refundFact?.statement).toContain("Existem 0 estorno(s)");
+  });
+
+  it("status not_configured/no_data/temporary_failure nunca produz nenhum Fact — nunca um zero de mentira", () => {
+    for (const status of ["not_configured", "no_data", "temporary_failure"] as const) {
+      const result: ToolResult = {
+        id: "stone_reconciliation_summary",
+        source: "Stone",
+        error: "algo",
+        ...meta(status),
+        summary: stoneSummary({ status, transactionCount: 0, grossAmountTotal: 0 }),
+      };
+      expect(extractFacts([result])).toEqual([]);
+    }
+  });
+
+  it("posição financeira 'no_data' nunca vira Fact — nunca um saldo inventado", () => {
+    const result: ToolResult = {
+      id: "stone_reconciliation_summary",
+      source: "Stone",
+      error: null,
+      ...meta("ok"),
+      summary: stoneSummary({ financialPosition: { status: "no_data", amount: null, referenceDate: null, processedAt: "2026-07-24T12:00:00.000Z", origin: "Stone", limitation: "Nenhuma posição financeira." } }),
+    };
+    expect(extractFacts([result]).some((f) => f.key === "stone_financial_position")).toBe(false);
   });
 });

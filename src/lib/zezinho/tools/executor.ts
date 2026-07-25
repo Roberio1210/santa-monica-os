@@ -7,12 +7,13 @@ import { fetchCrmCustomers } from "@/lib/crm/service";
 import { fetchInventoryOverview } from "@/lib/inventory/service";
 import { fetchCentralOverview, computeConsolidatedAlerts } from "@/lib/operations/central";
 import { isJumpParkConfigured } from "@/lib/config/env";
-import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
+import { addDaysIso, saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
 import { buildComparisonReport, computePeakHour, metric, packageCounts, sumCashInRange, topServicesByRevenue, type ComparisonMetric, type PackageCounts } from "@/lib/zezinho/comparison-engine";
 import { getWeatherForecast } from "@/lib/integrations/weather/service";
 import { fetchActiveGoal, computeGoalProgress } from "@/lib/goals/service";
 import { fetchAccountsPayableOverview, fetchAccountsReceivableDashboard } from "@/lib/finance/service";
 import { computeSituationalContext } from "@/lib/zezinho/situational/stage";
+import { buildReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
 import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
@@ -290,6 +291,19 @@ async function runMarketingSummary(): Promise<ToolResult> {
   return { id: "marketing_summary", source, error: "Integração de marketing (Meta Ads/Instagram) ainda não implementada.", ...meta("not_configured") };
 }
 
+/**
+ * Conciliação financeira Stone (Sprint 7.0, Z2) — nunca toca `client.ts`/XML/gzip/credenciais
+ * diretamente, só `buildReconciliationSummary` (já normalizado). O arquivo é sempre de um único
+ * dia; sem período resolvido, usa "ontem" (nunca "hoje" — o arquivo do dia D só é publicado às 5h
+ * do dia D+1, pedir "hoje" quase sempre devolveria `no_data`).
+ */
+async function runStoneReconciliationSummary(call: ToolCall): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.stone_reconciliation_summary.source;
+  const referenceDate = call.periodA?.to ?? addDaysIso(saoPauloDateISO(), -1);
+  const summary = await buildReconciliationSummary(referenceDate);
+  return { id: "stone_reconciliation_summary", source, error: summary.error, ...meta(summary.status, summary.limitations), summary };
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -327,6 +341,8 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runAgendaSummary();
     case "marketing_summary":
       return runMarketingSummary();
+    case "stone_reconciliation_summary":
+      return runStoneReconciliationSummary(call);
   }
 }
 

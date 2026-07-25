@@ -9,6 +9,7 @@ import type { GoalArea, GoalProgress } from "@/lib/goals/types";
 import type { HistoricalPatternResult } from "@/lib/integrations/jumppark/historical-pattern";
 import type { SituationalContext } from "@/lib/zezinho/situational/types";
 import type { AccountsPayableSummary, AccountsReceivableDashboard } from "@/lib/finance/service";
+import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
 
 /**
  * Catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção 6). Cada
@@ -33,7 +34,8 @@ export type ToolId =
   | "accounts_receivable"
   | "unanswered_clients"
   | "agenda_summary"
-  | "marketing_summary";
+  | "marketing_summary"
+  | "stone_reconciliation_summary";
 
 export type ToolCostHint = "low" | "medium" | "high";
 export type ToolRelevance = "high" | "medium" | "low";
@@ -112,4 +114,6 @@ export type ToolResult =
   /** `/agenda` hoje só mostra dados ilustrativos (mock) — este resultado é sempre `not_configured` até haver integração real. */
   | (ToolResultBase & { id: "agenda_summary" })
   /** Meta Ads/Instagram (Fase B) ainda não implementado — este resultado é sempre `not_configured`. */
-  | (ToolResultBase & { id: "marketing_summary" });
+  | (ToolResultBase & { id: "marketing_summary" })
+  /** Conciliação financeira Stone (Sprint 7.0, Z2) — `summary` já normalizado, nunca o XML/gzip bruto (ver `integrations/stone/reconciliationSummary.ts`). */
+  | (ToolResultBase & { id: "stone_reconciliation_summary"; summary: StoneReconciliationSummary });

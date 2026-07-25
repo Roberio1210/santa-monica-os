@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { gzipSync } from "node:zlib";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runDirector } from "@/lib/zezinho/directors/runDirector";
 import { DIRECTOR_REGISTRY } from "@/lib/zezinho/directors/registry";
 import { EMPTY_REASONING_SESSION } from "@/lib/zezinho/memory/types";
+import { clearStoneCache } from "@/lib/integrations/stone/cache";
+import { OFFICIAL_SAMPLE_XML } from "@/lib/integrations/stone/__fixtures__/official-sample";
 
 describe("runDirector — Diretor sem nenhuma capacidade própria (RH) nunca inventa dado", () => {
   it("RH sempre devolve um relatório honesto sobre a ausência de fonte real", async () => {
@@ -29,6 +32,57 @@ describe("runDirector — Diretores reais reaproveitam o motor de raciocínio j�
     // cash_ledger_totals exige período — se o relatório tem alguma fonte disponível/indisponível
     // rastreada (não "confidence vazio"), é porque o período padrão foi aplicado.
     expect(report.confidence.availableSources.length + report.confidence.missingSources.length + report.confidence.failedSources.length).toBeGreaterThan(0);
+  });
+
+  it("Financeiro honestamente reporta Stone não configurado neste ambiente, nunca inventa venda/repasse (Sprint 7.0, Z2)", async () => {
+    const original = { key: process.env.STONE_API_KEY, account: process.env.STONE_ACCOUNT_ID };
+    delete process.env.STONE_API_KEY;
+    delete process.env.STONE_ACCOUNT_ID;
+    try {
+      const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
+      expect(report.facts.some((f) => f.key === "stone_transaction_count")).toBe(false);
+      expect(report.facts.some((f) => f.key.startsWith("stone_"))).toBe(false);
+    } finally {
+      if (original.key !== undefined) process.env.STONE_API_KEY = original.key;
+      if (original.account !== undefined) process.env.STONE_ACCOUNT_ID = original.account;
+    }
+  });
+
+  describe("Financeiro com Stone configurada (mocked) — DirectorReport estruturado com fatos reais (Sprint 7.0, Z2)", () => {
+    const ORIGINAL_ENV = { ...process.env };
+
+    beforeEach(() => {
+      clearStoneCache();
+      process.env = { ...ORIGINAL_ENV, STONE_API_KEY: "test-key", STONE_ACCOUNT_ID: "900000001" };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "200", arrayBuffer: async () => { const g = gzipSync(Buffer.from(OFFICIAL_SAMPLE_XML, "utf-8")); return g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength); } }),
+      );
+    });
+
+    afterEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      vi.unstubAllGlobals();
+    });
+
+    it("produz um DirectorReport com os fatos Stone pedidos pelo usuário, no formato de frase exigido", async () => {
+      const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
+      const stoneFacts = report.facts.filter((f) => f.key.startsWith("stone_"));
+      expect(stoneFacts.length).toBeGreaterThan(0);
+
+      const grossFact = stoneFacts.find((f) => f.key === "stone_gross_amount_total");
+      expect(grossFact?.statement).toMatch(/R\$ 650\.00 em vendas brutas/);
+
+      const netFact = stoneFacts.find((f) => f.key === "stone_net_amount_total");
+      expect(netFact?.statement).toMatch(/valor líquido processado foi R\$ 582\.50/);
+
+      const cancellationFact = stoneFacts.find((f) => f.key === "stone_cancellation_count");
+      expect(cancellationFact?.statement).toMatch(/Existem 1 cancelamento\(s\)/);
+
+      const positionFact = stoneFacts.find((f) => f.key === "stone_financial_position");
+      expect(positionFact?.statement).toMatch(/última posição financeira processada é de R\$ 5000\.00, referente a 2026-07-22/);
+      expect(positionFact?.statement.toLowerCase()).not.toContain("saldo disponível");
+    });
   });
 
   it("Operações honestamente reporta JumpPark não configurado neste ambiente, nunca inventa veículo/faturamento", async () => {

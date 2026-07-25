@@ -27,7 +27,8 @@ export type Capability =
   | "staffing_capacity"
   | "marketing_summary"
   | "dre_result"
-  | "jumppark_wash_packages";
+  | "jumppark_wash_packages"
+  | "stone_reconciliation_summary";
 
 export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   situational_context: "situational_context",
@@ -52,6 +53,10 @@ export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   // com dois períodos explícitos, nunca uma observação contínua de um Diretor).
   dre_result: "dre_result",
   jumppark_wash_packages: "jumppark_wash_packages",
+  // Sprint 7.0 (Z2) — primeira capacidade financeira baseada na Stone, exclusiva do Diretor
+  // Financeiro (directors/registry.ts); nunca aparece em INTENT_CAPABILITIES ainda (decisão do
+  // usuário: nada de chat/CEO Virtual neste checkpoint).
+  stone_reconciliation_summary: "stone_reconciliation_summary",
 };
 
 /** Linha "status_check / business_health" do exemplo do checkpoint — a única lista genuinamente ampla. */

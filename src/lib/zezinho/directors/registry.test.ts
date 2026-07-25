@@ -22,6 +22,10 @@ describe("DIRECTOR_REGISTRY — todos os 8 Diretores declarados (Sprint 5.0, Z1)
   it("RH não possui nenhuma capacidade própria (nenhum módulo de RH real existe)", () => {
     expect(DIRECTOR_REGISTRY.rh.ownedCapabilities).toEqual([]);
   });
+
+  it("Financeiro possui a capacidade stone_reconciliation_summary (Sprint 7.0, Z2)", () => {
+    expect(DIRECTOR_REGISTRY.financeiro.ownedCapabilities).toContain("stone_reconciliation_summary");
+  });
 });
 
 describe("participationCriteria — critérios objetivos de participação no Executive Briefing", () => {

@@ -170,6 +170,49 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
         });
         break;
       }
+
+      // Sprint 7.0 (Z2) — um Fact por item pedido pelo usuário, nunca combinando dois números
+      // numa frase só. Só emite quando `status === "ok"` (arquivo obtido e processado de verdade)
+      // — sem isso, todo valor seria um zero de mentira, nunca um "zero real".
+      case "stone_reconciliation_summary": {
+        if (result.status !== "ok") break;
+        const s = result.summary;
+        const source = result.source;
+
+        facts.push({ key: "stone_file_period", label: "Período do arquivo Stone", statement: `Arquivo de conciliação Stone referente a ${s.referenceDate}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_processed_at", label: "Processamento do arquivo Stone", statement: `Arquivo gerado pela Stone em ${s.generationDateTime}, processado por nós em ${s.processedAt}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_transaction_count", label: "Transações Stone", statement: `O arquivo Stone de ${s.referenceDate} contém ${s.transactionCount} transação(ões).`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_gross_amount_total", label: "Valor bruto Stone", statement: `Foram identificados R$ ${s.grossAmountTotal.toFixed(2)} em vendas brutas.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_net_amount_total", label: "Valor líquido Stone", statement: `O valor líquido processado foi R$ ${s.netAmountTotal.toFixed(2)}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_fees_total", label: "Taxas Stone", statement: `Foram identificados R$ ${s.feesTotal.toFixed(2)} em taxas.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_debit_transaction_count", label: "Transações de débito Stone", statement: `${s.debitTransactionCount} transação(ões) de débito.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_credit_transaction_count", label: "Transações de crédito Stone", statement: `${s.creditTransactionCount} transação(ões) de crédito.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_installment_sale_count", label: "Vendas parceladas Stone", statement: `${s.installmentSaleCount} venda(s) parcelada(s).`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_installment_count", label: "Parcelas Stone", statement: `${s.installmentCount} parcela(s) no total.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_expected_payments", label: "Pagamentos previstos Stone", statement: `${s.expectedPaymentsCount} parcela(s) prevista(s), totalizando R$ ${s.expectedPaymentsAmountTotal.toFixed(2)}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_realized_payments", label: "Pagamentos realizados Stone", statement: `${s.realizedPaymentsCount} repasse(s) efetivamente liquidado(s), totalizando R$ ${s.realizedPaymentsAmountTotal.toFixed(2)}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_cancellation_count", label: "Cancelamentos Stone", statement: `Existem ${s.cancellationCount} cancelamento(s).`, direction: s.cancellationCount > 0 ? "queda" : "estavel", source, isProxy: false });
+        facts.push({ key: "stone_refund_count", label: "Estornos Stone", statement: `Existem ${s.refundCount} estorno(s) de chargeback.`, direction: s.refundCount > 0 ? "queda" : "estavel", source, isProxy: false });
+        facts.push({ key: "stone_chargeback_count", label: "Chargebacks Stone", statement: `Existem ${s.chargebackCount} chargeback(s).`, direction: s.chargebackCount > 0 ? "queda" : "estavel", source, isProxy: false });
+        facts.push({ key: "stone_advance_count", label: "Antecipações Stone", statement: `${s.advanceCount} parcela(s) antecipada(s) identificada(s).`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "stone_pix_included", label: "PIX no arquivo Stone", statement: s.pixNote, direction: "indisponivel", source, isProxy: false });
+
+        if (s.financialPosition.status === "ok" || s.financialPosition.status === "stale_data") {
+          facts.push({
+            key: "stone_financial_position",
+            label: "Última posição financeira processada (Stone)",
+            statement: `A última posição financeira processada é de R$ ${s.financialPosition.amount!.toFixed(2)}, referente a ${s.financialPosition.referenceDate}. ${s.financialPosition.limitation}`,
+            direction: "indisponivel",
+            source,
+            isProxy: false,
+          });
+        }
+
+        if (s.terminalSerialNumbers.length > 0) {
+          facts.push({ key: "stone_terminal_count", label: "Terminais Stone", statement: `${s.terminalSerialNumbers.length} terminal(is) identificado(s) no arquivo.`, direction: "indisponivel", source, isProxy: false });
+        }
+        break;
+      }
     }
   }
 

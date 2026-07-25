@@ -280,10 +280,25 @@ function mapTrailer(raw: unknown): StoneTrailer {
   };
 }
 
-/** `layout` vem de quem pediu o arquivo (`service.ts`) — o XML em si não declara isso de forma própria além de `Header.LayoutVersion`. */
+export class StoneInvalidXmlError extends Error {
+  constructor() {
+    super("XML de conciliação Stone inválido — elemento <Conciliation>/<Header> ausente ou malformado.");
+    this.name = "StoneInvalidXmlError";
+  }
+}
+
+/**
+ * `layout` vem de quem pediu o arquivo (`service.ts`) — o XML em si não declara isso de forma
+ * própria além de `Header.LayoutVersion`. Lança `StoneInvalidXmlError` quando o texto recebido
+ * não é um XML de conciliação real (sem `<Conciliation>`/`<Header>` reconhecíveis) — nunca
+ * confundido com "arquivo vazio" (que tem Header real, só sem transações no dia).
+ */
 export function parseConciliationXml(xml: string, layout: "XML2_2" | "XML2_4"): StoneConciliationFile {
   const parsed: unknown = parser.parse(xml);
   const root = field(parsed, "Conciliation");
+  if (root === undefined || field(root, "Header") === undefined || !str(field(field(root, "Header"), "ReferenceDate"))) {
+    throw new StoneInvalidXmlError();
+  }
 
   return {
     header: mapHeader(field(root, "Header")),

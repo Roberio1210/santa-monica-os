@@ -249,4 +249,21 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     optional: true,
     fallbackAllowed: true,
   },
+  stone_reconciliation_summary: {
+    id: "stone_reconciliation_summary",
+    label: "Conciliação financeira Stone (vendas, recebimentos, cancelamentos, chargebacks, posição processada)",
+    source: "Stone — Conciliação Cliente Stone",
+    reuses: "buildReconciliationSummary (src/lib/integrations/stone/reconciliationSummary.ts)",
+    objectives: ["improve_cash_flow", "business_health"],
+    // O arquivo é por dia único (nunca um intervalo) — usa periodA.to ou "ontem" por padrão,
+    // nunca "hoje": o arquivo do dia D só é publicado às 5h do dia D+1. Mesmo padrão de
+    // `historical_pattern`/`goal_progress` (período opcional, com um default honesto quando ausente).
+    requiresPeriod: false,
+    costHint: "medium",
+    relevance: "high",
+    latencyHint: "medium",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
+  },
 };
