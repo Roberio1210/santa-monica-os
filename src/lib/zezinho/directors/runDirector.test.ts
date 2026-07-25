@@ -56,7 +56,7 @@ describe("runDirector — Diretores reais reaproveitam o motor de raciocínio j�
       process.env = { ...ORIGINAL_ENV, STONE_API_KEY: "test-key", STONE_ACCOUNT_ID: "900000001" };
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "200", arrayBuffer: async () => { const g = gzipSync(Buffer.from(OFFICIAL_SAMPLE_XML, "utf-8")); return g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength); } }),
+        vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "200", url: "https://conciliation.stone.com.br/mock", redirected: false, headers: { get: () => "application/gzip" }, arrayBuffer: async () => { const g = gzipSync(Buffer.from(OFFICIAL_SAMPLE_XML, "utf-8")); return g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength); } }),
       );
     });
 

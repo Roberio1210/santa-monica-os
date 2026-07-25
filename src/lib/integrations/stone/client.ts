@@ -1,6 +1,7 @@
 import "server-only";
 import { gunzipSync } from "node:zlib";
 import { getStoneEnv } from "@/lib/config/env";
+import { stoneLogger } from "@/lib/integrations/stone/logger";
 
 /**
  * Cliente HTTP para a API "Conciliação Cliente Stone" — ver
@@ -55,8 +56,149 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 
 export interface ConciliationFileResponse {
   status: number;
-  /** XML já descompactado (o arquivo é sempre devolvido gzip — descompressão de payload, não de transporte). */
+  /** Sempre XML já resolvido (descompactado quando necessário) — nunca assume o formato do corpo, ver `resolveXmlContent`. */
   xml: string;
+}
+
+/**
+ * Achado real de produção (checkpoint de diagnóstico, ver docs/stone-integration-architecture.md):
+ * a documentação oficial descreve o corpo de um 200 como o arquivo gzip em si, mas o
+ * comportamento observado é que a Stone pode responder com um JSON apontando para uma URL de
+ * blob (Azure), que precisa ser baixada numa segunda requisição. O cliente nunca mais assume que
+ * HTTP 200 = gzip — sempre classifica o `Content-Type` (com checagem de conteúdo como reforço,
+ * já que APIs reais nem sempre rotulam o `Content-Type` com precisão) antes de decidir o que
+ * fazer, preservando compatibilidade com os três formatos possíveis: JSON-ponteiro, XML direto
+ * (texto, sem compressão) e gzip direto (o comportamento original, documentado).
+ */
+type StoneResponseKind = "gzip" | "xml" | "json_pointer" | "unknown";
+
+interface RawStoneHttpResponse {
+  status: number;
+  contentType: string | null;
+  buffer: Buffer;
+  url: string;
+  redirected: boolean;
+}
+
+const GZIP_MAGIC_BYTES = Buffer.from([0x1f, 0x8b]);
+/** Nomes de campo plausíveis para a URL do arquivo num JSON-ponteiro — schema real não documentado pela Stone, revisar se a produção revelar um nome diferente. */
+const BLOB_URL_FIELD_CANDIDATES = ["url", "Url", "URL", "fileUrl", "FileUrl", "downloadUrl", "DownloadUrl", "blobUrl", "BlobUrl", "location", "Location", "href", "Href"];
+
+function classifyStoneResponse(contentType: string | null, buffer: Buffer): StoneResponseKind {
+  const ct = (contentType ?? "").toLowerCase();
+  if (ct.includes("json")) return "json_pointer";
+  if (ct.includes("gzip")) return "gzip";
+  if (ct.includes("xml")) return "xml";
+
+  // Content-Type ausente/genérico (ex.: application/octet-stream, comum em blob storage) — reforça por assinatura/conteúdo.
+  if (buffer.length >= 2 && buffer[0] === GZIP_MAGIC_BYTES[0] && buffer[1] === GZIP_MAGIC_BYTES[1]) return "gzip";
+  const head = buffer.subarray(0, 200).toString("utf-8").trimStart();
+  if (head.startsWith("<?xml") || head.startsWith("<")) return "xml";
+  if (head.startsWith("{") || head.startsWith("[")) return "json_pointer";
+  return "unknown";
+}
+
+function extractBlobUrl(parsed: unknown): string | null {
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+  for (const key of BLOB_URL_FIELD_CANDIDATES) {
+    const value = obj[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+/** Só aceita HTTPS — nunca segue uma URL de blob apontando para um esquema inseguro. */
+function validateBlobUrl(rawUrl: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new StoneRequestError(0, "Stone JSON response contained an invalid file URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new StoneRequestError(0, "Stone file URL must use HTTPS.");
+  }
+  return parsed;
+}
+
+/** Nunca loga a URL completa (query string de blob costuma carregar um token SAS — um segredo). */
+function sanitizedUrlForLog(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "<url inválida>";
+  }
+}
+
+/**
+ * Resolve o conteúdo XML final a partir de uma resposta HTTP crua, seguindo o ponteiro de blob no
+ * máximo uma vez (`depth`) — nunca segue um segundo ponteiro indefinidamente. Loga cada decisão
+ * (Content-Type, status, tamanho, redirecionamento, detecção de JSON, URL sanitizada, resultado da
+ * segunda requisição) para nunca mais perder o diagnóstico como aconteceu na falha original.
+ */
+async function resolveXmlContent(raw: RawStoneHttpResponse, label: string, depth = 0): Promise<string> {
+  const kind = classifyStoneResponse(raw.contentType, raw.buffer);
+  stoneLogger.info("Resposta da Stone classificada.", {
+    label,
+    status: raw.status,
+    contentType: raw.contentType,
+    bytes: raw.buffer.length,
+    redirected: raw.redirected,
+    kind,
+  });
+
+  if (kind === "gzip") {
+    try {
+      const decompressed = gunzipSync(raw.buffer, { maxOutputLength: MAX_DECOMPRESSED_FILE_BYTES });
+      return decompressed.toString("utf-8");
+    } catch {
+      throw new StoneRequestError(0, "Stone response indicated gzip content but decompression failed (invalid gzip or exceeded size limit).");
+    }
+  }
+
+  if (kind === "xml") {
+    return raw.buffer.toString("utf-8");
+  }
+
+  if (kind === "json_pointer") {
+    if (depth > 0) {
+      throw new StoneRequestError(0, "Stone blob URL response was itself a JSON pointer — refusing to follow further redirects.");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.buffer.toString("utf-8"));
+    } catch {
+      throw new StoneRequestError(0, "Stone response content-type indicated JSON but the body was not valid JSON.");
+    }
+    const blobUrl = extractBlobUrl(parsed);
+    if (!blobUrl) {
+      throw new StoneRequestError(0, "Stone JSON response did not contain a recognizable file URL.");
+    }
+    const validatedUrl = validateBlobUrl(blobUrl);
+    stoneLogger.info("URL de blob detectada na resposta da Stone — buscando o arquivo real.", { label, blobUrl: sanitizedUrlForLog(validatedUrl.href) });
+
+    const secondStart = Date.now();
+    const secondResponse = await fetchWithTimeout(validatedUrl.href, { method: "GET" }, FILE_TIMEOUT_MS, `${label} (blob)`);
+    const secondElapsedMs = Date.now() - secondStart;
+    if (!secondResponse.ok) {
+      stoneLogger.error("Download do blob da Stone falhou.", { label, status: secondResponse.status, elapsedMs: secondElapsedMs });
+      throw new StoneRequestError(secondResponse.status, `Stone blob download failed: ${secondResponse.status} ${secondResponse.statusText}`);
+    }
+    const secondBuffer = Buffer.from(await secondResponse.arrayBuffer());
+    const secondRaw: RawStoneHttpResponse = {
+      status: secondResponse.status,
+      contentType: secondResponse.headers.get("content-type"),
+      buffer: secondBuffer,
+      url: secondResponse.url,
+      redirected: secondResponse.redirected,
+    };
+    stoneLogger.info("Download do blob da Stone concluído.", { label, status: secondRaw.status, contentType: secondRaw.contentType, bytes: secondBuffer.length, elapsedMs: secondElapsedMs });
+    return resolveXmlContent(secondRaw, `${label} (blob)`, depth + 1);
+  }
+
+  throw new StoneRequestError(0, "Stone response format not recognized (neither gzip, XML, nor a JSON file pointer).");
 }
 
 /**
@@ -92,13 +234,15 @@ async function fetchConciliationFile(affiliationCode: string, referenceDate: str
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
-  let decompressed: Buffer;
-  try {
-    decompressed = gunzipSync(buffer, { maxOutputLength: MAX_DECOMPRESSED_FILE_BYTES });
-  } catch {
-    throw new StoneRequestError(0, "Stone conciliation file exceeded the maximum expected decompressed size or is not valid gzip.");
-  }
-  return { status: response.status, xml: decompressed.toString("utf-8") };
+  const raw: RawStoneHttpResponse = {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    buffer,
+    url: response.url,
+    redirected: response.redirected,
+  };
+  const xml = await resolveXmlContent(raw, "arquivo de conciliação Stone");
+  return { status: response.status, xml };
 }
 
 export interface PixFileRequestResponse {

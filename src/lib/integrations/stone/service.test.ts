@@ -10,11 +10,11 @@ const NO_WALLET_XML = `<Conciliation><Header><GenerationDateTime>20260721053000<
 
 function gzipResponse(status: number, xml: string) {
   const gzipped = gzipSync(Buffer.from(xml, "utf-8"));
-  return { ok: status >= 200 && status < 300, status, statusText: String(status), arrayBuffer: async () => gzipped.buffer.slice(gzipped.byteOffset, gzipped.byteOffset + gzipped.byteLength) };
+  return { ok: status >= 200 && status < 300, status, statusText: String(status), url: "https://conciliation.stone.com.br/mock", redirected: false, headers: { get: () => "application/gzip" }, arrayBuffer: async () => gzipped.buffer.slice(gzipped.byteOffset, gzipped.byteOffset + gzipped.byteLength) };
 }
 
 function jsonResponse(status: number) {
-  return { ok: status >= 200 && status < 300, status, statusText: String(status), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+  return { ok: status >= 200 && status < 300, status, statusText: String(status), url: "https://conciliation.stone.com.br/mock", redirected: false, headers: { get: () => null }, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
 }
 
 describe("Stone service — Sprint 7.0, Z1 (mesmo padrão de weather/service.test.ts)", () => {
