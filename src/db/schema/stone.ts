@@ -31,6 +31,35 @@ export const stoneFileLayoutEnum = pgEnum("stone_file_layout", ["XML2_2", "XML2_
 /** Mesmos 6 valores de `StoneResultStatus` (`types.ts`, Z1) — mirrorado, nunca importado. Só preenchido quando `status = "failed"`; usado por `healthStatus.ts` para distinguir erro de credencial de falha temporária sem depender de casamento de texto em `error_sanitized`. */
 export const stoneResultStatusEnum = pgEnum("stone_result_status", ["ok", "not_configured", "temporary_failure", "stale_data", "insufficient_permission", "no_data"]);
 
+/** Mesmos 13 valores de `StoneFailureCategory` (`failureClassification.ts`, Sprint 7.1) — mirrorado, nunca importado. Corrige o problema em que o status HTTP real era perdido e tudo virava mensagem genérica. */
+export const stoneFailureCategoryEnum = pgEnum("stone_failure_category", [
+  "no_data_expected",
+  "file_not_published_yet",
+  "temporary_network_failure",
+  "authentication_failure",
+  "insufficient_permission",
+  "invalid_pointer_response",
+  "blob_download_failure",
+  "invalid_content_type",
+  "invalid_gzip",
+  "invalid_xml",
+  "unsupported_layout",
+  "persistence_failure",
+  "unknown_failure",
+]);
+
+/** Mesmos 8 valores de `StoneFailureStage` (`failureClassification.ts`, Sprint 7.1) — mirrorado, nunca importado. */
+export const stoneFailureStageEnum = pgEnum("stone_failure_stage", [
+  "authentication",
+  "file_request",
+  "pointer_resolution",
+  "blob_download",
+  "decompression",
+  "xml_parsing",
+  "normalization",
+  "persistence",
+]);
+
 export const stoneImportRuns = pgTable(
   "stone_import_runs",
   {
@@ -48,6 +77,17 @@ export const stoneImportRuns = pgTable(
     /** Nunca contém segredo, XML bruto nem dado sensível — só uma mensagem curta e sanitizada. */
     errorSanitized: text("error_sanitized"),
     failureStatus: stoneResultStatusEnum("failure_status"),
+    // --- Observabilidade (Sprint 7.1, decisão do usuário, Etapa 7) — nunca chave/Authorization/URL SAS completa/payload financeiro. ---
+    failureStage: stoneFailureStageEnum("failure_stage"),
+    failureCategory: stoneFailureCategoryEnum("failure_category"),
+    upstreamStatus: integer("upstream_status"),
+    responseContentType: text("response_content_type"),
+    attemptCount: integer("attempt_count"),
+    elapsedMs: integer("elapsed_ms"),
+    /** Só host + path — nunca a query string, onde vive o token SAS de uma URL de blob. */
+    sanitizedHost: text("sanitized_host"),
+    sanitizedPath: text("sanitized_path"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
     origin: text("origin").notNull().default("manual"),
     ...timestamps,
   },

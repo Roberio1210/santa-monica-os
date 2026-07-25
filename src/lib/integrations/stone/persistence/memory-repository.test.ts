@@ -73,7 +73,7 @@ describe("StoneMemoryRepository — import runs (Sprint 7.0, Z4)", () => {
   it("reprocessar o mesmo dia (mesma referenceDate+layout) nunca cria uma segunda execução — idempotente", async () => {
     const repo = new StoneMemoryRepository();
     const first = await repo.startImportRun({ referenceDate: "2026-07-24", layout: "XML2_4", requestedPeriodFrom: null, requestedPeriodTo: null, origin: "manual" });
-    await repo.finishImportRun({ id: first.id, status: "succeeded", recordCount: 5, errorSanitized: null, failureStatus: null, fileHash: "hash-1" });
+    await repo.finishImportRun({ id: first.id, status: "succeeded", recordCount: 5, errorSanitized: null, failureStatus: null, fileHash: "hash-1", failureDiagnostics: null });
 
     const second = await repo.startImportRun({ referenceDate: "2026-07-24", layout: "XML2_4", requestedPeriodFrom: null, requestedPeriodTo: null, origin: "manual_reprocess" });
     expect(second.id).toBe(first.id);
@@ -92,9 +92,9 @@ describe("StoneMemoryRepository — import runs (Sprint 7.0, Z4)", () => {
   it("getLatestSucceededImportRun ignora execuções falhadas ou em andamento", async () => {
     const repo = new StoneMemoryRepository();
     const failed = await repo.startImportRun({ referenceDate: "2026-07-23", layout: "XML2_4", requestedPeriodFrom: null, requestedPeriodTo: null, origin: "manual" });
-    await repo.finishImportRun({ id: failed.id, status: "failed", recordCount: null, errorSanitized: "erro", failureStatus: "temporary_failure", fileHash: null });
+    await repo.finishImportRun({ id: failed.id, status: "failed", recordCount: null, errorSanitized: "erro", failureStatus: "temporary_failure", fileHash: null, failureDiagnostics: null });
     const succeeded = await repo.startImportRun({ referenceDate: "2026-07-24", layout: "XML2_4", requestedPeriodFrom: null, requestedPeriodTo: null, origin: "manual" });
-    await repo.finishImportRun({ id: succeeded.id, status: "succeeded", recordCount: 5, errorSanitized: null, failureStatus: null, fileHash: "hash" });
+    await repo.finishImportRun({ id: succeeded.id, status: "succeeded", recordCount: 5, errorSanitized: null, failureStatus: null, fileHash: "hash", failureDiagnostics: null });
 
     const latest = await repo.getLatestSucceededImportRun();
     expect(latest?.id).toBe(succeeded.id);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
+import { computeSyncStatus } from "@/lib/integrations/stone/syncStatus";
 
 /**
  * Diagnóstico seguro da integração Stone Conciliação — usado pelo botão "Testar conexão" em
@@ -12,5 +13,6 @@ export async function GET() {
     configured: report.configured,
     lastImportRun: report.lastImportRun,
     lastSuccessfulImportRun: report.lastSuccessfulImportRun,
+    syncStatus: computeSyncStatus(report.recentRuns),
   });
 }

@@ -67,6 +67,25 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
     expect(uniqueKeys.size).toBe(transactions.length);
   });
 
+  it("dia obtido após retry (429 seguido de sucesso) persiste normalmente e reprocessar depois continua idempotente", async () => {
+    process.env.STONE_API_KEY = "test-key";
+    process.env.STONE_ACCOUNT_ID = "900000001";
+    const fetchMock = vi.fn().mockResolvedValueOnce(gzipResponse(429, OFFICIAL_SAMPLE_XML)).mockResolvedValueOnce(gzipResponse(200, OFFICIAL_SAMPLE_XML));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await syncStonePeriod({ fromDate: "2026-07-22", toDate: "2026-07-22", origin: "manual" });
+    expect(first.days[0].status).toBe("succeeded");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    clearStoneCache();
+    fetchMock.mockResolvedValue(gzipResponse(200, OFFICIAL_SAMPLE_XML));
+    const second = await syncStonePeriod({ fromDate: "2026-07-22", toDate: "2026-07-22", origin: "manual_reprocess" });
+
+    expect(first.transactionsPersisted).toBe(second.transactionsPersisted);
+    const runs = await getStonePersistenceRepository().listImportRuns(10);
+    expect(runs).toHaveLength(1);
+  });
+
   it("importação concorrente do mesmo dia (chamadas sobrepostas) nunca duplica a execução", async () => {
     process.env.STONE_API_KEY = "test-key";
     process.env.STONE_ACCOUNT_ID = "900000001";

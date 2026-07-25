@@ -3,6 +3,7 @@ import { addDaysIso } from "@/lib/utils/timezone";
 import { getStoneIntegrationHealth, type StoneIntegrationHealthReport } from "@/lib/integrations/stone/healthStatus";
 import { buildFinancialScheduleForToday, type FinancialScheduleResult } from "@/lib/integrations/stone/financialScheduleService";
 import { buildReconciliationSummary, type StoneReconciliationSummary } from "@/lib/integrations/stone/reconciliationSummary";
+import { computeSyncStatus, type StoneSyncStatusReport } from "@/lib/integrations/stone/syncStatus";
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
 import type { StoneDivergenceRow, StoneImportRun, StoneReconciliationResultRow } from "@/lib/integrations/stone/persistence/types";
 
@@ -14,6 +15,7 @@ import type { StoneDivergenceRow, StoneImportRun, StoneReconciliationResultRow }
  */
 export interface StoneConciliacaoPageData {
   health: StoneIntegrationHealthReport;
+  syncStatus: StoneSyncStatusReport;
   summary: StoneReconciliationSummary | null;
   schedule: FinancialScheduleResult;
   reconciliationResults: StoneReconciliationResultRow[];
@@ -24,7 +26,8 @@ export interface StoneConciliacaoPageData {
 }
 
 const DEFAULT_LOOKBACK_DAYS = 30;
-const IMPORT_RUN_HISTORY_LIMIT = 20;
+/** Cobre folgadamente os `DEFAULT_LOOKBACK_DAYS + 1` dias do período sincronizado — nunca deixa `syncStatus` de fora nenhum dia do último período por causa de um limite curto demais. */
+const IMPORT_RUN_HISTORY_LIMIT = 45;
 
 export async function getStoneConciliacaoPageData(todayIso: string): Promise<StoneConciliacaoPageData> {
   const periodFrom = addDaysIso(todayIso, -DEFAULT_LOOKBACK_DAYS);
@@ -43,5 +46,7 @@ export async function getStoneConciliacaoPageData(todayIso: string): Promise<Sto
     repo.listDivergences(),
   ]);
 
-  return { health, summary, schedule, reconciliationResults, divergences, importRuns, periodFrom, periodTo: todayIso };
+  const syncStatus = computeSyncStatus(importRuns.filter((r) => r.referenceDate >= periodFrom && r.referenceDate <= todayIso));
+
+  return { health, syncStatus, summary, schedule, reconciliationResults, divergences, importRuns, periodFrom, periodTo: todayIso };
 }

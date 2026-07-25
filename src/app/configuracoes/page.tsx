@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { StoneIntegrationCard } from "@/components/configuracoes/stone-integration-card";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
+import { computeSyncStatus } from "@/lib/integrations/stone/syncStatus";
 import { agentProfiles } from "@/data/mock/agents";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
@@ -92,6 +93,7 @@ export default async function ConfiguracoesPage() {
                 configured: stoneHealth.configured,
                 lastImportRun: stoneHealth.lastImportRun,
                 lastSuccessfulImportRun: stoneHealth.lastSuccessfulImportRun,
+                syncStatus: computeSyncStatus(stoneHealth.recentRuns),
               }}
             />
             {integrations.map((integration) => (

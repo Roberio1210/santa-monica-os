@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { syncStoneAction, reprocessStoneDayAction } from "@/app/financeiro/stone-conciliacao/actions";
 import type { StoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
+import type { StoneSyncStatusReport, StoneSyncVisualStatus } from "@/lib/integrations/stone/syncStatus";
 import type { StoneImportRun } from "@/lib/integrations/stone/persistence/types";
 
 interface StoneStatusResponse {
@@ -13,7 +14,16 @@ interface StoneStatusResponse {
   configured: boolean;
   lastImportRun: StoneImportRun | null;
   lastSuccessfulImportRun: StoneImportRun | null;
+  syncStatus: StoneSyncStatusReport;
 }
+
+const syncStatusVariant: Record<StoneSyncVisualStatus, "outline" | "warning" | "positive" | "critical" | "info"> = {
+  completed: "positive",
+  completed_with_alerts: "warning",
+  temporary_failure: "critical",
+  action_required: "critical",
+  awaiting_first_sync: "outline",
+};
 
 const healthLabels: Record<StoneIntegrationHealth, string> = {
   not_configured: "Não configurado",
@@ -61,9 +71,12 @@ export function StoneIntegrationCard({ initial }: { initial: StoneStatusResponse
 
   return (
     <div className="rounded-lg border border-border-subtle p-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">Stone Conciliação</p>
-        <Badge variant={healthVariant[status.health]}>{healthLabels[status.health]}</Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={healthVariant[status.health]}>{healthLabels[status.health]}</Badge>
+          <Badge variant={syncStatusVariant[status.syncStatus.status]}>{status.syncStatus.label}</Badge>
+        </div>
       </div>
       <p className="mt-1 text-xs text-foreground-muted">Conciliação financeira: vendas, recebimentos, antecipações, cancelamentos e chargebacks. Nunca a Conta Stone (sem saldo bancário, extrato ou Pix direto).</p>
 
@@ -72,7 +85,9 @@ export function StoneIntegrationCard({ initial }: { initial: StoneStatusResponse
         <p>Último arquivo: {status.lastSuccessfulImportRun ? status.lastSuccessfulImportRun.referenceDate : "nenhum ainda"}</p>
         <p>Período coberto: {status.lastImportRun?.requestedPeriodFrom ?? "—"} a {status.lastImportRun?.requestedPeriodTo ?? "—"}</p>
         <p>Registros na última importação: {status.lastImportRun?.recordCount ?? 0}</p>
-        {status.lastImportRun?.status === "failed" ? <p className="text-warning">Última falha: {status.lastImportRun.errorSanitized}</p> : null}
+        {status.syncStatus.daysTotal > 0 ? <p>Dias: {status.syncStatus.daysSucceeded} sucesso · {status.syncStatus.daysWithAlert} alerta · {status.syncStatus.daysWithFailure} falha</p> : null}
+        {status.syncStatus.alertReason ? <p className="text-warning">Alerta: {status.syncStatus.alertReason}</p> : null}
+        {status.syncStatus.failureReason ? <p className="text-critical">Falha: {status.syncStatus.failureReason}</p> : null}
       </div>
 
       <div className="mt-2 flex flex-wrap gap-2">

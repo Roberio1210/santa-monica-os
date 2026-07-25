@@ -77,14 +77,14 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
       const records = buildNormalizedTransactionRecords(dayResult.normalized, availableThrough ?? dayResult.referenceDate, run.id);
       await repo.upsertNormalizedTransactions(records);
       transactionsPersisted += records.length;
-      await repo.finishImportRun({ id: run.id, status: "succeeded", recordCount: records.length, errorSanitized: null, failureStatus: null, fileHash: hashNormalizedConciliation(dayResult.normalized) });
+      await repo.finishImportRun({ id: run.id, status: "succeeded", recordCount: records.length, errorSanitized: null, failureStatus: null, fileHash: hashNormalizedConciliation(dayResult.normalized), failureDiagnostics: null });
       days.push({ referenceDate: dayResult.referenceDate, status: "succeeded", recordCount: records.length, error: null });
     } else if (dayResult.status === "no_data") {
       // Arquivo ainda não publicado é o caso mais comum e esperado (nunca um erro) — a execução é concluída como sucesso, sem registros.
-      await repo.finishImportRun({ id: run.id, status: "succeeded", recordCount: 0, errorSanitized: null, failureStatus: null, fileHash: null });
+      await repo.finishImportRun({ id: run.id, status: "succeeded", recordCount: 0, errorSanitized: null, failureStatus: null, fileHash: null, failureDiagnostics: dayResult.failureDiagnostics });
       days.push({ referenceDate: dayResult.referenceDate, status: "succeeded", recordCount: 0, error: null });
     } else {
-      await repo.finishImportRun({ id: run.id, status: "failed", recordCount: null, errorSanitized: dayResult.error, failureStatus: dayResult.status, fileHash: null });
+      await repo.finishImportRun({ id: run.id, status: "failed", recordCount: null, errorSanitized: dayResult.error, failureStatus: dayResult.status, fileHash: null, failureDiagnostics: dayResult.failureDiagnostics });
       days.push({ referenceDate: dayResult.referenceDate, status: "failed", recordCount: null, error: dayResult.error });
     }
   }

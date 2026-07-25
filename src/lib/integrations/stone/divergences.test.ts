@@ -90,14 +90,14 @@ describe("deriveDivergencesFromConciliationDays — chargebacks e estornos, inde
 
 describe("deriveDivergencesFromDayFetchResults — arquivo ausente/defasado, nunca silenciado", () => {
   it("dia com status diferente de ok vira divergência de baixa confiança, alta visibilidade", () => {
-    const results: DayFetchResult[] = [{ referenceDate: "2026-07-20", status: "no_data", normalized: null, error: "arquivo ainda não disponível", limitations: [] }];
+    const results: DayFetchResult[] = [{ referenceDate: "2026-07-20", status: "no_data", normalized: null, error: "arquivo ainda não disponível", limitations: [], failureDiagnostics: null }];
     const divergences = deriveDivergencesFromDayFetchResults(results);
     expect(divergences).toHaveLength(1);
     expect(divergences[0]).toMatchObject({ type: "arquivo_stone_ausente_ou_defasado", confidence: "low" });
   });
 
   it("dias com status ok nunca viram divergência", () => {
-    const results: DayFetchResult[] = [{ referenceDate: "2026-07-20", status: "ok", normalized: null, error: null, limitations: [] }];
+    const results: DayFetchResult[] = [{ referenceDate: "2026-07-20", status: "ok", normalized: null, error: null, limitations: [], failureDiagnostics: null }];
     expect(deriveDivergencesFromDayFetchResults(results)).toEqual([]);
   });
 });

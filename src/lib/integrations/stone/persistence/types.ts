@@ -1,6 +1,7 @@
 import type { ReconciliationResult } from "@/lib/integrations/stone/jumpparkReconciliation";
 import type { Divergence } from "@/lib/integrations/stone/divergences";
 import type { StoneResultStatus } from "@/lib/integrations/stone/types";
+import type { StoneFailureCategory, StoneFailureDiagnostics, StoneFailureStage } from "@/lib/integrations/stone/failureClassification";
 
 /**
  * Tipos de domínio da persistência Stone (Sprint 7.0, Z4, decisão do usuário) — independentes das
@@ -27,6 +28,16 @@ export interface StoneImportRun {
   errorSanitized: string | null;
   /** Só preenchido quando `status === "failed"` — o `StoneResultStatus` (Z1) que causou a falha, usado por `healthStatus.ts` para nunca precisar casar texto de erro. */
   failureStatus: StoneResultStatus | null;
+  // --- Observabilidade (Sprint 7.1, decisão do usuário, Etapa 7) — nunca chave/Authorization/URL SAS completa/payload financeiro. ---
+  failureStage: StoneFailureStage | null;
+  failureCategory: StoneFailureCategory | null;
+  upstreamStatus: number | null;
+  responseContentType: string | null;
+  attemptCount: number | null;
+  elapsedMs: number | null;
+  sanitizedHost: string | null;
+  sanitizedPath: string | null;
+  occurredAt: string | null;
   origin: string;
   createdAt: string;
   updatedAt: string;
@@ -47,6 +58,8 @@ export interface FinishImportRunInput {
   errorSanitized: string | null;
   failureStatus: StoneResultStatus | null;
   fileHash: string | null;
+  /** Diagnóstico estruturado (Sprint 7.1) — `null` em sucesso. */
+  failureDiagnostics: StoneFailureDiagnostics | null;
 }
 
 export type StoneTransactionEventType = "sale" | "cancellation" | "chargeback" | "chargeback_refund";

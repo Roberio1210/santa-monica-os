@@ -15,6 +15,7 @@
  * (não importa) `ToolResultStatus` (`zezinho/tools/types.ts`) porque é o mesmo vocabulário de
  * honestidade sobre disponibilidade de dado já usado desde a Sprint 4/5.
  */
+import type { StoneFailureDiagnostics } from "@/lib/integrations/stone/failureClassification";
 
 // --- Enums e tabelas de código documentadas ---
 
@@ -360,6 +361,12 @@ interface StoneResultBase {
 export interface StoneConciliationResult extends StoneResultBase {
   file: StoneConciliationFile | null;
   referenceDate: string;
+  /**
+   * Diagnóstico estruturado da falha (Sprint 7.1) — `null` quando `status === "ok"`. Nunca
+   * inclui segredo/URL assinada completa (ver `failureClassification.ts:sanitizedUrlParts`).
+   * Independente do `status` (6 valores, Z1) — camada de observação adicional, nunca substitui.
+   */
+  failureDiagnostics: StoneFailureDiagnostics | null;
 }
 
 /**

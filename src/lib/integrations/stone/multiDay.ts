@@ -3,6 +3,7 @@ import { getConciliationFile } from "@/lib/integrations/stone/service";
 import { normalizeConciliation, type NormalizedConciliation } from "@/lib/integrations/stone/normalize";
 import { addDaysIso } from "@/lib/utils/timezone";
 import type { StoneResultStatus } from "@/lib/integrations/stone/types";
+import type { StoneFailureDiagnostics } from "@/lib/integrations/stone/failureClassification";
 
 /**
  * Orquestrador fino de I/O multi-dia (Sprint 7.0, Z3) — reaproveita `service.ts` (Z1,
@@ -22,6 +23,8 @@ export interface DayFetchResult {
   normalized: NormalizedConciliation | null;
   error: string | null;
   limitations: string[];
+  /** Diagnóstico estruturado da falha (Sprint 7.1) — `null` quando `status === "ok"`. */
+  failureDiagnostics: StoneFailureDiagnostics | null;
 }
 
 export const DEFAULT_LOOKBACK_DAYS = 30;
@@ -39,9 +42,9 @@ export async function fetchNormalizedConciliations(referenceDates: string[]): Pr
     referenceDates.map(async (referenceDate): Promise<DayFetchResult> => {
       const result = await getConciliationFile(referenceDate);
       if (result.status !== "ok" || !result.file) {
-        return { referenceDate, status: result.status, normalized: null, error: result.error, limitations: result.limitations };
+        return { referenceDate, status: result.status, normalized: null, error: result.error, limitations: result.limitations, failureDiagnostics: result.failureDiagnostics };
       }
-      return { referenceDate, status: "ok", normalized: normalizeConciliation(result.file), error: null, limitations: result.limitations };
+      return { referenceDate, status: "ok", normalized: normalizeConciliation(result.file), error: null, limitations: result.limitations, failureDiagnostics: null };
     }),
   );
 }

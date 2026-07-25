@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { syncStoneAction, reprocessStoneDayAction, updateDivergenceReviewAction, updateReconciliationReviewAction } from "@/app/financeiro/stone-conciliacao/actions";
 import type { StoneConciliacaoPageData } from "@/lib/integrations/stone/pageData";
 import type { StoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
+import type { StoneSyncStatusReport, StoneSyncVisualStatus } from "@/lib/integrations/stone/syncStatus";
 import type { StoneDivergenceRow, StoneReconciliationResultRow, StoneReviewStatus } from "@/lib/integrations/stone/persistence/types";
 
 const currency = (value: number) => `R$ ${value.toFixed(2)}`;
@@ -39,6 +40,14 @@ const healthVariants: Record<StoneIntegrationHealth, BadgeVariant> = {
   temporary_failure: "warning",
   stale_data: "warning",
   no_data: "outline",
+};
+
+const syncStatusVariants: Record<StoneSyncVisualStatus, BadgeVariant> = {
+  completed: "positive",
+  completed_with_alerts: "warning",
+  temporary_failure: "critical",
+  action_required: "critical",
+  awaiting_first_sync: "outline",
 };
 
 const reviewStatusLabels: Record<StoneReviewStatus, string> = {
@@ -86,10 +95,12 @@ interface StoneConciliacaoViewProps {
 
 export function StoneConciliacaoView({ data, today }: StoneConciliacaoViewProps) {
   const [syncState, syncAction, syncPending] = useActionState(syncStoneAction, { error: null });
-  const { health, summary, schedule, reconciliationResults, divergences, importRuns } = data;
+  const { health, syncStatus, summary, schedule, reconciliationResults, divergences, importRuns } = data;
 
   return (
     <div className="space-y-6">
+      <SyncStatusCard status={syncStatus} today={today} />
+
       <Card>
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center justify-between gap-2">
@@ -190,6 +201,54 @@ export function StoneConciliacaoView({ data, today }: StoneConciliacaoViewProps)
       <DivergencesCard divergences={divergences} />
       <ImportHistoryCard runs={importRuns} today={today} />
     </div>
+  );
+}
+
+function SyncStatusCard({ status, today }: { status: StoneSyncStatusReport; today: string }) {
+  const [state, action, pending] = useActionState(reprocessStoneDayAction, { error: null });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Última sincronização</span>
+          <Badge variant={syncStatusVariants[status.status]}>{status.label}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
+        {status.status === "awaiting_first_sync" ? (
+          <p className="text-foreground-subtle">Nenhuma sincronização foi executada ainda.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Metric label="Dias com sucesso" value={String(status.daysSucceeded)} />
+              <Metric label="Dias com alerta" value={String(status.daysWithAlert)} />
+              <Metric label="Dias com falha" value={String(status.daysWithFailure)} />
+              <Metric label="Transações atualizadas" value={String(status.transactionsUpdated)} />
+            </div>
+            <Row label="Último dia com dado real" value={status.lastRealDataDate ?? "Nenhum ainda"} />
+            {status.alertReason ? <p className="rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs text-warning">{status.alertReason}</p> : null}
+            {status.failureReason ? <p className="rounded-lg border border-critical/30 bg-critical-bg px-3 py-2 text-xs text-critical">{status.failureReason}</p> : null}
+
+            {status.reprocessableDates.length > 0 ? (
+              <div className="space-y-2 border-t border-border-subtle pt-3">
+                <p className="text-xs font-medium text-foreground-subtle">Dias afetados — reprocessar individualmente:</p>
+                <div className="flex flex-wrap gap-2">
+                  {status.reprocessableDates.map((date) => (
+                    <form key={date} action={action} className="flex items-center gap-1">
+                      <input type="hidden" name="referenceDate" value={date} />
+                      <Button type="submit" size="sm" variant="outline" disabled={pending || date > today}>{pending ? "Reprocessando..." : `Reprocessar ${date}`}</Button>
+                    </form>
+                  ))}
+                </div>
+                {state.error ? <p className="text-xs text-critical">{state.error}</p> : null}
+                {state.success ? <p className="text-xs text-positive">{state.success}</p> : null}
+              </div>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
