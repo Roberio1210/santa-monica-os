@@ -273,6 +273,29 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
         facts.push({ key: "stone_integration_health_status", label: "Saúde da integração Stone", statement: `A integração Stone Conciliação está com status "${report.health}".`, direction: report.health === "healthy" || report.health === "connected" ? "estavel" : "indisponivel", source, isProxy: false });
         break;
       }
+
+      // Sprint 8 — Diretor Financeiro Inteligente (métricas/tendências/diagnósticos/recomendações
+      // já calculados por `finance/intelligence`, nunca recalculado aqui). Um Fact por item do
+      // resumo executivo + as métricas principais + os diagnósticos mais relevantes.
+      case "financial_intelligence": {
+        if (result.status !== "ok" || !result.report.primaryMetrics || !result.report.executiveSummary) break;
+        const { primaryMetrics: m, executiveSummary: summary, diagnostics } = result.report;
+        const source = result.source;
+
+        facts.push({ key: "financial_intelligence_situation", label: "Situação financeira geral", statement: summary.situation, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_net_revenue", label: "Receita líquida (Diretor Financeiro Inteligente)", statement: summary.netRevenueLabel, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_receivables", label: "Recebíveis (Diretor Financeiro Inteligente)", statement: summary.receivablesLabel, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_main_risk", label: "Principal risco financeiro", statement: summary.mainRisk, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_main_opportunity", label: "Principal oportunidade financeira", statement: summary.mainOpportunity, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_main_recommendation", label: "Principal recomendação financeira", statement: summary.mainRecommendation, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_average_ticket", label: "Ticket médio (30 dias)", statement: `O ticket médio dos últimos 30 dias com dado disponível é de R$ ${m.averageTicket.toFixed(2)}.`, direction: "indisponivel", source, isProxy: false });
+        facts.push({ key: "financial_intelligence_fee_percentage", label: "Percentual de taxas (30 dias)", statement: `As taxas representam ${m.feePercentage.toFixed(1)}% da receita bruta dos últimos 30 dias.`, direction: "indisponivel", source, isProxy: false });
+
+        for (const d of diagnostics.filter((d) => d.severity !== "info").slice(0, 3)) {
+          facts.push({ key: `financial_intelligence_diagnostic_${d.id}`, label: d.title, statement: d.description, direction: d.severity === "critical" ? "queda" : "indisponivel", source, isProxy: false });
+        }
+        break;
+      }
     }
   }
 

@@ -324,4 +324,21 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
     optional: true,
     fallbackAllowed: true,
   },
+  financial_intelligence: {
+    id: "financial_intelligence",
+    label: "Diretor Financeiro Inteligente (métricas, tendências, diagnósticos e recomendações executivas)",
+    source: "Santa Monica OS — Diretor Financeiro Inteligente (baseado em regras sobre dados Stone)",
+    reuses: "runFinancialDirector (src/lib/finance/intelligence/director/service.ts)",
+    objectives: ["improve_cash_flow", "business_health"],
+    // Sempre ancorado em "hoje" (periodA.to como override) — busca uma janela de dias passados
+    // internamente (director/service.ts), nunca um único dia só. Mesmo padrão de
+    // `stone_financial_schedule`.
+    requiresPeriod: false,
+    costHint: "high",
+    relevance: "high",
+    latencyHint: "slow",
+    freshnessRequirement: "recent",
+    optional: true,
+    fallbackAllowed: true,
+  },
 };

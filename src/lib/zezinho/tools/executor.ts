@@ -18,6 +18,7 @@ import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financi
 import { reconcileStoneWithJumpparkForPeriod } from "@/lib/integrations/stone/jumpparkReconciliationService";
 import { buildDivergencesSummary } from "@/lib/integrations/stone/divergencesSummary";
 import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
+import { runFinancialDirector } from "@/lib/finance/intelligence/director/service";
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
 import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
@@ -350,6 +351,19 @@ async function runStoneIntegrationHealth(): Promise<ToolResult> {
   return { id: "stone_integration_health", source, error, ...meta(status), report };
 }
 
+/**
+ * Diretor Financeiro Inteligente (Sprint 8) — nunca toca `client.ts`/XML/gzip diretamente, só
+ * `runFinancialDirector` (já normalizado, métricas/tendências/diagnósticos/recomendações
+ * baseados em regras, nunca IA generativa). Sempre ancorado em "hoje" (`periodA.to` como
+ * override), mesmo padrão de `stone_financial_schedule`.
+ */
+async function runFinancialIntelligence(call: ToolCall): Promise<ToolResult> {
+  const source = TOOL_REGISTRY.financial_intelligence.source;
+  const todayIso = call.periodA?.to ?? saoPauloDateISO();
+  const report = await runFinancialDirector(todayIso);
+  return { id: "financial_intelligence", source, error: report.error, ...meta(report.status, report.limitations), report };
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
 export async function executeTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
@@ -397,6 +411,8 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
       return runStoneDivergencesSummary();
     case "stone_integration_health":
       return runStoneIntegrationHealth();
+    case "financial_intelligence":
+      return runFinancialIntelligence(call);
   }
 }
 

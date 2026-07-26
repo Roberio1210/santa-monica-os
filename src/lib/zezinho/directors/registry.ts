@@ -33,7 +33,9 @@ export const DIRECTOR_REGISTRY: Record<DirectorId, Director> = {
     // capacidades financeiras novas, só do Financeiro. A partir do Z4, as três primeiras também
     // aparecem seletivamente em INTENT_CAPABILITIES (planner/capabilities.ts) para
     // financial_status/cash_position — nunca em intenções sem relação financeira.
-    ownedCapabilities: ["cash_ledger_totals", "accounts_payable", "accounts_receivable", "goal_progress", "dre_result", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary", "stone_integration_health"],
+    // "financial_intelligence" (Sprint 8) — Diretor Financeiro Inteligente (métricas/tendências/
+    // diagnósticos/recomendações baseados em regras), também exclusivo do Financeiro.
+    ownedCapabilities: ["cash_ledger_totals", "accounts_payable", "accounts_receivable", "goal_progress", "dre_result", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary", "stone_integration_health", "financial_intelligence"],
     dataAvailability: "real",
     defaultObjective: "improve_cash_flow",
     defaultTopic: "caixa",

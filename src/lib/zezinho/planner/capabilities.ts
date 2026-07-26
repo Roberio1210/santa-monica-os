@@ -32,7 +32,8 @@ export type Capability =
   | "stone_financial_schedule"
   | "stone_jumppark_reconciliation"
   | "stone_divergences_summary"
-  | "stone_integration_health";
+  | "stone_integration_health"
+  | "financial_intelligence";
 
 export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   situational_context: "situational_context",
@@ -68,6 +69,10 @@ export const CAPABILITY_TOOL: Record<Capability, ToolId> = {
   // stone_integration_health nunca aparece em INTENT_CAPABILITIES — é um dado operacional da
   // integração (Configurações + Diretor Financeiro), não uma pergunta que o chat responde.
   stone_integration_health: "stone_integration_health",
+  // Sprint 8 — Diretor Financeiro Inteligente (métricas/tendências/diagnósticos/recomendações
+  // baseados em regras sobre os dados Stone já coletados). Mesma seletividade da Z4: só entra em
+  // financial_status/cash_position, nunca nas intenções sem relação financeira.
+  financial_intelligence: "financial_intelligence",
 };
 
 /** Linha "status_check / business_health" do exemplo do checkpoint — a única lista genuinamente ampla. */
@@ -95,8 +100,8 @@ export const INTENT_CAPABILITIES: Partial<Record<ManagerialIntent, Capability[]>
   // Sprint 7.0, Z4 (decisão do usuário, seção 11): perguntas financeiras passam a consultar a
   // Stone seletivamente — nunca clima/CRM/estoque, e nunca quando a integração não está
   // configurada (a ferramenta devolve `not_configured` honesto, sem derrubar a resposta).
-  financial_status: ["jumppark_period_summary", "cash_ledger_totals", "accounts_receivable", "accounts_payable", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary"],
-  cash_position: ["cash_ledger_totals", "stone_reconciliation_summary", "stone_financial_schedule"],
+  financial_status: ["jumppark_period_summary", "cash_ledger_totals", "accounts_receivable", "accounts_payable", "stone_reconciliation_summary", "stone_financial_schedule", "stone_jumppark_reconciliation", "stone_divergences_summary", "financial_intelligence"],
+  cash_position: ["cash_ledger_totals", "stone_reconciliation_summary", "stone_financial_schedule", "financial_intelligence"],
   goal_progress: ["goal_progress", "jumppark_period_summary"],
   weather_impact: ["weather_forecast", "historical_pattern"],
   client_retention: ["crm_summary"],

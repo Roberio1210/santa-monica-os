@@ -5,6 +5,7 @@ import type { StoneReconciliationSummary } from "@/lib/integrations/stone/reconc
 import type { FinancialScheduleResult } from "@/lib/integrations/stone/financialScheduleService";
 import type { JumpparkReconciliationResult } from "@/lib/integrations/stone/jumpparkReconciliationService";
 import type { FinancialSchedule } from "@/lib/integrations/stone/financialSchedule";
+import type { Diagnostic, FinancialDirectorReport, FinancialMetricSet } from "@/lib/finance/intelligence/types";
 
 function meta(status: ToolResult["status"], limitations: string[] = []) {
   return { status, collectedAt: "2026-07-24T12:00:00.000Z", limitations };
@@ -304,5 +305,89 @@ describe("extractFacts — stone_reconciliation_summary (Sprint 7.0, Z2, decisã
       summary: stoneSummary({ financialPosition: { status: "no_data", amount: null, referenceDate: null, processedAt: "2026-07-24T12:00:00.000Z", origin: "Stone", limitation: "Nenhuma posição financeira." } }),
     };
     expect(extractFacts([result]).some((f) => f.key === "stone_financial_position")).toBe(false);
+  });
+});
+
+function financialMetricSet(overrides: Partial<FinancialMetricSet> = {}): FinancialMetricSet {
+  return {
+    periodFrom: "2026-06-23",
+    periodTo: "2026-07-22",
+    transactionCount: 40,
+    grossRevenue: 4000,
+    netRevenue: 3850,
+    totalFees: 150,
+    feePercentage: 3.75,
+    averageTicket: 100,
+    averageTransactionValue: 96.25,
+    highestSale: 300,
+    lowestSale: 20,
+    topSalesConcentration: 22,
+    brandDistribution: [],
+    paymentMethodDistribution: [],
+    installmentDistribution: [],
+    dailyRevenue: [],
+    weeklyRevenue: [],
+    monthlyRevenue: [],
+    pendingReceivablesAmount: 500,
+    overdueReceivablesAmount: 50,
+    settledReceivablesAmount: 3000,
+    settledReceivablesPercentage: 84.5,
+    averageSettlementDays: 1,
+    advancedAmount: 100,
+    advancedPercentage: 3.3,
+    ...overrides,
+  };
+}
+
+function financialDirectorReport(overrides: Partial<FinancialDirectorReport> = {}): FinancialDirectorReport {
+  return {
+    status: "ok",
+    error: null,
+    limitations: [],
+    generatedAt: "2026-07-24T12:00:00.000Z",
+    dataAvailableThroughDate: "2026-07-22",
+    primaryMetrics: financialMetricSet(),
+    comparisons: [],
+    diagnostics: [],
+    recommendations: [],
+    executiveSummary: {
+      netRevenueLabel: "R$ 3850.00 nos últimos 30 dias",
+      receivablesLabel: "R$ 3000.00 liquidados, R$ 500.00 futuros, R$ 50.00 vencidos",
+      mainRisk: "Nenhum risco relevante identificado no período.",
+      mainOpportunity: "Nenhuma oportunidade adicional identificada no período.",
+      situation: "Saudável.",
+      mainRecommendation: "Nenhuma ação adicional necessária no momento.",
+    },
+    ...overrides,
+  };
+}
+
+describe("extractFacts — financial_intelligence (Sprint 8, Diretor Financeiro Inteligente)", () => {
+  it("status ok com métricas e resumo executivo produz um Fact por item do resumo, nunca recalcula nada", () => {
+    const result: ToolResult = { id: "financial_intelligence", source: "Santa Monica OS — Diretor Financeiro Inteligente", error: null, ...meta("ok"), report: financialDirectorReport() };
+    const facts = extractFacts([result]);
+
+    expect(facts.find((f) => f.key === "financial_intelligence_situation")?.statement).toBe("Saudável.");
+    expect(facts.find((f) => f.key === "financial_intelligence_net_revenue")?.statement).toBe("R$ 3850.00 nos últimos 30 dias");
+    expect(facts.find((f) => f.key === "financial_intelligence_average_ticket")?.statement).toContain("R$ 100.00");
+    expect(facts.find((f) => f.key === "financial_intelligence_fee_percentage")?.statement).toContain("3.8%");
+  });
+
+  it("diagnósticos com severidade warning/critical viram Fact — diagnósticos 'info' nunca entram", () => {
+    const diagnostics: Diagnostic[] = [
+      { id: "ticket_medio_caiu", severity: "warning", confidence: "medium", title: "Ticket médio caiu", description: "desc", reason: "r", evidence: [], recommendation: "rec" },
+      { id: "receita_cresceu", severity: "info", confidence: "medium", title: "Receita cresceu", description: "desc", reason: "r", evidence: [], recommendation: "rec" },
+    ];
+    const result: ToolResult = { id: "financial_intelligence", source: "Santa Monica OS", error: null, ...meta("ok"), report: financialDirectorReport({ diagnostics }) };
+    const facts = extractFacts([result]);
+    expect(facts.some((f) => f.key === "financial_intelligence_diagnostic_ticket_medio_caiu")).toBe(true);
+    expect(facts.some((f) => f.key === "financial_intelligence_diagnostic_receita_cresceu")).toBe(false);
+  });
+
+  it("status not_configured/no_data/temporary_failure nunca produz nenhum Fact — nunca um número inventado", () => {
+    for (const status of ["not_configured", "no_data", "temporary_failure"] as const) {
+      const result: ToolResult = { id: "financial_intelligence", source: "Santa Monica OS", error: "algo", ...meta(status), report: financialDirectorReport({ status, primaryMetrics: null, executiveSummary: null }) };
+      expect(extractFacts([result])).toEqual([]);
+    }
   });
 });
