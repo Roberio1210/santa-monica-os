@@ -72,6 +72,23 @@ function invalidXmlHttpResponse() {
   };
 }
 
+function badRequestResponse(contentType: string | null, body: string, arrayBufferOverride?: () => Promise<ArrayBuffer>) {
+  let readCount = 0;
+  return {
+    ok: false,
+    status: 400,
+    statusText: "400",
+    url: FILE_URL,
+    redirected: false,
+    headers: { get: (name: string) => (contentType && name.toLowerCase() === "content-type" ? contentType : null) },
+    arrayBuffer: arrayBufferOverride ?? (async () => {
+      readCount += 1;
+      if (readCount > 1) throw new Error("body already consumed — response.arrayBuffer() lido mais de uma vez");
+      return bufferOf(body);
+    }),
+  };
+}
+
 describe("client.ts — retry seguro e classificação de falha (Sprint 7.1, Etapa 6 e 8)", () => {
   beforeEach(() => {
     clearStoneCache();
@@ -173,5 +190,111 @@ describe("client.ts — retry seguro e classificação de falha (Sprint 7.1, Eta
     expect(allLoggedText).not.toContain("test-key");
     expect(allLoggedText).not.toContain("SUPER_SECRET_TOKEN");
     expect(allLoggedText).not.toContain("Authorization");
+  });
+});
+
+describe("client.ts — HTTP 400 com evidência real do corpo (Sprint 7.2, decisão do usuário)", () => {
+  beforeEach(() => {
+    clearStoneCache();
+    process.env = { ...ORIGINAL_ENV, STONE_API_KEY: "test-key", STONE_ACCOUNT_ID: "900000001" };
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
+  });
+
+  it("HTTP 400 JSON com layout inválido → unsupported_layout", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("application/json", JSON.stringify({ code: "LAYOUT_NOT_SUPPORTED", message: "Layout XML2_4 not supported." })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("unsupported_layout");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("HTTP 400 JSON indicando arquivo ainda não publicado → file_not_published_yet", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("application/json", JSON.stringify({ message: "File not yet generated for this reference date." })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("file_not_published_yet");
+  });
+
+  it("HTTP 400 JSON com data inválida → invalid_reference_date", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("application/json", JSON.stringify({ message: "Reference date is invalid." })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("invalid_reference_date");
+  });
+
+  it("HTTP 400 texto simples → interpretado como mensagem, classificado pela evidência", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("text/plain", "Invalid parameter: affiliationCode"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("invalid_request");
+  });
+
+  it("HTTP 400 XML → código/mensagem extraídos das tags", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("text/xml", "<Error><Code>LAYOUT</Code><Message>layout inválido para este merchant</Message></Error>"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("unsupported_layout");
+  });
+
+  it("HTTP 400 com body vazio → upstream_bad_request, nunca inventa uma causa mais específica", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse(null, ""));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("upstream_bad_request");
+    expect(result.error).toBe("A Stone recusou a consulta para este dia. O motivo detalhado não foi informado.");
+  });
+
+  it("HTTP 400 com corpo acima de 8 KB nunca lança — trunca e ainda assim classifica pela evidência disponível", async () => {
+    const bigMessage = "layout ".repeat(2000); // bem acima de 8KB, sempre contém "layout" perto do início
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse("application/json", JSON.stringify({ message: bigMessage })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.status).not.toBe("not_configured");
+    expect(result.failureDiagnostics?.category).toBe("unsupported_layout");
+  });
+
+  it("HTTP 400 nunca é retryable — uma única chamada, mesmo com corpo indicando falha genérica", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse(null, ""));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    await getConciliationFile("2026-07-22");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("o corpo da resposta de erro é lido apenas uma vez — response.arrayBuffer() lançaria na 2ª chamada, então uma classificação bem-sucedida prova leitura única", async () => {
+    const response = badRequestResponse("application/json", JSON.stringify({ message: "Invalid parameter" }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+    const { getConciliationFile } = await import("@/lib/integrations/stone/service");
+    const result = await getConciliationFile("2026-07-22");
+
+    expect(result.failureDiagnostics?.category).toBe("invalid_request");
   });
 });

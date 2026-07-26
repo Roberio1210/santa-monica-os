@@ -50,6 +50,9 @@ const CATEGORY_TO_RESULT_STATUS: Record<StoneFailureCategory, StoneResultStatus>
   invalid_gzip: "temporary_failure",
   invalid_xml: "temporary_failure",
   unsupported_layout: "temporary_failure",
+  invalid_reference_date: "temporary_failure",
+  invalid_request: "temporary_failure",
+  upstream_bad_request: "temporary_failure",
   persistence_failure: "temporary_failure",
   unknown_failure: "temporary_failure",
 };
@@ -66,7 +69,10 @@ export const CATEGORY_MESSAGES: Record<StoneFailureCategory, string> = {
   invalid_content_type: "Resposta da Stone em formato não reconhecido.",
   invalid_gzip: "Resposta da Stone indicava gzip, mas o conteúdo não é um gzip válido.",
   invalid_xml: "Arquivo da Stone não pôde ser interpretado como XML válido.",
-  unsupported_layout: "Layout de arquivo não suportado pela Stone para esta requisição.",
+  unsupported_layout: "O layout solicitado não é suportado pela Stone.",
+  invalid_reference_date: "A data consultada não é aceita pela API de conciliação da Stone.",
+  invalid_request: "A Stone recusou a consulta — parâmetro inválido.",
+  upstream_bad_request: "A Stone recusou a consulta para este dia. O motivo detalhado não foi informado.",
   persistence_failure: "Falha ao persistir os dados já obtidos da Stone.",
   unknown_failure: "Não foi possível consultar a Stone agora.",
 };
@@ -154,7 +160,18 @@ export async function getConciliationFile(referenceDate: string, layout: typeof 
   } catch (error) {
     const elapsedMs = Date.now() - requestStartedAt;
     const mapped = mapError(error, elapsedMs);
-    stoneLogger.error("Falha ao consultar arquivo de conciliação Stone.", { referenceDate, layout, status: mapped.status, category: mapped.failureDiagnostics.category, stage: mapped.failureDiagnostics.stage, attempts: mapped.failureDiagnostics.attemptCount, elapsedMs });
+    stoneLogger.error("Falha ao consultar arquivo de conciliação Stone.", {
+      referenceDate,
+      layout,
+      status: mapped.status,
+      category: mapped.failureDiagnostics.category,
+      stage: mapped.failureDiagnostics.stage,
+      upstreamStatus: mapped.failureDiagnostics.upstreamStatus,
+      upstreamErrorCode: error instanceof StoneRequestError ? error.upstreamErrorCode : null,
+      upstreamMessage: error instanceof StoneRequestError ? error.upstreamMessage : null,
+      attempts: mapped.failureDiagnostics.attemptCount,
+      elapsedMs,
+    });
     return { status: mapped.status, error: mapped.error, collectedAt, limitations: mapped.limitations, file: null, referenceDate, failureDiagnostics: mapped.failureDiagnostics };
   }
 }

@@ -85,7 +85,7 @@ describe("runDirector — Diretores reais reaproveitam o motor de raciocínio j�
     });
 
     it("teste 33 — falha da Stone (500) nunca derruba o Diretor Financeiro — relatório continua sendo produzido", async () => {
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) }));
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", headers: { get: () => null }, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) }));
       const report = await runDirector(DIRECTOR_REGISTRY.financeiro);
       expect(report.director).toBe("financeiro");
       // Fatos que dependem do arquivo do dia (Z2/Z3) nunca aparecem quando a Stone falha — mas

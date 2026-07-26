@@ -108,6 +108,16 @@ describe("computeSyncStatus — Sprint 7.1, Etapa 5, 5 estados visuais", () => {
     expect(report.status).toBe("action_required");
   });
 
+  it("30 dias com sucesso + 1 dia HTTP 400 (upstream_bad_request, Sprint 7.2) → 'Sincronização concluída com alertas', status global preservado, nunca 'Falha temporária'", () => {
+    const dates = Array.from({ length: 30 }, (_, i) => new Date(Date.UTC(2026, 5, 25 + i)).toISOString().slice(0, 10));
+    const runs = [...dates.map((d) => succeededDay(d, 13)), failedDay("2026-07-25", "upstream_bad_request")];
+    const report = computeSyncStatus(runs);
+    expect(report.status).toBe("completed_with_alerts");
+    expect(report.label).toBe("Sincronização concluída com alertas");
+    expect(report.daysSucceeded).toBe(30);
+    expect(report.daysWithFailure).toBe(1);
+  });
+
   it("todos os dias são apenas alerta (sem sucesso real, sem falha técnica) → 'Sincronização concluída com alertas', nunca 'Falha temporária'", () => {
     const runs = [alertDay("2026-07-25", "no_data_expected")];
     const report = computeSyncStatus(runs);

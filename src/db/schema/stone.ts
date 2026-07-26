@@ -44,6 +44,9 @@ export const stoneFailureCategoryEnum = pgEnum("stone_failure_category", [
   "invalid_gzip",
   "invalid_xml",
   "unsupported_layout",
+  "invalid_reference_date",
+  "invalid_request",
+  "upstream_bad_request",
   "persistence_failure",
   "unknown_failure",
 ]);

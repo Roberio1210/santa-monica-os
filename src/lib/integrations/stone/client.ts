@@ -3,8 +3,10 @@ import { gunzipSync } from "node:zlib";
 import { getStoneEnv } from "@/lib/config/env";
 import { stoneLogger } from "@/lib/integrations/stone/logger";
 import {
+  classifyBadRequestBody,
   classifyBlobHttpFailure,
   classifyFileHttpFailure,
+  parseErrorBodyEvidence,
   sanitizedUrlParts,
   type StoneFailureCategory,
   type StoneFailureStage,
@@ -44,6 +46,10 @@ export interface StoneRequestErrorInput {
   retryable: boolean;
   attempts?: number;
   upstreamContentType?: string | null;
+  /** Código de erro extraído do corpo da resposta (Sprint 7.2) — só quando realmente presente, nunca inventado. */
+  upstreamErrorCode?: string | null;
+  /** Mensagem de erro sanitizada extraída do corpo da resposta (Sprint 7.2) — nunca a mensagem canônica exibida ao usuário (essa vem de `CATEGORY_MESSAGES`, em `service.ts`). */
+  upstreamMessage?: string | null;
   sanitizedHost?: string | null;
   sanitizedPath?: string | null;
 }
@@ -56,6 +62,8 @@ export class StoneRequestError extends Error {
   retryable: boolean;
   attempts: number;
   upstreamContentType: string | null;
+  upstreamErrorCode: string | null;
+  upstreamMessage: string | null;
   sanitizedHost: string | null;
   sanitizedPath: string | null;
 
@@ -68,6 +76,8 @@ export class StoneRequestError extends Error {
     this.retryable = input.retryable;
     this.attempts = input.attempts ?? 1;
     this.upstreamContentType = input.upstreamContentType ?? null;
+    this.upstreamErrorCode = input.upstreamErrorCode ?? null;
+    this.upstreamMessage = input.upstreamMessage ?? null;
     this.sanitizedHost = input.sanitizedHost ?? null;
     this.sanitizedPath = input.sanitizedPath ?? null;
   }
@@ -350,9 +360,38 @@ async function fetchConciliationFile(affiliationCode: string, referenceDate: str
 
   const response = firstResult.response;
   if (!response.ok) {
-    const { category, retryable } = classifyFileHttpFailure(response.status, referenceDate);
+    const errorContentType = response.headers.get("content-type");
+    const evidence = parseErrorBodyEvidence(errorContentType, Buffer.from(await response.arrayBuffer()));
+    // HTTP 400 nunca é classificado por uma regra fixa (Sprint 7.2) — sempre pela evidência real do corpo.
+    const { category, retryable } = response.status === 400 ? classifyBadRequestBody(evidence) : classifyFileHttpFailure(response.status, referenceDate);
+    stoneLogger.error("Stone recusou a consulta do arquivo de conciliação.", {
+      referenceDate,
+      layout,
+      status: response.status,
+      contentType: errorContentType,
+      category,
+      upstreamErrorCode: evidence.upstreamErrorCode,
+      upstreamMessage: evidence.upstreamMessage,
+      bodyPreview: evidence.bodyPreview.slice(0, 300),
+      bodyTruncated: evidence.truncated,
+      sanitizedHost: fileHost,
+      sanitizedPath: filePath,
+      attempts: firstResult.attempts,
+    });
     // Nunca inclui a chave nesta mensagem de erro.
-    throw new StoneRequestError({ status: response.status, message: `Stone conciliation file request failed: ${response.status} ${response.statusText}`, category, stage: "file_request", retryable, attempts: firstResult.attempts, sanitizedHost: fileHost, sanitizedPath: filePath });
+    throw new StoneRequestError({
+      status: response.status,
+      message: `Stone conciliation file request failed: ${response.status} ${response.statusText}`,
+      category,
+      stage: "file_request",
+      retryable,
+      attempts: firstResult.attempts,
+      upstreamContentType: errorContentType,
+      upstreamErrorCode: evidence.upstreamErrorCode,
+      upstreamMessage: evidence.upstreamMessage,
+      sanitizedHost: fileHost,
+      sanitizedPath: filePath,
+    });
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());

@@ -12,6 +12,18 @@ function gzipResponse(status: number, xml: string) {
   return { ok: status >= 200 && status < 300, status, statusText: String(status), url: "https://conciliation.stone.com.br/mock", redirected: false, headers: { get: () => "application/gzip" }, arrayBuffer: async () => gzipped.buffer.slice(gzipped.byteOffset, gzipped.byteOffset + gzipped.byteLength) };
 }
 
+function badRequestResponse(body: string) {
+  return {
+    ok: false,
+    status: 400,
+    statusText: "400",
+    url: "https://conciliation.stone.com.br/mock",
+    redirected: false,
+    headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "application/json" : null) },
+    arrayBuffer: async () => Buffer.from(body, "utf-8"),
+  };
+}
+
 describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e idempotente", () => {
   beforeEach(() => {
     clearStoneCache();
@@ -103,7 +115,7 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
   it("dia sem arquivo publicado ainda (no_data) conclui como sucesso, com zero registros — nunca um erro", async () => {
     process.env.STONE_API_KEY = "test-key";
     process.env.STONE_ACCOUNT_ID = "900000001";
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: "404", arrayBuffer: async () => new ArrayBuffer(0) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: "404", headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) }));
 
     const result = await syncStonePeriod({ fromDate: "2026-07-24", toDate: "2026-07-24", origin: "manual" });
     expect(result.status).toBe("ok");
@@ -114,7 +126,7 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
   it("falha real (500) marca a execução como failed com o status estruturado, sem derrubar o processo", async () => {
     process.env.STONE_API_KEY = "test-key";
     process.env.STONE_ACCOUNT_ID = "900000001";
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", arrayBuffer: async () => new ArrayBuffer(0) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "500", headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) }));
 
     const result = await syncStonePeriod({ fromDate: "2026-07-24", toDate: "2026-07-24", origin: "manual" });
     expect(result.status).toBe("no_data");
@@ -122,6 +134,26 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
 
     const runs = await getStonePersistenceRepository().listImportRuns(10);
     expect(runs[0].failureStatus).toBe("temporary_failure");
+  });
+
+  it("HTTP 400 com corpo indicando data inválida (Sprint 7.2) é classificado pela evidência real, nunca retryable, e reprocessar depois continua idempotente", async () => {
+    process.env.STONE_API_KEY = "test-key";
+    process.env.STONE_ACCOUNT_ID = "900000001";
+    const fetchMock = vi.fn().mockResolvedValue(badRequestResponse(JSON.stringify({ message: "Reference date is invalid." })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await syncStonePeriod({ fromDate: "2026-07-25", toDate: "2026-07-25", origin: "manual" });
+    expect(first.days[0].status).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // HTTP 400 nunca é retryable
+
+    const firstRun = await getStonePersistenceRepository().getImportRun("2026-07-25", "XML2_4");
+    expect(firstRun?.failureCategory).toBe("invalid_reference_date");
+
+    const second = await syncStonePeriod({ fromDate: "2026-07-25", toDate: "2026-07-25", origin: "manual_reprocess" });
+    expect(second.days[0].status).toBe("failed");
+
+    const runs = await getStonePersistenceRepository().listImportRuns(10);
+    expect(runs).toHaveLength(1); // reprocessar nunca duplica a execução
   });
 
   it("período com dias mistos (sucesso e falha) reporta status 'partial'", async () => {
@@ -132,7 +164,7 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
       "fetch",
       vi.fn().mockImplementation(async () => {
         call += 1;
-        return call === 1 ? gzipResponse(200, OFFICIAL_SAMPLE_XML) : { ok: false, status: 500, statusText: "500", arrayBuffer: async () => new ArrayBuffer(0) };
+        return call === 1 ? gzipResponse(200, OFFICIAL_SAMPLE_XML) : { ok: false, status: 500, statusText: "500", headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) };
       }),
     );
 
