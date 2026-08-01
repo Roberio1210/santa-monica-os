@@ -1,5 +1,6 @@
 import { identityKey, normalizeName, normalizePlate, slugifyCustomerId } from "@/lib/crm/normalize";
 import { maskPhone, maskPlate } from "@/lib/utils/mask";
+import { classifyPaymentMethod } from "@/lib/utils/paymentMethod";
 import { classifyServiceCategory } from "@/lib/domain/operational/category";
 import type { JumpParkServiceOrder } from "@/lib/integrations/jumppark/types";
 import type { OperationalCustomer, OperationalEmployee, OperationalOrder, OperationalVehicle } from "@/lib/domain/operational/types";
@@ -25,21 +26,6 @@ export type JumpParkOrderInput = JumpParkServiceOrder & {
   /** Confirmado na amostra real (sempre 0/null nos exemplos vistos) — nunca populado com um caso real observado até agora. */
   discountAmount?: string | number | null;
 };
-
-/**
- * Mirrorado de `integrations/jumppark/service.ts`/`operations-summary.ts` (nunca importado —
- * aquele código é privado/não-exportado nos dois arquivos originais, e este domínio não deve
- * acoplar-se à camada de integração além do que já é público em `types.ts`). Mesma lógica, mesma
- * lista de palavras-chave.
- */
-function classifyPaymentMethodCategory(name: string): "dinheiro" | "debito" | "credito" | "pix" | "outro" {
-  const normalized = name.toLowerCase();
-  if (normalized.includes("dinheiro") || normalized.includes("cash")) return "dinheiro";
-  if (normalized.includes("debito") || normalized.includes("débito")) return "debito";
-  if (normalized.includes("credito") || normalized.includes("crédito")) return "credito";
-  if (normalized.includes("pix")) return "pix";
-  return "outro";
-}
 
 function toNumber(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -88,7 +74,7 @@ export function mapJumpParkOrderToOperationalOrder(order: JumpParkOrderInput): O
   const discountAmount = round2(toNumber(order.discountAmount));
   const netAmount = round2(grossAmount - discountAmount);
 
-  const paymentMethodCategory = order.paymentMethodName ? classifyPaymentMethodCategory(order.paymentMethodName) : "outro";
+  const paymentMethodCategory = order.paymentMethodName ? classifyPaymentMethod(order.paymentMethodName) : "outro";
 
   const observationText = null; // `observations` não está tipado em JumpParkServiceOrder hoje e nunca foi visto populado em amostra real — nunca inventado, ver docs/jumppark-data-map.md.
 

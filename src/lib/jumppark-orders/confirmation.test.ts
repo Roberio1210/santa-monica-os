@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confirmOrderConsumption, reverseOrderConsumption, type ConfirmConsumptionInput } from "@/lib/orders/confirmation";
+import { confirmOrderConsumption, reverseOrderConsumption, type ConfirmConsumptionInput } from "@/lib/jumppark-orders/confirmation";
 
 function baseInput(overrides: Partial<ConfirmConsumptionInput> = {}): ConfirmConsumptionInput {
   return {

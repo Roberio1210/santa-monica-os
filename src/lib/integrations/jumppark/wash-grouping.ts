@@ -1,5 +1,5 @@
 import "server-only";
-import { listServiceMappings } from "@/lib/orders/service-mapping";
+import { listServiceMappings } from "@/lib/jumppark-orders/service-mapping";
 import type { OperationalOrder } from "./operations-summary";
 
 export interface WashCategoryGroup {

@@ -5,9 +5,9 @@ import { inventoryConsumptionConfirmations } from "@/db/schema";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchServiceOrders, JumpParkNotConfiguredError } from "@/lib/integrations/jumppark";
 import { maskPlate } from "@/lib/utils/mask";
-import { normalizePlate } from "@/lib/orders/plate";
-import { registerSeenServiceNames } from "@/lib/orders/service-mapping";
-import type { ConsumptionConfirmationStatus, EligibleOrder } from "@/lib/orders/types";
+import { normalizePlate } from "@/lib/jumppark-orders/plate";
+import { registerSeenServiceNames } from "@/lib/jumppark-orders/service-mapping";
+import type { ConsumptionConfirmationStatus, EligibleOrder } from "@/lib/jumppark-orders/types";
 
 function timeOnly(dateTime?: string): string | null {
   if (!dateTime) return null;

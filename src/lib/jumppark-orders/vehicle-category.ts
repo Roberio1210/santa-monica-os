@@ -2,8 +2,8 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { vehicleCategoryAssignments } from "@/db/schema";
-import { normalizePlate } from "@/lib/orders/plate";
-import type { OrderVehicleCategory, VehicleCategoryAssignment } from "@/lib/orders/types";
+import { normalizePlate } from "@/lib/jumppark-orders/plate";
+import type { OrderVehicleCategory, VehicleCategoryAssignment } from "@/lib/jumppark-orders/types";
 
 function toAssignment(row: typeof vehicleCategoryAssignments.$inferSelect): VehicleCategoryAssignment {
   return {

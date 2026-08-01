@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
-import type { ConsumptionConfirmationView } from "@/lib/orders/consumption-history";
+import type { ConsumptionConfirmationView } from "@/lib/jumppark-orders/consumption-history";
 
 const fieldClasses =
   "h-9 rounded-lg border border-border bg-background-elevated px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50";

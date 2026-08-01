@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { ConsumptionsView } from "@/components/inventory/consumptions-view";
-import { listConsumptionConfirmations } from "@/lib/orders/consumption-history";
+import { listConsumptionConfirmations } from "@/lib/jumppark-orders/consumption-history";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { Unavailable } from "@/components/shared/unavailable";
 

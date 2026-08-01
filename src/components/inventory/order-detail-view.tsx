@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
-import { orderConsumptionStatusLabels, classifyOrderStatus, type OrderConsumptionStatus } from "@/lib/orders/status";
-import { orderVehicleCategories } from "@/lib/orders/types";
-import type { OrderVehicleCategory } from "@/lib/orders/types";
-import type { OrderDetail } from "@/lib/orders/order-detail";
+import { orderConsumptionStatusLabels, classifyOrderStatus, type OrderConsumptionStatus } from "@/lib/jumppark-orders/status";
+import { orderVehicleCategories } from "@/lib/jumppark-orders/types";
+import type { OrderVehicleCategory } from "@/lib/jumppark-orders/types";
+import type { OrderDetail } from "@/lib/jumppark-orders/order-detail";
 import type { InventoryConsumptionMode } from "@/lib/config/env";
 import {
   confirmConsumptionAction,

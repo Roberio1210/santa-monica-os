@@ -2,7 +2,7 @@ import "server-only";
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { inventoryConsumptionConfirmations, inventoryConsumptionLines, inventoryItems } from "@/db/schema";
-import type { ConsumptionConfirmationStatus, OrderVehicleCategory } from "@/lib/orders/types";
+import type { ConsumptionConfirmationStatus, OrderVehicleCategory } from "@/lib/jumppark-orders/types";
 import type { ProcessStep } from "@/lib/recipes/types";
 import type { InventoryUnit } from "@/lib/inventory/types";
 

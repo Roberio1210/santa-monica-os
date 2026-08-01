@@ -2,8 +2,8 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { jumpparkServiceMappings, services } from "@/db/schema";
-import { slugifyServiceName } from "@/lib/orders/plate";
-import type { ServiceMapping } from "@/lib/orders/types";
+import { slugifyServiceName } from "@/lib/jumppark-orders/plate";
+import type { ServiceMapping } from "@/lib/jumppark-orders/types";
 
 /** Honesto: sem Postgres configurado, retorna vazio — nunca inventa mapeamentos. */
 export async function listServiceMappings(): Promise<ServiceMapping[]> {

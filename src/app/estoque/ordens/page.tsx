@@ -1,9 +1,9 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Badge } from "@/components/ui/badge";
 import { OrdersView, type OrderRow } from "@/components/inventory/orders-view";
-import { fetchEligibleOrders } from "@/lib/orders/eligible-orders";
-import { fetchOrderPreview } from "@/lib/orders/preview-service";
-import { classifyOrderStatus } from "@/lib/orders/status";
+import { fetchEligibleOrders } from "@/lib/jumppark-orders/eligible-orders";
+import { fetchOrderPreview } from "@/lib/jumppark-orders/preview-service";
+import { classifyOrderStatus } from "@/lib/jumppark-orders/status";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
 import { Unavailable } from "@/components/shared/unavailable";
 

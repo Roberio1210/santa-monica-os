@@ -4,17 +4,9 @@ import { maskPlate, maskPhone } from "@/lib/utils/mask";
 import { fetchServiceOrders } from "./service";
 import { JumpParkNotConfiguredError, JumpParkRequestError } from "./client";
 import { resolvePeriod } from "@/lib/utils/timezone";
+import { classifyPaymentMethod } from "@/lib/utils/paymentMethod";
 import type { PaymentMethod } from "@/types/common";
 import type { JumpParkServiceOrder } from "./types";
-
-function classifyPaymentMethod(name: string): PaymentMethod {
-  const normalized = name.toLowerCase();
-  if (normalized.includes("dinheiro") || normalized.includes("cash")) return "dinheiro";
-  if (normalized.includes("debito") || normalized.includes("débito")) return "debito";
-  if (normalized.includes("credito") || normalized.includes("crédito")) return "credito";
-  if (normalized.includes("pix")) return "pix";
-  return "outro";
-}
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   dinheiro: "Dinheiro",

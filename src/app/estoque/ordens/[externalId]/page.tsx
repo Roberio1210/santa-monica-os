@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { OrderDetailView } from "@/components/inventory/order-detail-view";
-import { fetchOrderDetail } from "@/lib/orders/order-detail";
+import { fetchOrderDetail } from "@/lib/jumppark-orders/order-detail";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
 
 export const dynamic = "force-dynamic";

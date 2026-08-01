@@ -1,10 +1,10 @@
 import "server-only";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
-import { listServiceMappings } from "@/lib/orders/service-mapping";
-import { getVehicleCategory } from "@/lib/orders/vehicle-category";
-import { computeConsumptionPreview, type ConsumptionPreview, type PreviewItem, type PreviewServiceMapping } from "@/lib/orders/preview";
-import type { EligibleOrder } from "@/lib/orders/types";
+import { listServiceMappings } from "@/lib/jumppark-orders/service-mapping";
+import { getVehicleCategory } from "@/lib/jumppark-orders/vehicle-category";
+import { computeConsumptionPreview, type ConsumptionPreview, type PreviewItem, type PreviewServiceMapping } from "@/lib/jumppark-orders/preview";
+import type { EligibleOrder } from "@/lib/jumppark-orders/types";
 import type { Recipe } from "@/lib/recipes/types";
 
 /** Reúne mapeamentos, receitas e saldos reais e delega o julgamento a computeConsumptionPreview (pura). */

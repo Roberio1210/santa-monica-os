@@ -5,7 +5,7 @@
  */
 import type { InventoryUnit } from "@/lib/inventory/types";
 import type { ProcessStep, Recipe } from "@/lib/recipes/types";
-import type { JumpparkServiceMappingStatus, OrderVehicleCategory } from "@/lib/orders/types";
+import type { JumpparkServiceMappingStatus, OrderVehicleCategory } from "@/lib/jumppark-orders/types";
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;

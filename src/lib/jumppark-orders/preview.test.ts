@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeConsumptionPreview, type PreviewInput, type PreviewItem, type PreviewServiceMapping } from "@/lib/orders/preview";
+import { computeConsumptionPreview, type PreviewInput, type PreviewItem, type PreviewServiceMapping } from "@/lib/jumppark-orders/preview";
 import type { Recipe } from "@/lib/recipes/types";
 
 function recipe(overrides: Partial<Recipe> = {}): Recipe {

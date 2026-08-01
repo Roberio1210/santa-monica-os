@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
-import { orderConsumptionStatusLabels, type OrderConsumptionStatus } from "@/lib/orders/status";
-import type { EligibleOrder } from "@/lib/orders/types";
+import { orderConsumptionStatusLabels, type OrderConsumptionStatus } from "@/lib/jumppark-orders/status";
+import type { EligibleOrder } from "@/lib/jumppark-orders/types";
 
 const statusVariant: Record<OrderConsumptionStatus, "outline" | "warning" | "positive" | "critical"> = {
   bloqueado: "critical",

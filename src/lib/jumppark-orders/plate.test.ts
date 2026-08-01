@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePlate, slugifyServiceName } from "@/lib/orders/plate";
+import { normalizePlate, slugifyServiceName } from "@/lib/jumppark-orders/plate";
 
 describe("normalizePlate", () => {
   it("maiúscula e sem espaços", () => {

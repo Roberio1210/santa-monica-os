@@ -1,14 +1,14 @@
 import "server-only";
-import { fetchEligibleOrders } from "@/lib/orders/eligible-orders";
-import { fetchOrderPreview } from "@/lib/orders/preview-service";
-import { fetchConsumptionConfirmationsForOrder } from "@/lib/orders/consumption-history";
-import { listServiceMappings } from "@/lib/orders/service-mapping";
+import { fetchEligibleOrders } from "@/lib/jumppark-orders/eligible-orders";
+import { fetchOrderPreview } from "@/lib/jumppark-orders/preview-service";
+import { fetchConsumptionConfirmationsForOrder } from "@/lib/jumppark-orders/consumption-history";
+import { listServiceMappings } from "@/lib/jumppark-orders/service-mapping";
 import { listServices, type ServiceCatalogEntry } from "@/lib/inventory/services-catalog";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { toItemView } from "@/lib/inventory/status";
-import type { EligibleOrder, OrderVehicleCategory, ServiceMapping } from "@/lib/orders/types";
-import type { ConsumptionPreview } from "@/lib/orders/preview";
-import type { ConsumptionConfirmationView } from "@/lib/orders/consumption-history";
+import type { EligibleOrder, OrderVehicleCategory, ServiceMapping } from "@/lib/jumppark-orders/types";
+import type { ConsumptionPreview } from "@/lib/jumppark-orders/preview";
+import type { ConsumptionConfirmationView } from "@/lib/jumppark-orders/consumption-history";
 import type { InventoryItemView } from "@/lib/inventory/types";
 
 export interface OrderDetail {

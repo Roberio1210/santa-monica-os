@@ -15,7 +15,7 @@ import {
 } from "@/lib/finance/service";
 import { fetchInventoryOverview, type InventorySummary } from "@/lib/inventory/service";
 import { fetchDataQualitySummary, type DataQualitySummary } from "@/lib/inventory/data-quality";
-import { fetchOrdersConsumptionIndicators, type OrdersConsumptionIndicators } from "@/lib/orders/central-indicators";
+import { fetchOrdersConsumptionIndicators, type OrdersConsumptionIndicators } from "@/lib/jumppark-orders/central-indicators";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowAlert, CashFlowProjectionPoint, FinancialAccountBalance } from "@/lib/finance/types";
 
 /**

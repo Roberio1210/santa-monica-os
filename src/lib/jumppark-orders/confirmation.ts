@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { inventoryConsumptionConfirmations, inventoryConsumptionLines, inventoryItems, inventoryMovements } from "@/db/schema";
 import { applyMovementDelta } from "@/lib/inventory/movement-math";
 import type { ProcessStep } from "@/lib/recipes/types";
-import type { ConsumptionConfirmationStatus, OrderVehicleCategory } from "@/lib/orders/types";
+import type { ConsumptionConfirmationStatus, OrderVehicleCategory } from "@/lib/jumppark-orders/types";
 
 /**
  * Drizzle envolve o erro real do Postgres em DrizzleQueryError — o código do erro (23505 =

@@ -1,5 +1,5 @@
-import type { ConsumptionPreview } from "@/lib/orders/preview";
-import type { ConsumptionConfirmationStatus } from "@/lib/orders/types";
+import type { ConsumptionPreview } from "@/lib/jumppark-orders/preview";
+import type { ConsumptionConfirmationStatus } from "@/lib/jumppark-orders/types";
 
 export type OrderConsumptionStatus = "bloqueado" | "previa_disponivel" | "aguardando_confirmacao" | "confirmado" | "parcialmente_confirmado" | "estornado";
 

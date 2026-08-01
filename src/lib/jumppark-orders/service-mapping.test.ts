@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listServiceMappings, registerSeenServiceNames } from "@/lib/orders/service-mapping";
+import { listServiceMappings, registerSeenServiceNames } from "@/lib/jumppark-orders/service-mapping";
 
 describe("service-mapping — honesto sem Postgres configurado", () => {
   it("listServiceMappings retorna vazio, nunca inventado", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getVehicleCategory, listVehicleCategoryAssignments, setVehicleCategory } from "@/lib/orders/vehicle-category";
+import { getVehicleCategory, listVehicleCategoryAssignments, setVehicleCategory } from "@/lib/jumppark-orders/vehicle-category";
 
 describe("getVehicleCategory — nunca inventa categoria pelo texto do modelo", () => {
   it("retorna 'desconhecido' sem placa", async () => {

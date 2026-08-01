@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { confirmOrderConsumption, reverseOrderConsumption, type ConfirmConsumptionLineInput, type RemovedItemLog } from "@/lib/orders/confirmation";
-import { confirmServiceMapping } from "@/lib/orders/service-mapping";
-import { setVehicleCategory } from "@/lib/orders/vehicle-category";
+import { confirmOrderConsumption, reverseOrderConsumption, type ConfirmConsumptionLineInput, type RemovedItemLog } from "@/lib/jumppark-orders/confirmation";
+import { confirmServiceMapping } from "@/lib/jumppark-orders/service-mapping";
+import { setVehicleCategory } from "@/lib/jumppark-orders/vehicle-category";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
-import type { OrderVehicleCategory } from "@/lib/orders/types";
+import type { OrderVehicleCategory } from "@/lib/jumppark-orders/types";
 
 export interface FormActionState {
   error: string | null;

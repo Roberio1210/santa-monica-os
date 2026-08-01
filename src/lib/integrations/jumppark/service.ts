@@ -9,15 +9,7 @@ import type { PaymentBreakdown } from "@/types/finance";
 import type { PaymentMethod } from "@/types/common";
 import { maskPlate, maskPhone } from "@/lib/utils/mask";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
-
-function classifyPaymentMethod(name: string): PaymentMethod {
-  const normalized = name.toLowerCase();
-  if (normalized.includes("dinheiro") || normalized.includes("cash")) return "dinheiro";
-  if (normalized.includes("debito") || normalized.includes("débito")) return "debito";
-  if (normalized.includes("credito") || normalized.includes("crédito")) return "credito";
-  if (normalized.includes("pix")) return "pix";
-  return "outro";
-}
+import { classifyPaymentMethod } from "@/lib/utils/paymentMethod";
 
 export interface JumpParkDailyFinancial {
   date: string;

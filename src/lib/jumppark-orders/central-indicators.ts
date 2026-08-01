@@ -1,7 +1,7 @@
 import "server-only";
-import { fetchEligibleOrders } from "@/lib/orders/eligible-orders";
-import { fetchOrderPreview } from "@/lib/orders/preview-service";
-import { listConsumptionConfirmations } from "@/lib/orders/consumption-history";
+import { fetchEligibleOrders } from "@/lib/jumppark-orders/eligible-orders";
+import { fetchOrderPreview } from "@/lib/jumppark-orders/preview-service";
+import { listConsumptionConfirmations } from "@/lib/jumppark-orders/consumption-history";
 import { isJumpParkConfigured } from "@/lib/config/env";
 
 export interface OrdersConsumptionIndicators {
