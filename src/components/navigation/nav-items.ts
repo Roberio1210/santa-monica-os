@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Wrench,
   Gauge,
   Droplets,
   ParkingSquare,
@@ -42,6 +43,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Central de Operações", icon: LayoutDashboard },
+  { href: "/atendimento", label: "Atendimento", icon: Wrench },
   { href: "/painel-gerencial", label: "Painel Gerencial", icon: Gauge },
   { href: "/movimentacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
