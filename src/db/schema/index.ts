@@ -10,3 +10,4 @@ export * from "./goals";
 export * from "./organizationalMemory";
 export * from "./stone";
 export * from "./attendance";
+export * from "./managerAssistant";
