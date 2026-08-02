@@ -1,10 +1,12 @@
 import type {
+  AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
   CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
+  DiagnosticPhoto,
   ManagerBoardOrder,
   SaveDiagnosticInput,
   ServiceOrder,
@@ -33,6 +35,8 @@ export interface AttendanceRepository {
   findCustomerByCpf(cpf: string): Promise<Customer | null>;
   getCustomer(id: string): Promise<Customer | null>;
   createCustomer(input: CreateCustomerInput): Promise<Customer>;
+  /** Busca livre por nome do cliente OU marca/modelo de veículo — usada quando a query não é telefone nem placa. Limitada a poucos resultados. */
+  searchCustomersByText(query: string): Promise<Customer[]>;
 
   findVehicleByPlate(plate: string): Promise<Vehicle | null>;
   getVehicle(id: string): Promise<Vehicle | null>;
@@ -52,6 +56,10 @@ export interface AttendanceRepository {
   listRecommendationsByVisit(serviceVisitId: string): Promise<TechnicalRecommendation[]>;
   listRecommendationsByCustomer(customerId: string): Promise<TechnicalRecommendation[]>;
 
+  /** `url` sempre `null` — só registra que a foto foi capturada e em qual etapa (estrutura preparada, sem upload real). */
+  addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto>;
+  listPhotosByDiagnostic(diagnosticId: string): Promise<DiagnosticPhoto[]>;
+
   createServiceOrder(input: CreateServiceOrderInput): Promise<ServiceOrder>;
   getServiceOrder(id: string): Promise<ServiceOrder | null>;
   getServiceOrderByVisit(serviceVisitId: string): Promise<ServiceOrder | null>;
@@ -62,6 +70,8 @@ export interface AttendanceRepository {
   listBoardOrders(): Promise<ManagerBoardOrder[]>;
   /** Ordens com status `entregue` cujo `updatedAt` cai no dia informado (YYYY-MM-DD, America/Sao_Paulo). */
   listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]>;
+  /** Ordens cuja visita (`service_visits.created_at`) cai no dia informado — usado no faturamento do dia da Home. */
+  listServiceOrdersVisitedOnDate(dateIso: string): Promise<ServiceOrder[]>;
 
   listServiceCatalog(): Promise<ServiceCatalogEntry[]>;
 }

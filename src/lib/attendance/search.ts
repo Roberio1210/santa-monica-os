@@ -12,9 +12,13 @@ export function looksLikePhone(query: string): boolean {
 /** Placas reais têm pelo menos 7 caracteres (Mercosul ou formato antigo) — evita buscar a cada letra digitada. */
 const MIN_PLATE_LENGTH = 7;
 
+/** Toda placa real brasileira mistura letra e número (ABC1234 ou ABC1D23) — só letras é nome/modelo, nunca placa. */
 export function looksLikePlate(query: string): boolean {
   const normalized = normalizePlate(query);
-  return normalized !== null && normalized.length >= MIN_PLATE_LENGTH && /[a-zA-Z]/.test(query);
+  return normalized !== null && normalized.length >= MIN_PLATE_LENGTH && /[a-zA-Z]/.test(query) && /\d/.test(query);
 }
 
 export { normalizePhone, normalizePlate };
+
+/** Teto de resultados para busca livre por nome/veículo — mantém a Home rápida mesmo com base grande. */
+export const SEARCH_RESULT_LIMIT = 8;

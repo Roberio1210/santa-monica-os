@@ -1,13 +1,12 @@
-import { PageHeader } from "@/components/shared/page-header";
-import { NewAttendanceFlow } from "@/components/attendance/new-attendance-flow";
+import { NewAttendanceWizard } from "@/components/attendance/mobile/wizard/new-attendance-wizard";
+import { fetchCustomerSearchResult, fetchServiceCatalog } from "@/lib/attendance/service";
 
 export const dynamic = "force-dynamic";
 
-export default function NovoAtendimentoPage() {
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Novo Atendimento" description="Busque o cliente pelo telefone ou placa — se não existir, cadastre em segundos." />
-      <NewAttendanceFlow />
-    </div>
-  );
+export default async function NovoAtendimentoPage({ searchParams }: { searchParams: Promise<{ customerId?: string }> }) {
+  const { customerId } = await searchParams;
+
+  const [serviceCatalog, initialCustomer] = await Promise.all([fetchServiceCatalog(), customerId ? fetchCustomerSearchResult(customerId) : Promise.resolve(null)]);
+
+  return <NewAttendanceWizard initialCustomer={initialCustomer} serviceCatalog={serviceCatalog} />;
 }

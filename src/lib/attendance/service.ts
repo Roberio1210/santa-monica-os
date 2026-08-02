@@ -2,10 +2,31 @@ import "server-only";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
 import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
 import { summarizeCustomerHistory } from "@/lib/attendance/history";
+import { summarizeHome } from "@/lib/attendance/home";
 import { looksLikePhone, looksLikePlate } from "@/lib/attendance/search";
-import { SERVICE_ORDER_STATUSES, type Customer, type CustomerHistorySummary, type Diagnostic, type ExteriorAssessment, type InteriorAssessment, type ManagerBoardColumn, type ManagerBoardOrder, type ServiceOrder, type ServiceOrderStatus, type ServiceVisit, type TechnicalRecommendation, type Vehicle, SERVICE_ORDER_STATUS_LABELS } from "@/lib/attendance/types";
+import {
+  SERVICE_ORDER_STATUSES,
+  SERVICE_ORDER_STATUS_LABELS,
+  type Customer,
+  type CustomerHistorySummary,
+  type Diagnostic,
+  type DiagnosticPhoto,
+  type ExteriorAssessment,
+  type HomeSummary,
+  type InteriorAssessment,
+  type ManagerBoardColumn,
+  type ManagerBoardOrder,
+  type OrderDetail,
+  type PhotoStage,
+  type ServiceOrder,
+  type ServiceOrderStatus,
+  type ServiceVisit,
+  type TechnicalRecommendation,
+  type Vehicle,
+} from "@/lib/attendance/types";
 import { nextStatus } from "@/lib/attendance/status";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
+import { fetchActiveGoal } from "@/lib/goals/service";
 
 /**
  * Orquestração do Atendimento Inteligente — único ponto de I/O do módulo. Toda lógica pura
@@ -62,6 +83,27 @@ export async function searchByPhoneOrPlate(query: string): Promise<SearchResult 
   }
 
   return null;
+}
+
+/** Carrega o contexto completo de um cliente já identificado (ex.: veio da tela Buscar) — mesmo formato de `searchByPhoneOrPlate`, sem precisar buscar de novo. */
+export async function fetchCustomerSearchResult(customerId: string): Promise<SearchResult | null> {
+  const repo = getAttendanceRepository();
+  const customer = await repo.getCustomer(customerId);
+  if (!customer) return null;
+  const history = await buildHistory(customer);
+  return { customer, vehicles: history.vehicles, matchedVehicleId: null, history };
+}
+
+/** Busca livre por nome/veículo — usada quando a query não é telefone nem placa. Retorna vários resultados, nunca um só "adivinhado". */
+export async function searchCustomersByText(query: string): Promise<SearchResult[]> {
+  const repo = getAttendanceRepository();
+  const matches = await repo.searchCustomersByText(query);
+  return Promise.all(
+    matches.map(async (customer) => {
+      const history = await buildHistory(customer);
+      return { customer, vehicles: history.vehicles, matchedVehicleId: null, history };
+    }),
+  );
 }
 
 export interface QuickRegisterInput {
@@ -130,6 +172,15 @@ export async function saveDiagnosticStep(serviceVisitId: string, exterior: Exter
   return getAttendanceRepository().saveDiagnostic({ serviceVisitId, exterior, interior, observations });
 }
 
+/** `caption` é sempre `null`/livre — nunca inventa legenda. `url` sempre `null` (sem upload real nesta sprint). */
+export async function addDiagnosticPhoto(diagnosticId: string, stage: PhotoStage, caption: string | null = null): Promise<DiagnosticPhoto> {
+  return getAttendanceRepository().addPhoto({ diagnosticId, stage, caption });
+}
+
+export async function listDiagnosticPhotos(diagnosticId: string): Promise<DiagnosticPhoto[]> {
+  return getAttendanceRepository().listPhotosByDiagnostic(diagnosticId);
+}
+
 export async function addTechnicalRecommendation(serviceVisitId: string, category: string, observations: string | null): Promise<TechnicalRecommendation> {
   return getAttendanceRepository().addRecommendation({ serviceVisitId, category, observations });
 }
@@ -176,4 +227,35 @@ export async function fetchManagerBoard(): Promise<ManagerBoard> {
   }));
 
   return { columns, deliveredToday };
+}
+
+/** Tudo que a tela "Detalhe do Veículo" precisa, numa única chamada — fotos já anexadas ao diagnóstico. */
+export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | null> {
+  const repo = getAttendanceRepository();
+  const order = await repo.getServiceOrder(orderId);
+  if (!order) return null;
+
+  const context = await fetchServiceVisitContext(order.serviceVisitId);
+  if (!context) return null;
+
+  const diagnostic = context.diagnostic ? { ...context.diagnostic, photos: await repo.listPhotosByDiagnostic(context.diagnostic.id) } : null;
+
+  return { order, visit: context.visit, customer: context.customer, vehicle: context.vehicle, diagnostic, recommendations: context.recommendations };
+}
+
+/** Home — só contagens e valores reais, nunca uma meta diária inventada (ver home.ts). */
+export async function fetchHomeSummary(): Promise<HomeSummary> {
+  const repo = getAttendanceRepository();
+  const today = saoPauloDateISO();
+
+  const [board, todaysOrders, catalog, activeGoal] = await Promise.all([
+    fetchManagerBoard(),
+    repo.listServiceOrdersVisitedOnDate(today),
+    repo.listServiceCatalog(),
+    fetchActiveGoal("consolidado", today),
+  ]);
+
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+
+  return summarizeHome({ boardColumns: board.columns, todaysOrders, servicePriceById, activeGoal });
 }

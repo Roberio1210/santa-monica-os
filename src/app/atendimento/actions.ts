@@ -1,35 +1,51 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import {
+  addDiagnosticPhoto,
   addTechnicalRecommendation,
   advanceServiceOrderStatus,
   createServiceOrderFromApprovedServices,
+  fetchCustomerSearchResult,
   registerQuickCustomerAndVehicle,
   saveDiagnosticStep,
   searchByPhoneOrPlate,
-  setServiceOrderStatus,
+  searchCustomersByText,
   startAttendance,
   type QuickRegisterInput,
   type SearchResult,
 } from "@/lib/attendance/service";
-import type { ExteriorAssessment, InteriorAssessment, ServiceOrderStatus } from "@/lib/attendance/types";
+import type { DiagnosticPhoto, ExteriorAssessment, InteriorAssessment, PhotoStage, ServiceOrderStatus } from "@/lib/attendance/types";
 
 export async function searchAttendanceAction(query: string): Promise<SearchResult | null> {
   return searchByPhoneOrPlate(query);
 }
 
-/** Cadastro rápido + início do atendimento em uma única ação — poucos cliques, como pede a UX. */
-export async function quickStartAttendanceAction(input: QuickRegisterInput, mileageAtVisit: number | null): Promise<void> {
-  const { customer, vehicle } = await registerQuickCustomerAndVehicle(input);
-  const visit = await startAttendance(customer.id, vehicle.id, mileageAtVisit);
-  redirect(`/atendimento/${visit.id}`);
+/** Busca livre por nome/veículo — só entra em ação quando a query não parece telefone nem placa. */
+export async function searchAttendanceByTextAction(query: string): Promise<SearchResult[]> {
+  return searchCustomersByText(query);
 }
 
-export async function startAttendanceForExistingAction(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<void> {
+export async function fetchCustomerByIdAction(customerId: string): Promise<SearchResult | null> {
+  return fetchCustomerSearchResult(customerId);
+}
+
+/** Inicia o atendimento para um cliente/veículo já cadastrados — usado na Etapa 2 do wizard quando o gerente seleciona um veículo existente. */
+export async function startVisitAction(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<{ visitId: string }> {
   const visit = await startAttendance(customerId, vehicleId, mileageAtVisit);
-  redirect(`/atendimento/${visit.id}`);
+  return { visitId: visit.id };
+}
+
+/** Cadastra cliente/veículo (reaproveitando por telefone/placa quando já existem) e já inicia o atendimento — usado na Etapa 2 do wizard para cliente novo ou veículo novo de cliente existente. */
+export async function registerVehicleAndStartVisitAction(input: QuickRegisterInput, mileageAtVisit: number | null): Promise<{ visitId: string }> {
+  const { customer, vehicle } = await registerQuickCustomerAndVehicle(input);
+  const visit = await startAttendance(customer.id, vehicle.id, mileageAtVisit);
+  return { visitId: visit.id };
+}
+
+/** `caption` sempre `null` — registra só o estágio da foto (estrutura preparada, sem upload real). */
+export async function addPhotoAction(diagnosticId: string, stage: PhotoStage): Promise<DiagnosticPhoto> {
+  return addDiagnosticPhoto(diagnosticId, stage, null);
 }
 
 export interface DiagnosticFormState {
@@ -37,14 +53,19 @@ export interface DiagnosticFormState {
   success: string | null;
 }
 
-export async function saveDiagnosticAction(serviceVisitId: string, exterior: ExteriorAssessment, interior: InteriorAssessment, observations: string | null): Promise<DiagnosticFormState> {
+/** Devolve o `diagnosticId` — a Etapa 4 (Fotos) do wizard precisa dele para anexar fotos ao diagnóstico certo. */
+export async function saveWizardDiagnosticAction(
+  serviceVisitId: string,
+  exterior: ExteriorAssessment,
+  interior: InteriorAssessment,
+  observations: string | null,
+): Promise<{ diagnosticId: string | null; error: string | null }> {
   try {
-    await saveDiagnosticStep(serviceVisitId, exterior, interior, observations);
+    const diagnostic = await saveDiagnosticStep(serviceVisitId, exterior, interior, observations);
+    return { diagnosticId: diagnostic.id, error: null };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Falha ao salvar o diagnóstico.", success: null };
+    return { diagnosticId: null, error: err instanceof Error ? err.message : "Falha ao salvar o diagnóstico." };
   }
-  revalidatePath(`/atendimento/${serviceVisitId}`);
-  return { error: null, success: "Diagnóstico salvo." };
 }
 
 export async function addRecommendationAction(serviceVisitId: string, category: string, observations: string | null): Promise<DiagnosticFormState> {
@@ -70,10 +91,5 @@ export async function createServiceOrderAction(serviceVisitId: string, serviceId
 
 export async function advanceServiceOrderStatusAction(serviceOrderId: string, currentStatus: ServiceOrderStatus): Promise<void> {
   await advanceServiceOrderStatus(serviceOrderId, currentStatus);
-  revalidatePath("/atendimento");
-}
-
-export async function setServiceOrderStatusAction(serviceOrderId: string, status: ServiceOrderStatus): Promise<void> {
-  await setServiceOrderStatus(serviceOrderId, status);
   revalidatePath("/atendimento");
 }

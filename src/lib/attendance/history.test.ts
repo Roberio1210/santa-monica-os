@@ -118,4 +118,26 @@ describe("summarizeCustomerHistory", () => {
     const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [], diagnostics: [], recommendations: [], orders: [], servicePriceById: {} });
     expect(summary.activeProtections).toEqual([]);
   });
+
+  it("último valor é só da ordem mais recente, não a soma histórica", () => {
+    const summary = summarizeCustomerHistory({
+      customer,
+      vehicles: [vehicle],
+      visits: [visit("visit-1", "2026-01-01T10:00:00Z"), visit("visit-2", "2026-06-01T10:00:00Z")],
+      diagnostics: [],
+      recommendations: [],
+      orders: [
+        order("visit-1", "2026-01-01T11:00:00Z", [{ serviceId: "s1", serviceName: "Lavação" }]),
+        order("visit-2", "2026-06-01T11:00:00Z", [{ serviceId: "s2", serviceName: "Vitrificação" }, { serviceId: "s3", serviceName: "Cera" }]),
+      ],
+      servicePriceById: { s1: 80, s2: 500, s3: 50 },
+    });
+    expect(summary.lastOrderValue).toBe(550);
+    expect(summary.totalSpent).toBe(630);
+  });
+
+  it("último valor é null quando não há nenhuma ordem, nunca 0 inventado", () => {
+    const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [], diagnostics: [], recommendations: [], orders: [], servicePriceById: {} });
+    expect(summary.lastOrderValue).toBeNull();
+  });
 });

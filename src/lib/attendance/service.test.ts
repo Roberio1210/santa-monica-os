@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDiagnosticPhoto,
   addTechnicalRecommendation,
   advanceServiceOrderStatus,
   createServiceOrderFromApprovedServices,
+  fetchHomeSummary,
   fetchManagerBoard,
+  fetchOrderDetail,
   fetchServiceCatalog,
   fetchServiceVisitContext,
+  listDiagnosticPhotos,
   registerQuickCustomerAndVehicle,
   saveDiagnosticStep,
   searchByPhoneOrPlate,
+  searchCustomersByText,
   setServiceOrderStatus,
   startAttendance,
 } from "@/lib/attendance/service";
@@ -66,6 +71,31 @@ describe("searchByPhoneOrPlate", () => {
   it("busca sem correspondência retorna null, nunca inventa um cliente", async () => {
     const result = await searchByPhoneOrPlate("48900000000");
     expect(result).toBeNull();
+  });
+});
+
+describe("searchCustomersByText", () => {
+  it("encontra cliente pelo nome, mesmo com correspondência parcial", async () => {
+    const { customer } = await registerQuickCustomerAndVehicle({ customerName: "Fernanda Oliveira", customerPhone: "48999990020", vehiclePlate: "GGG7H77" });
+    const results = await searchCustomersByText("fernanda");
+    expect(results.map((r) => r.customer.id)).toContain(customer.id);
+  });
+
+  it("encontra cliente pela marca/modelo do veículo, mesmo sem o nome bater", async () => {
+    const { customer } = await registerQuickCustomerAndVehicle({
+      customerName: "Marcos Souza",
+      customerPhone: "48999990021",
+      vehiclePlate: "HHH8I88",
+      vehicleBrand: "Porsche",
+      vehicleModel: "Cayenne",
+    });
+    const results = await searchCustomersByText("cayenne");
+    expect(results.map((r) => r.customer.id)).toContain(customer.id);
+  });
+
+  it("busca sem correspondência retorna lista vazia, nunca inventa cliente", async () => {
+    const results = await searchCustomersByText("nome-que-nao-existe-em-lugar-nenhum");
+    expect(results).toEqual([]);
   });
 });
 
@@ -140,5 +170,55 @@ describe("fetchManagerBoard", () => {
     expect(board.columns.map((c) => c.status)).toEqual(["aguardando_execucao", "em_execucao", "aguardando_conferencia", "pronto_entrega"]);
     const aguardando = board.columns.find((c) => c.status === "aguardando_execucao");
     expect(aguardando?.orders.some((o) => o.customerName === "Painel")).toBe(true);
+  });
+});
+
+describe("fotos do diagnóstico", () => {
+  it("registra a etapa da foto, mas nunca uma url (sem upload real)", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Fotos", customerPhone: "48999990050", vehiclePlate: "LLL2M22" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), null);
+
+    const photo = await addDiagnosticPhoto(diagnostic.id, "antes");
+    expect(photo.stage).toBe("antes");
+    expect(photo.url).toBeNull();
+
+    const photos = await listDiagnosticPhotos(diagnostic.id);
+    expect(photos).toHaveLength(1);
+  });
+});
+
+describe("fetchOrderDetail", () => {
+  it("consolida ordem, visita, cliente, veículo, diagnóstico (com fotos) e recomendações", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Detalhe", customerPhone: "48999990060", vehiclePlate: "MMM3N33" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), "Observação real");
+    await addDiagnosticPhoto(diagnostic.id, "durante");
+    await addTechnicalRecommendation(visit.id, "polimento", null);
+    const catalog = await fetchServiceCatalog();
+    const order = await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
+
+    const detail = await fetchOrderDetail(order.id);
+    expect(detail?.customer.name).toBe("Detalhe");
+    expect(detail?.vehicle.plate).toBe("MMM3N33");
+    expect(detail?.diagnostic?.photos).toHaveLength(1);
+    expect(detail?.recommendations).toHaveLength(1);
+  });
+
+  it("retorna null para uma ordem inexistente, nunca inventa detalhe", async () => {
+    expect(await fetchOrderDetail("ordem-que-nao-existe")).toBeNull();
+  });
+});
+
+describe("fetchHomeSummary", () => {
+  it("reflete no faturamento do dia uma ordem criada agora", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Home", customerPhone: "48999990070", vehiclePlate: "NNN4O44" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const catalog = await fetchServiceCatalog();
+    await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
+
+    const summary = await fetchHomeSummary();
+    expect(summary.dailyRevenue).toBeGreaterThanOrEqual(catalog[0].defaultPrice ?? 0);
+    expect(summary.countsToday.aguardandoExecucao).toBeGreaterThanOrEqual(1);
   });
 });

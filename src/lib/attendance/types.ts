@@ -134,6 +134,12 @@ export interface DiagnosticPhoto {
   caption: string | null;
 }
 
+export interface AddPhotoInput {
+  diagnosticId: string;
+  stage: PhotoStage;
+  caption?: string | null;
+}
+
 export interface Diagnostic {
   id: string;
   serviceVisitId: string;
@@ -217,6 +223,8 @@ export interface CustomerHistorySummary {
   vehicles: Vehicle[];
   lastVisitAt: string | null;
   lastServices: string[];
+  /** Valor só da última Ordem de Serviço — nunca confundir com `totalSpent` (soma histórica). */
+  lastOrderValue: number | null;
   totalSpent: number;
   observations: string[];
   pendingRecommendations: TechnicalRecommendation[];
@@ -243,4 +251,36 @@ export interface ManagerBoardOrder {
   vehicleModel: string | null;
   vehiclePlate: string | null;
   updatedAt: string;
+  /** `service_visits.created_at` — quando o carro entrou, base real para "tempo desde entrada" (nunca `updatedAt`, que é só a última mudança de status). */
+  visitCreatedAt: string;
+}
+
+/** Detalhe consolidado de um veículo/atendimento — tudo que a tela "Detalhe do Veículo" precisa, numa só busca. */
+export interface OrderDetail {
+  order: ServiceOrder;
+  visit: ServiceVisit;
+  customer: Customer;
+  vehicle: Vehicle;
+  diagnostic: Diagnostic | null;
+  recommendations: TechnicalRecommendation[];
+}
+
+/**
+ * Meta do dia é sempre derivada de uma meta mensal real (`goals`), dividida pelos dias do
+ * período — nunca uma meta diária inventada. `null` quando não há meta ativa configurada.
+ */
+export interface HomeGoalEstimate {
+  label: string;
+  dailyTargetEstimate: number;
+}
+
+export interface HomeSummary {
+  countsToday: {
+    aguardandoExecucao: number;
+    emExecucao: number;
+    aguardandoConferencia: number;
+    prontoEntrega: number;
+  };
+  dailyRevenue: number;
+  goal: HomeGoalEstimate | null;
 }

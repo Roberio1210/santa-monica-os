@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
 import type { AttendanceRepository } from "@/lib/attendance/repository";
 import type {
+  AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
   CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
+  DiagnosticPhoto,
   ManagerBoardOrder,
   SaveDiagnosticInput,
   ServiceOrder,
@@ -17,6 +19,8 @@ import type {
   Vehicle,
 } from "@/lib/attendance/types";
 import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
+import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 /** Catálogo mínimo para desenvolvimento sem banco (`DATABASE_URL` ausente) — nunca usado em produção. */
 const DEV_SERVICE_CATALOG: ServiceCatalogEntry[] = [
@@ -38,6 +42,7 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
   private diagnostics = new Map<string, Diagnostic>(); // key: serviceVisitId
   private recommendations = new Map<string, TechnicalRecommendation>();
   private orders = new Map<string, ServiceOrder>();
+  private photos = new Map<string, DiagnosticPhoto & { diagnosticId: string }>();
 
   async findCustomerByPhone(phone: string): Promise<Customer | null> {
     const normalized = normalizePhone(phone);
@@ -73,6 +78,23 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     };
     this.customers.set(customer.id, customer);
     return customer;
+  }
+
+  async searchCustomersByText(query: string): Promise<Customer[]> {
+    const needle = query.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const matchedByName = new Set<string>();
+    for (const c of this.customers.values()) {
+      if (c.name?.toLowerCase().includes(needle)) matchedByName.add(c.id);
+    }
+    for (const v of this.vehicles.values()) {
+      const matches = v.brand?.toLowerCase().includes(needle) || v.model?.toLowerCase().includes(needle);
+      if (matches) matchedByName.add(v.customerId);
+    }
+    return Array.from(matchedByName)
+      .map((id) => this.customers.get(id))
+      .filter((c): c is Customer => !!c)
+      .slice(0, SEARCH_RESULT_LIMIT);
   }
 
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
@@ -168,6 +190,22 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.recommendations.values()).filter((r) => visitIds.has(r.serviceVisitId));
   }
 
+  async addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto> {
+    const photo: DiagnosticPhoto & { diagnosticId: string } = {
+      id: randomUUID(),
+      diagnosticId: input.diagnosticId,
+      stage: input.stage,
+      url: null,
+      caption: input.caption ?? null,
+    };
+    this.photos.set(photo.id, photo);
+    return photo;
+  }
+
+  async listPhotosByDiagnostic(diagnosticId: string): Promise<DiagnosticPhoto[]> {
+    return Array.from(this.photos.values()).filter((p) => p.diagnosticId === diagnosticId);
+  }
+
   async createServiceOrder(input: CreateServiceOrderInput): Promise<ServiceOrder> {
     const catalog = await this.listServiceCatalog();
     const catalogById = new Map(catalog.map((s) => [s.id, s]));
@@ -222,6 +260,7 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       vehicleModel: vehicle?.model ?? null,
       vehiclePlate: vehicle?.plate ?? null,
       updatedAt: order.updatedAt,
+      visitCreatedAt: visit?.createdAt ?? order.createdAt,
     };
   }
 
@@ -231,8 +270,13 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
   }
 
   async listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]> {
-    const delivered = Array.from(this.orders.values()).filter((o) => o.status === "entregue" && o.updatedAt.slice(0, 10) === dateIso);
+    const delivered = Array.from(this.orders.values()).filter((o) => o.status === "entregue" && saoPauloDateISO(new Date(o.updatedAt)) === dateIso);
     return Promise.all(delivered.map((o) => this.boardEntry(o)));
+  }
+
+  async listServiceOrdersVisitedOnDate(dateIso: string): Promise<ServiceOrder[]> {
+    const visitIdsToday = new Set(Array.from(this.visits.values()).filter((v) => saoPauloDateISO(new Date(v.createdAt)) === dateIso).map((v) => v.id));
+    return Array.from(this.orders.values()).filter((o) => visitIdsToday.has(o.serviceVisitId));
   }
 
   async listServiceCatalog(): Promise<ServiceCatalogEntry[]> {

@@ -1,15 +1,17 @@
 import "server-only";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { customers, diagnostics, serviceOrderItems, serviceOrders, serviceVisits, services, technicalRecommendations, vehicles } from "@/db/schema";
+import { customers, diagnosticPhotos, diagnostics, serviceOrderItems, serviceOrders, serviceVisits, services, technicalRecommendations, vehicles } from "@/db/schema";
 import type { AttendanceRepository, ServiceCatalogEntry } from "@/lib/attendance/repository";
 import type {
+  AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
   CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
+  DiagnosticPhoto,
   ExteriorAssessment,
   InteriorAssessment,
   ManagerBoardOrder,
@@ -22,6 +24,8 @@ import type {
   Vehicle,
 } from "@/lib/attendance/types";
 import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
+import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 function toCustomer(row: typeof customers.$inferSelect): Customer {
   return {
@@ -72,6 +76,10 @@ function toRecommendation(row: typeof technicalRecommendations.$inferSelect): Te
   return { id: row.id, serviceVisitId: row.serviceVisitId, category: row.category, observations: row.observations, createdAt: row.createdAt.toISOString() };
 }
 
+function toPhoto(row: typeof diagnosticPhotos.$inferSelect): DiagnosticPhoto {
+  return { id: row.id, stage: row.stage, url: row.url, caption: row.caption };
+}
+
 /**
  * Implementação real, ativada automaticamente quando DATABASE_URL está configurada (ver
  * repository-factory.ts). Mesmo padrão de `PostgresInventoryRepository`/`PostgresFinanceRepository`.
@@ -112,6 +120,30 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .values({ name: input.name, phone: input.phone, cpf: input.cpf ?? null, source: "manual" })
       .returning();
     return toCustomer(row);
+  }
+
+  /** Busca livre por nome do cliente OU marca/modelo de veículo — clientes com veículo batendo entram mesmo sem nome batendo. */
+  async searchCustomersByText(query: string): Promise<Customer[]> {
+    const needle = query.trim();
+    if (needle.length < 2) return [];
+    const pattern = `%${needle}%`;
+
+    const byName = await this.db().select().from(customers).where(ilike(customers.name, pattern)).limit(SEARCH_RESULT_LIMIT);
+
+    const byVehicle = await this.db()
+      .select({ customer: customers })
+      .from(vehicles)
+      .innerJoin(customers, eq(vehicles.customerId, customers.id))
+      .where(or(ilike(vehicles.brand, pattern), ilike(vehicles.model, pattern)))
+      .limit(SEARCH_RESULT_LIMIT);
+
+    const merged = new Map<string, typeof customers.$inferSelect>();
+    for (const row of byName) merged.set(row.id, row);
+    for (const row of byVehicle) merged.set(row.customer.id, row.customer);
+
+    return Array.from(merged.values())
+      .slice(0, SEARCH_RESULT_LIMIT)
+      .map(toCustomer);
   }
 
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
@@ -216,6 +248,19 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toRecommendation);
   }
 
+  async addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto> {
+    const [row] = await this.db()
+      .insert(diagnosticPhotos)
+      .values({ diagnosticId: input.diagnosticId, stage: input.stage, url: null, caption: input.caption ?? null, source: "manual" })
+      .returning();
+    return toPhoto(row);
+  }
+
+  async listPhotosByDiagnostic(diagnosticId: string): Promise<DiagnosticPhoto[]> {
+    const rows = await this.db().select().from(diagnosticPhotos).where(eq(diagnosticPhotos.diagnosticId, diagnosticId));
+    return rows.map(toPhoto);
+  }
+
   private async loadOrderItems(serviceOrderId: string): Promise<ServiceOrderItem[]> {
     const rows = await this.db()
       .select({ id: serviceOrderItems.id, serviceOrderId: serviceOrderItems.serviceOrderId, serviceId: serviceOrderItems.serviceId, notes: serviceOrderItems.notes, serviceName: services.name })
@@ -272,6 +317,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         vehicleModel: vehicles.model,
         vehiclePlate: vehicles.plate,
         updatedAt: serviceOrders.updatedAt,
+        visitCreatedAt: serviceVisits.createdAt,
       })
       .from(serviceOrders)
       .innerJoin(serviceVisits, eq(serviceOrders.serviceVisitId, serviceVisits.id))
@@ -281,12 +327,22 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
 
   async listBoardOrders(): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(ne(serviceOrders.status, "entregue"));
-    return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
+    return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString() }));
   }
 
   async listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(eq(serviceOrders.status, "entregue"));
-    return rows.filter((r) => r.updatedAt.toISOString().slice(0, 10) === dateIso).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString() }));
+    return rows.filter((r) => saoPauloDateISO(r.updatedAt) === dateIso).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString() }));
+  }
+
+  /** Mesma estratégia de `listDeliveredOnDate`: filtra em JS pela data de `service_visits.created_at`, sem depender de fuso do banco. */
+  async listServiceOrdersVisitedOnDate(dateIso: string): Promise<ServiceOrder[]> {
+    const rows = await this.db()
+      .select({ order: serviceOrders, visitCreatedAt: serviceVisits.createdAt })
+      .from(serviceOrders)
+      .innerJoin(serviceVisits, eq(serviceOrders.serviceVisitId, serviceVisits.id));
+    const todaysRows = rows.filter((r) => saoPauloDateISO(r.visitCreatedAt) === dateIso);
+    return Promise.all(todaysRows.map((r) => this.toServiceOrderWithItems(r.order)));
   }
 
   async listServiceCatalog(): Promise<ServiceCatalogEntry[]> {

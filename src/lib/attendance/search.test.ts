@@ -16,4 +16,9 @@ describe("looksLikePhone / looksLikePlate", () => {
     expect(looksLikePhone("12")).toBe(false);
     expect(looksLikePlate("AB")).toBe(false);
   });
+
+  it("nome ou modelo só com letras, mesmo longo, nunca é confundido com placa", () => {
+    expect(looksLikePlate("corolla")).toBe(false);
+    expect(looksLikePlate("Fernanda Oliveira")).toBe(false);
+  });
 });

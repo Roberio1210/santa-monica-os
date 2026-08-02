@@ -23,7 +23,9 @@ export function summarizeCustomerHistory(params: {
   const visitIdsWithOrder = new Set(orders.map((o) => o.serviceVisitId));
 
   const sortedOrders = [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const lastServices = sortedOrders[0]?.items.map((item) => item.serviceName) ?? [];
+  const lastOrder = sortedOrders[0];
+  const lastServices = lastOrder?.items.map((item) => item.serviceName) ?? [];
+  const lastOrderValue = lastOrder ? Math.round(lastOrder.items.reduce((s, item) => s + (servicePriceById[item.serviceId] ?? 0), 0) * 100) / 100 : null;
 
   const totalSpent = orders.reduce((sum, order) => sum + order.items.reduce((s, item) => s + (servicePriceById[item.serviceId] ?? 0), 0), 0);
 
@@ -37,6 +39,7 @@ export function summarizeCustomerHistory(params: {
     vehicles,
     lastVisitAt,
     lastServices,
+    lastOrderValue,
     totalSpent: Math.round(totalSpent * 100) / 100,
     observations,
     pendingRecommendations,
