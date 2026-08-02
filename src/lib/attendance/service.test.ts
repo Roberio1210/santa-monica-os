@@ -5,11 +5,14 @@ import {
   advanceServiceOrderStatus,
   createServiceOrderFromApprovedServices,
   fetchCustomerTimeline,
+  fetchDayManagement,
   fetchHomeSummary,
   fetchManagerBoard,
   fetchOrderDetail,
+  fetchRecentVehicles,
   fetchServiceCatalog,
   fetchServiceVisitContext,
+  fetchTimelineFeed,
   fetchVehicleTimeline,
   listDiagnosticPhotos,
   registerQuickCustomerAndVehicle,
@@ -277,5 +280,51 @@ describe("fetchVehicleTimeline", () => {
 
   it("retorna null para um veículo inexistente, nunca inventa detalhe", async () => {
     expect(await fetchVehicleTimeline("veiculo-que-nao-existe")).toBeNull();
+  });
+});
+
+describe("fetchDayManagement", () => {
+  it("entradas mostram o status atual da ordem, dentro do período pedido", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Gestão do Dia", customerPhone: "48999990100", vehiclePlate: "GDD1A11" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    await startServiceOrder(visit.id);
+
+    const { entradas, summary, period } = await fetchDayManagement("hoje");
+    expect(period.key).toBe("hoje");
+    expect(entradas.some((e) => e.customerName === "Gestão do Dia")).toBe(true);
+    expect(summary.countsToday.previstos).toBeGreaterThanOrEqual(1);
+  });
+
+  it("separa em execução e prontos por status a partir do mesmo board, sem inventar dados", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Execução Dia", customerPhone: "48999990101", vehiclePlate: "GDD2B22" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const order = await startServiceOrder(visit.id);
+    await setServiceOrderStatus(order.id, "em_execucao");
+
+    const { emExecucao, prontos } = await fetchDayManagement("hoje");
+    expect(emExecucao.some((o) => o.serviceOrderId === order.id)).toBe(true);
+    expect(prontos.some((o) => o.serviceOrderId === order.id)).toBe(false);
+  });
+});
+
+describe("fetchRecentVehicles", () => {
+  it("traz o cliente dono de cada veículo", async () => {
+    const { vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Veículo Recente", customerPhone: "48999990102", vehiclePlate: "GDD3C33" });
+    const recent = await fetchRecentVehicles(50);
+    expect(recent.some((r) => r.vehicle.id === vehicle.id && r.customer.name === "Veículo Recente")).toBe(true);
+  });
+});
+
+describe("fetchTimelineFeed", () => {
+  it("isola entradas de hoje de um período 'ontem', nunca mistura períodos", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Timeline Feed", customerPhone: "48999990103", vehiclePlate: "GDD4D44" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    await startServiceOrder(visit.id);
+
+    const hoje = await fetchTimelineFeed("hoje");
+    expect(hoje.entries.some((e) => e.customerName === "Timeline Feed")).toBe(true);
+
+    const ontem = await fetchTimelineFeed("ontem");
+    expect(ontem.entries.some((e) => e.customerName === "Timeline Feed")).toBe(false);
   });
 });

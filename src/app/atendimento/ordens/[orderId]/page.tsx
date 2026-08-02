@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ChevronRight, Phone, Camera } from "lucide-react";
 import { MobileTopBar } from "@/components/attendance/mobile/top-bar";
 import { StatusAdvanceButton } from "@/components/attendance/mobile/status-advance-button";
+import { OrderTimers } from "@/components/attendance/mobile/order-timers";
 import { AREA_PROBLEM_LABELS, recommendationCategoryLabel } from "@/lib/attendance/catalog";
 import { fetchOrderDetail } from "@/lib/attendance/service";
 import {
@@ -23,7 +24,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
   const detail = await fetchOrderDetail(orderId);
   if (!detail) notFound();
 
-  const { order, customer, vehicle, diagnostic, recommendations } = detail;
+  const { order, visit, customer, vehicle, diagnostic, recommendations } = detail;
   const vehicleLabel = [vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "Veículo";
 
   const assessedExterior = EXTERIOR_AREAS.filter((area) => diagnostic?.exterior[area]?.condition);
@@ -35,6 +36,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
 
       <div className="space-y-4 px-4 pb-8 pt-4">
         <StatusAdvanceButton serviceOrderId={order.id} currentStatus={order.status} />
+
+        <OrderTimers status={order.status} visitCreatedAt={visit.createdAt} updatedAt={order.updatedAt} />
 
         <div className="rounded-2xl border border-border-subtle bg-background-panel p-4">
           <p className="text-base font-semibold text-foreground">{customer.name ?? "Cliente sem nome cadastrado"}</p>

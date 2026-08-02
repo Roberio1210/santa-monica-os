@@ -96,3 +96,10 @@ export async function advanceServiceOrderStatusAction(serviceOrderId: string, cu
   await advanceServiceOrderStatus(serviceOrderId, currentStatus);
   revalidatePath("/atendimento");
 }
+
+/** Check-in rápido ("Cliente Chegou") — cliente/veículo já identificados na busca inline da Gestão do Dia. Mesmo par visita+ordem do wizard, sem passar pelas etapas de diagnóstico/fotos/serviços. */
+export async function checkInArrivalAction(customerId: string, vehicleId: string): Promise<{ visitId: string; orderId: string }> {
+  const result = await startVisitAction(customerId, vehicleId, null);
+  revalidatePath("/atendimento");
+  return result;
+}

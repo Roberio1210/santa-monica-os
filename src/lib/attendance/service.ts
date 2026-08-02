@@ -1,10 +1,11 @@
 import "server-only";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
-import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
+import type { RecentVehicleEntry, ServiceCatalogEntry } from "@/lib/attendance/repository";
 import { summarizeCustomerHistory } from "@/lib/attendance/history";
 import { summarizeHome } from "@/lib/attendance/home";
 import { looksLikePhone, looksLikePlate } from "@/lib/attendance/search";
 import { summarizeTimeline, type TimelineEntry } from "@/lib/attendance/timeline";
+import { resolveDayPeriod, type DayPeriodKey, type DayPeriodRange } from "@/lib/attendance/period";
 import {
   SERVICE_ORDER_STATUSES,
   SERVICE_ORDER_STATUS_LABELS,
@@ -273,7 +274,67 @@ export async function fetchHomeSummary(): Promise<HomeSummary> {
 
   const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
 
-  return summarizeHome({ boardColumns: board.columns, todaysOrders, servicePriceById, activeGoal });
+  return summarizeHome({ boardColumns: board.columns, todaysOrders, deliveredToday: board.deliveredToday, servicePriceById, activeGoal });
+}
+
+export interface DayManagement {
+  summary: HomeSummary;
+  /** Só os cards com status `em_execucao` — mesmo dado de `fetchManagerBoard`, sem nova consulta. */
+  emExecucao: ManagerBoardOrder[];
+  /** Só os cards com status `pronto_entrega`. */
+  prontos: ManagerBoardOrder[];
+  /** Entradas do período selecionado (qualquer status atual), mais recente primeiro. */
+  entradas: ManagerBoardOrder[];
+  period: DayPeriodRange;
+}
+
+/**
+ * Orquestrador da tela "Gestão do Dia" — os indicadores do topo (`summary`) são sempre de hoje;
+ * só a lista de Entradas respeita o filtro de período (revisão histórica), porque não guardamos
+ * histórico de status por dia — mostrar contagens "de ontem" seria inventar um retrato que não
+ * temos.
+ */
+export async function fetchDayManagement(periodKey: DayPeriodKey = "hoje"): Promise<DayManagement> {
+  const repo = getAttendanceRepository();
+  const today = saoPauloDateISO();
+  const period = resolveDayPeriod(periodKey, today);
+
+  const [board, todaysOrders, catalog, activeGoal, entradas] = await Promise.all([
+    fetchManagerBoard(),
+    repo.listServiceOrdersVisitedOnDate(today),
+    repo.listServiceCatalog(),
+    fetchActiveGoal("consolidado", today),
+    repo.listOrdersInRange(period.from, period.to),
+  ]);
+
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+  const summary = summarizeHome({ boardColumns: board.columns, todaysOrders, deliveredToday: board.deliveredToday, servicePriceById, activeGoal });
+
+  return {
+    summary,
+    emExecucao: board.columns.find((c) => c.status === "em_execucao")?.orders ?? [],
+    prontos: board.columns.find((c) => c.status === "pronto_entrega")?.orders ?? [],
+    entradas: [...entradas].sort((a, b) => b.visitCreatedAt.localeCompare(a.visitCreatedAt)),
+    period,
+  };
+}
+
+/** Lista de veículos mais recentes com o cliente dono — base da tela "Veículos". */
+export async function fetchRecentVehicles(limit = 50): Promise<RecentVehicleEntry[]> {
+  return getAttendanceRepository().listRecentVehiclesWithCustomer(limit);
+}
+
+export interface TimelineFeed {
+  entries: ManagerBoardOrder[];
+  period: DayPeriodRange;
+}
+
+/** Feed geral de entradas filtrável por período — base da tela "Timeline" (versão dedicada, sem cap, da seção "Entradas" da Gestão do Dia). */
+export async function fetchTimelineFeed(periodKey: DayPeriodKey = "hoje"): Promise<TimelineFeed> {
+  const repo = getAttendanceRepository();
+  const period = resolveDayPeriod(periodKey, saoPauloDateISO());
+  const entries = await repo.listOrdersInRange(period.from, period.to);
+  return { entries: [...entries].sort((a, b) => b.visitCreatedAt.localeCompare(a.visitCreatedAt)), period };
 }
 
 /** Linha do tempo com todas as visitas do cliente (qualquer veículo), mais recente primeiro. */
