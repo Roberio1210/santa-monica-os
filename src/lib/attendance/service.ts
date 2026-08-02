@@ -37,6 +37,10 @@ import { fetchActiveGoal } from "@/lib/goals/service";
  * duplicada.
  */
 
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 export interface SearchResult {
   customer: Customer;
   vehicles: Vehicle[];
@@ -258,7 +262,11 @@ export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | n
 
   const diagnostic = context.diagnostic ? { ...context.diagnostic, photos: await repo.listPhotosByDiagnostic(context.diagnostic.id) } : null;
 
-  return { order, visit: context.visit, customer: context.customer, vehicle: context.vehicle, diagnostic, recommendations: context.recommendations };
+  const catalog = await repo.listServiceCatalog();
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+  const totalValue = round2(order.items.reduce((sum, item) => sum + (servicePriceById[item.serviceId] ?? 0), 0));
+
+  return { order, visit: context.visit, customer: context.customer, vehicle: context.vehicle, diagnostic, recommendations: context.recommendations, totalValue };
 }
 
 /** Home — só contagens e valores reais, nunca uma meta diária inventada (ver home.ts). */

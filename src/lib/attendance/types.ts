@@ -252,6 +252,10 @@ export interface ManagerBoardColumn {
 export interface ManagerBoardOrder {
   serviceOrderId: string;
   status: ServiceOrderStatus;
+  /** IDs reais para linkar a ordem ao cliente/veículo/visita (ex.: Assistente do Gerente, timeline). */
+  customerId: string;
+  vehicleId: string;
+  visitId: string;
   customerName: string | null;
   vehicleModel: string | null;
   vehiclePlate: string | null;
@@ -272,6 +276,8 @@ export interface OrderDetail {
   vehicle: Vehicle;
   diagnostic: Diagnostic | null;
   recommendations: TechnicalRecommendation[];
+  /** Soma do preço padrão dos itens aprovados — mesma regra de `ManagerBoardOrder.totalValue`, é o "valor de tabela" usado no registro de desconto. */
+  totalValue: number;
 }
 
 /**

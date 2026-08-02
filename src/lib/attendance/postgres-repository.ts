@@ -253,6 +253,11 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toRecommendation);
   }
 
+  async countRecommendationsCreatedOnDate(dateIso: string): Promise<number> {
+    const rows = await this.db().select({ createdAt: technicalRecommendations.createdAt }).from(technicalRecommendations);
+    return rows.filter((r) => saoPauloDateISO(r.createdAt) === dateIso).length;
+  }
+
   async addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto> {
     const [row] = await this.db()
       .insert(diagnosticPhotos)
@@ -324,6 +329,9 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .select({
         serviceOrderId: serviceOrders.id,
         status: serviceOrders.status,
+        customerId: customers.id,
+        vehicleId: vehicles.id,
+        visitId: serviceVisits.id,
         customerName: customers.name,
         vehicleModel: vehicles.model,
         vehiclePlate: vehicles.plate,
@@ -358,6 +366,9 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     rows: Array<{
       serviceOrderId: string;
       status: ServiceOrderStatus;
+      customerId: string;
+      vehicleId: string;
+      visitId: string;
       customerName: string | null;
       vehicleModel: string | null;
       vehiclePlate: string | null;

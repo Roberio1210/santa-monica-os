@@ -86,5 +86,8 @@ export interface AttendanceRepository {
   /** Veículos mais recentemente atualizados, com o cliente dono — base da tela "Veículos". */
   listRecentVehiclesWithCustomer(limit: number): Promise<RecentVehicleEntry[]>;
 
+  /** Recomendações técnicas registradas (por `createdAt`) no dia informado — base do Resumo do Proprietário. */
+  countRecommendationsCreatedOnDate(dateIso: string): Promise<number>;
+
   listServiceCatalog(): Promise<ServiceCatalogEntry[]>;
 }

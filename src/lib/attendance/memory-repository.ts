@@ -194,6 +194,10 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.recommendations.values()).filter((r) => visitIds.has(r.serviceVisitId));
   }
 
+  async countRecommendationsCreatedOnDate(dateIso: string): Promise<number> {
+    return Array.from(this.recommendations.values()).filter((r) => saoPauloDateISO(new Date(r.createdAt)) === dateIso).length;
+  }
+
   async addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto> {
     const photo: DiagnosticPhoto & { diagnosticId: string } = {
       id: randomUUID(),
@@ -271,6 +275,9 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return {
       serviceOrderId: order.id,
       status: order.status,
+      customerId: visit?.customerId ?? "",
+      vehicleId: visit?.vehicleId ?? "",
+      visitId: order.serviceVisitId,
       customerName: customer?.name ?? null,
       vehicleModel: vehicle?.model ?? null,
       vehiclePlate: vehicle?.plate ?? null,

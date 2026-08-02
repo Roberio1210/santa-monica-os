@@ -8,6 +8,9 @@ function order(overrides: Partial<ManagerBoardOrder>): ManagerBoardOrder {
   return {
     serviceOrderId: "o1",
     status: "recebido",
+    customerId: "c1",
+    vehicleId: "veh1",
+    visitId: "visit1",
     customerName: "João",
     vehicleModel: "Argo",
     vehiclePlate: "ABC1234",

@@ -10,6 +10,9 @@ function column(status: ManagerBoardColumn["status"], count: number): ManagerBoa
     orders: Array.from({ length: count }, (_, i) => ({
       serviceOrderId: `o-${status}-${i}`,
       status,
+      customerId: `c-${status}-${i}`,
+      vehicleId: `veh-${status}-${i}`,
+      visitId: `v-${status}-${i}`,
       customerName: null,
       vehicleModel: null,
       vehiclePlate: null,
@@ -36,6 +39,9 @@ function delivered(id: string, visitCreatedAt: string, updatedAt: string): Manag
   return {
     serviceOrderId: id,
     status: "entregue",
+    customerId: `c-${id}`,
+    vehicleId: `veh-${id}`,
+    visitId: `visit-${id}`,
     customerName: null,
     vehicleModel: null,
     vehiclePlate: null,
