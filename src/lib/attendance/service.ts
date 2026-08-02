@@ -13,19 +13,23 @@ import {
   type Customer,
   type CustomerHistorySummary,
   type Diagnostic,
+  type DiagnosticArea,
   type DiagnosticPhoto,
-  type ExteriorAssessment,
+  type EngineAssessment,
+  type GlassAssessment,
   type HomeSummary,
-  type InteriorAssessment,
+  type InteriorChecklist,
   type ManagerBoardColumn,
   type ManagerBoardOrder,
   type OrderDetail,
-  type PhotoStage,
+  type PaintAssessment,
   type ServiceOrder,
   type ServiceOrderStatus,
   type ServiceVisit,
   type TechnicalRecommendation,
+  type TiresAssessment,
   type Vehicle,
+  type WheelsAssessment,
 } from "@/lib/attendance/types";
 import { nextStatus } from "@/lib/attendance/status";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
@@ -180,13 +184,22 @@ export async function fetchServiceVisitContext(serviceVisitId: string): Promise<
   return { visit, customer, vehicle, diagnostic, recommendations, order };
 }
 
-export async function saveDiagnosticStep(serviceVisitId: string, exterior: ExteriorAssessment, interior: InteriorAssessment, observations: string | null): Promise<Diagnostic> {
-  return getAttendanceRepository().saveDiagnostic({ serviceVisitId, exterior, interior, observations });
+export async function saveDiagnosticStep(
+  serviceVisitId: string,
+  pintura: PaintAssessment,
+  rodas: WheelsAssessment,
+  pneus: TiresAssessment,
+  vidros: GlassAssessment,
+  motor: EngineAssessment,
+  interior: InteriorChecklist,
+  observations: string | null,
+): Promise<Diagnostic> {
+  return getAttendanceRepository().saveDiagnostic({ serviceVisitId, pintura, rodas, pneus, vidros, motor, interior, observations });
 }
 
 /** `caption` é sempre `null`/livre — nunca inventa legenda. `url` sempre `null` (sem upload real nesta sprint). */
-export async function addDiagnosticPhoto(diagnosticId: string, stage: PhotoStage, caption: string | null = null): Promise<DiagnosticPhoto> {
-  return getAttendanceRepository().addPhoto({ diagnosticId, stage, caption });
+export async function addDiagnosticPhoto(diagnosticId: string, area: DiagnosticArea, caption: string | null = null): Promise<DiagnosticPhoto> {
+  return getAttendanceRepository().addPhoto({ diagnosticId, area, caption });
 }
 
 export async function listDiagnosticPhotos(diagnosticId: string): Promise<DiagnosticPhoto[]> {

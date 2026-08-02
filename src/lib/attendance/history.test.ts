@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { summarizeCustomerHistory } from "@/lib/attendance/history";
-import type { Customer, Diagnostic, ServiceOrder, ServiceVisit, TechnicalRecommendation, Vehicle } from "@/lib/attendance/types";
+import { emptyTechnicalDiagnostic, type Customer, type Diagnostic, type ServiceOrder, type ServiceVisit, type TechnicalRecommendation, type Vehicle } from "@/lib/attendance/types";
 
 const customer: Customer = { id: "c1", name: "Fulano", phone: "48999998888", cpf: null, email: null, notes: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
 const vehicle: Vehicle = { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla Cross", year: 2023, color: "Branco", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
@@ -13,8 +13,7 @@ function diagnostic(serviceVisitId: string, observations: string | null): Diagno
   return {
     id: `d-${serviceVisitId}`,
     serviceVisitId,
-    exterior: {} as Diagnostic["exterior"],
-    interior: {} as Diagnostic["interior"],
+    ...emptyTechnicalDiagnostic(),
     observations,
     photos: [],
     createdAt: "2026-01-01T00:00:00Z",

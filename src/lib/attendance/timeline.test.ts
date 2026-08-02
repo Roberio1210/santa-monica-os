@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { summarizeTimeline } from "@/lib/attendance/timeline";
-import type { Diagnostic, ServiceOrder, ServiceVisit, TechnicalRecommendation } from "@/lib/attendance/types";
+import { emptyTechnicalDiagnostic, type Diagnostic, type ServiceOrder, type ServiceVisit, type TechnicalRecommendation } from "@/lib/attendance/types";
 
 function visit(id: string, createdAt: string): ServiceVisit {
   return { id, customerId: "c1", vehicleId: "v1", mileageAtVisit: null, createdAt };
@@ -10,8 +10,7 @@ function diagnostic(serviceVisitId: string, observations: string | null): Diagno
   return {
     id: `d-${serviceVisitId}`,
     serviceVisitId,
-    exterior: {} as Diagnostic["exterior"],
-    interior: {} as Diagnostic["interior"],
+    ...emptyTechnicalDiagnostic(),
     observations,
     photos: [],
     createdAt: "2026-01-01T00:00:00Z",

@@ -153,7 +153,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     const diagnostic: Diagnostic = {
       id: existing?.id ?? randomUUID(),
       serviceVisitId: input.serviceVisitId,
-      exterior: input.exterior,
+      pintura: input.pintura,
+      rodas: input.rodas,
+      pneus: input.pneus,
+      vidros: input.vidros,
+      motor: input.motor,
       interior: input.interior,
       observations: input.observations ?? null,
       photos: existing?.photos ?? [],
@@ -202,7 +206,7 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     const photo: DiagnosticPhoto & { diagnosticId: string } = {
       id: randomUUID(),
       diagnosticId: input.diagnosticId,
-      stage: input.stage,
+      area: input.area,
       url: null,
       caption: input.caption ?? null,
     };

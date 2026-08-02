@@ -11,16 +11,20 @@ import type {
   Customer,
   Diagnostic,
   DiagnosticPhoto,
-  ExteriorAssessment,
-  InteriorAssessment,
+  EngineAssessment,
+  GlassAssessment,
+  InteriorChecklist,
   ManagerBoardOrder,
+  PaintAssessment,
   SaveDiagnosticInput,
   ServiceOrder,
   ServiceOrderItem,
   ServiceOrderStatus,
   ServiceVisit,
   TechnicalRecommendation,
+  TiresAssessment,
   Vehicle,
+  WheelsAssessment,
 } from "@/lib/attendance/types";
 import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
 import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
@@ -58,12 +62,26 @@ function toServiceVisit(row: typeof serviceVisits.$inferSelect): ServiceVisit {
   return { id: row.id, customerId: row.customerId, vehicleId: row.vehicleId, mileageAtVisit: row.mileageAtVisit, createdAt: row.createdAt.toISOString() };
 }
 
+interface StoredExteriorAssessment {
+  pintura: PaintAssessment;
+  rodas: WheelsAssessment;
+  pneus: TiresAssessment;
+  vidros: GlassAssessment;
+  motor: EngineAssessment;
+}
+
 function toDiagnostic(row: typeof diagnostics.$inferSelect): Diagnostic {
+  const exterior = row.exteriorAssessment as unknown as StoredExteriorAssessment;
+  const interior = row.interiorAssessment as unknown as InteriorChecklist;
   return {
     id: row.id,
     serviceVisitId: row.serviceVisitId,
-    exterior: row.exteriorAssessment as unknown as ExteriorAssessment,
-    interior: row.interiorAssessment as unknown as InteriorAssessment,
+    pintura: exterior.pintura,
+    rodas: exterior.rodas,
+    pneus: exterior.pneus,
+    vidros: exterior.vidros,
+    motor: exterior.motor,
+    interior,
     observations: row.observations,
     // Sem escritor nesta sprint (upload real fica para depois) — sempre [] vindo do banco real.
     photos: [],
@@ -77,7 +95,7 @@ function toRecommendation(row: typeof technicalRecommendations.$inferSelect): Te
 }
 
 function toPhoto(row: typeof diagnosticPhotos.$inferSelect): DiagnosticPhoto {
-  return { id: row.id, stage: row.stage, url: row.url, caption: row.caption };
+  return { id: row.id, area: row.area, url: row.url, caption: row.caption };
 }
 
 /**
@@ -204,18 +222,20 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
   }
 
   async saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic> {
+    const exteriorAssessment = { pintura: input.pintura, rodas: input.rodas, pneus: input.pneus, vidros: input.vidros, motor: input.motor } as unknown as Record<string, unknown>;
+    const interiorAssessment = input.interior as unknown as Record<string, unknown>;
     const [row] = await this.db()
       .insert(diagnostics)
       .values({
         serviceVisitId: input.serviceVisitId,
-        exteriorAssessment: input.exterior,
-        interiorAssessment: input.interior,
+        exteriorAssessment,
+        interiorAssessment,
         observations: input.observations ?? null,
         source: "manual",
       })
       .onConflictDoUpdate({
         target: diagnostics.serviceVisitId,
-        set: { exteriorAssessment: input.exterior, interiorAssessment: input.interior, observations: input.observations ?? null, updatedAt: new Date() },
+        set: { exteriorAssessment, interiorAssessment, observations: input.observations ?? null, updatedAt: new Date() },
       })
       .returning();
     return toDiagnostic(row);
@@ -261,7 +281,7 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
   async addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto> {
     const [row] = await this.db()
       .insert(diagnosticPhotos)
-      .values({ diagnosticId: input.diagnosticId, stage: input.stage, url: null, caption: input.caption ?? null, source: "manual" })
+      .values({ diagnosticId: input.diagnosticId, area: input.area, url: null, caption: input.caption ?? null, source: "manual" })
       .returning();
     return toPhoto(row);
   }

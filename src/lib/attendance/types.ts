@@ -60,101 +60,133 @@ export const CONDITION_LABELS: Record<Condition, string> = {
   ruim: "Ruim",
 };
 
-export type Severity = "leve" | "moderada" | "severa";
-export const SEVERITIES: Severity[] = ["leve", "moderada", "severa"];
-export const SEVERITY_LABELS: Record<Severity, string> = {
-  leve: "Leve",
-  moderada: "Moderada",
-  severa: "Severa",
-};
+/**
+ * Diagnóstico Técnico Inteligente (Missão 19) — checklist estruturado, sempre de fora para dentro:
+ * Pintura → Rodas → Pneus → Vidros → Motor → Interior (`DIAGNOSTIC_AREAS`, ordem obrigatória do
+ * negócio). Cada área tem seu próprio formato porque o negócio especificou critérios diferentes
+ * por área — nunca um formato genérico "condição + lista de problema" inventado aqui.
+ */
+export type IssueLevel = "nenhuma" | "leve" | "media" | "alta";
+export const ISSUE_LEVELS: IssueLevel[] = ["nenhuma", "leve", "media", "alta"];
 
-export interface DiagnosticProblem {
-  type: string;
-  severity: Severity;
+export interface PaintAssessment {
+  chuvaAcida: IssueLevel;
+  riscos: IssueLevel;
+  hologramas: IssueLevel;
+  manchas: IssueLevel;
+}
+export function emptyPaintAssessment(): PaintAssessment {
+  return { chuvaAcida: "nenhuma", riscos: "nenhuma", hologramas: "nenhuma", manchas: "nenhuma" };
 }
 
-/** Uma área avaliada — condição pode ser `null` até o gerente selecionar (nunca assumida). */
-export interface AreaAssessment {
+export interface WheelsAssessment {
+  sujeiraPesada: boolean;
+  contaminacao: boolean;
+  oxidacao: boolean;
+  freioImpregnado: boolean;
+}
+export function emptyWheelsAssessment(): WheelsAssessment {
+  return { sujeiraPesada: false, contaminacao: false, oxidacao: false, freioImpregnado: false };
+}
+
+/** Sem checklist próprio especificado pelo negócio para Pneus — só condição geral (nunca um problema inventado). */
+export interface TiresAssessment {
   condition: Condition | null;
-  problems: DiagnosticProblem[];
+}
+export function emptyTiresAssessment(): TiresAssessment {
+  return { condition: null };
 }
 
-export function emptyAreaAssessment(): AreaAssessment {
-  return { condition: null, problems: [] };
+export interface GlassAssessment {
+  contaminacao: boolean;
+  marcasDagua: boolean;
+  /** Fato, não problema — cristalização já existe no vidro (usado para não sugerir de novo). */
+  cristalizacaoExistente: boolean;
+}
+export function emptyGlassAssessment(): GlassAssessment {
+  return { contaminacao: false, marcasDagua: false, cristalizacaoExistente: false };
 }
 
-export const EXTERIOR_AREAS = ["pintura", "rodas", "pneus", "plasticos", "vidros", "farois", "motor", "chassi"] as const;
-export type ExteriorArea = (typeof EXTERIOR_AREAS)[number];
-export const EXTERIOR_AREA_LABELS: Record<ExteriorArea, string> = {
+export type EngineCondition = "muito_limpo" | "normal" | "sujo" | "muito_sujo";
+export const ENGINE_CONDITIONS: EngineCondition[] = ["muito_limpo", "normal", "sujo", "muito_sujo"];
+export const ENGINE_CONDITION_LABELS: Record<EngineCondition, string> = {
+  muito_limpo: "Muito limpo",
+  normal: "Normal",
+  sujo: "Sujo",
+  muito_sujo: "Muito sujo",
+};
+export interface EngineAssessment {
+  condition: EngineCondition | null;
+}
+export function emptyEngineAssessment(): EngineAssessment {
+  return { condition: null };
+}
+
+export interface InteriorChecklist {
+  plasticos: boolean;
+  couro: boolean;
+  tecidos: boolean;
+  tapetes: boolean;
+  teto: boolean;
+  portaMalas: boolean;
+  vidrosInternos: boolean;
+  odor: boolean;
+  pelosAnimais: boolean;
+  areia: boolean;
+}
+export function emptyInteriorChecklist(): InteriorChecklist {
+  return { plasticos: false, couro: false, tecidos: false, tapetes: false, teto: false, portaMalas: false, vidrosInternos: false, odor: false, pelosAnimais: false, areia: false };
+}
+
+/** Ordem obrigatória do negócio — sempre de fora para dentro. Nunca reordenar. */
+export const DIAGNOSTIC_AREAS = ["pintura", "rodas", "pneus", "vidros", "motor", "interior"] as const;
+export type DiagnosticArea = (typeof DIAGNOSTIC_AREAS)[number];
+export const DIAGNOSTIC_AREA_LABELS: Record<DiagnosticArea, string> = {
   pintura: "Pintura",
   rodas: "Rodas",
   pneus: "Pneus",
-  plasticos: "Plásticos",
   vidros: "Vidros",
-  farois: "Faróis",
   motor: "Motor",
-  chassi: "Chassi",
+  interior: "Interior",
 };
-export type ExteriorAssessment = Record<ExteriorArea, AreaAssessment>;
 
-export const INTERIOR_AREAS = ["bancos", "painel", "carpete", "portaMalas", "teto", "console", "portas"] as const;
-export type InteriorArea = (typeof INTERIOR_AREAS)[number];
-export const INTERIOR_AREA_LABELS: Record<InteriorArea, string> = {
-  bancos: "Bancos",
-  painel: "Painel",
-  carpete: "Carpete",
-  portaMalas: "Porta-malas",
-  teto: "Teto",
-  console: "Console",
-  portas: "Portas",
-};
-export type InteriorAssessment = Record<InteriorArea, AreaAssessment>;
-
-export function emptyExteriorAssessment(): ExteriorAssessment {
-  return Object.fromEntries(EXTERIOR_AREAS.map((area) => [area, emptyAreaAssessment()])) as ExteriorAssessment;
+export interface TechnicalDiagnosticInput {
+  pintura: PaintAssessment;
+  rodas: WheelsAssessment;
+  pneus: TiresAssessment;
+  vidros: GlassAssessment;
+  motor: EngineAssessment;
+  interior: InteriorChecklist;
 }
-
-export function emptyInteriorAssessment(): InteriorAssessment {
-  return Object.fromEntries(INTERIOR_AREAS.map((area) => [area, emptyAreaAssessment()])) as InteriorAssessment;
+export function emptyTechnicalDiagnostic(): TechnicalDiagnosticInput {
+  return { pintura: emptyPaintAssessment(), rodas: emptyWheelsAssessment(), pneus: emptyTiresAssessment(), vidros: emptyGlassAssessment(), motor: emptyEngineAssessment(), interior: emptyInteriorChecklist() };
 }
-
-export type PhotoStage = "antes" | "durante" | "depois";
-export const PHOTO_STAGES: PhotoStage[] = ["antes", "durante", "depois"];
-export const PHOTO_STAGE_LABELS: Record<PhotoStage, string> = {
-  antes: "Antes",
-  durante: "Durante",
-  depois: "Depois",
-};
 
 /** `url` sempre `null` nesta sprint — estrutura preparada, sem upload real (decisão do escopo). */
 export interface DiagnosticPhoto {
   id: string;
-  stage: PhotoStage;
+  area: DiagnosticArea;
   url: string | null;
   caption: string | null;
 }
 
 export interface AddPhotoInput {
   diagnosticId: string;
-  stage: PhotoStage;
+  area: DiagnosticArea;
   caption?: string | null;
 }
 
-export interface Diagnostic {
+export interface Diagnostic extends TechnicalDiagnosticInput {
   id: string;
   serviceVisitId: string;
-  exterior: ExteriorAssessment;
-  interior: InteriorAssessment;
   observations: string | null;
   photos: DiagnosticPhoto[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface SaveDiagnosticInput {
+export interface SaveDiagnosticInput extends TechnicalDiagnosticInput {
   serviceVisitId: string;
-  exterior: ExteriorAssessment;
-  interior: InteriorAssessment;
   observations?: string | null;
 }
 

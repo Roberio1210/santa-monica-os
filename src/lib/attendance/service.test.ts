@@ -24,7 +24,12 @@ import {
   startAttendance,
   startServiceOrder,
 } from "@/lib/attendance/service";
-import { emptyExteriorAssessment, emptyInteriorAssessment } from "@/lib/attendance/types";
+import { emptyTechnicalDiagnostic, type TechnicalDiagnosticInput } from "@/lib/attendance/types";
+
+function saveEmptyDiagnostic(visitId: string, overrides: Partial<TechnicalDiagnosticInput> = {}, observations: string | null = null) {
+  const d = { ...emptyTechnicalDiagnostic(), ...overrides };
+  return saveDiagnosticStep(visitId, d.pintura, d.rodas, d.pneus, d.vidros, d.motor, d.interior, observations);
+}
 
 /**
  * Testa contra `getAttendanceRepository()`, que em ambiente de teste (sem DATABASE_URL) sempre
@@ -111,10 +116,8 @@ describe("fluxo completo de atendimento", () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Fluxo Completo", customerPhone: "48999990020", vehiclePlate: "GGG7H77" });
     const visit = await startAttendance(customer.id, vehicle.id, 42000);
 
-    const exterior = emptyExteriorAssessment();
-    exterior.pintura = { condition: "regular", problems: [{ type: "riscos", severity: "moderada" }] };
-    const diagnostic = await saveDiagnosticStep(visit.id, exterior, emptyInteriorAssessment(), "Cliente relatou uso frequente em estrada.");
-    expect(diagnostic.exterior.pintura.condition).toBe("regular");
+    const diagnostic = await saveEmptyDiagnostic(visit.id, { pintura: { chuvaAcida: "nenhuma", riscos: "media", hologramas: "nenhuma", manchas: "nenhuma" } }, "Cliente relatou uso frequente em estrada.");
+    expect(diagnostic.pintura.riscos).toBe("media");
 
     const recommendation = await addTechnicalRecommendation(visit.id, "polimento", "Riscos leves visíveis na lateral direita.");
     expect(recommendation.category).toBe("polimento");
@@ -195,10 +198,10 @@ describe("fotos do diagnóstico", () => {
   it("registra a etapa da foto, mas nunca uma url (sem upload real)", async () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Fotos", customerPhone: "48999990050", vehiclePlate: "LLL2M22" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
-    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), null);
+    const diagnostic = await saveEmptyDiagnostic(visit.id);
 
-    const photo = await addDiagnosticPhoto(diagnostic.id, "antes");
-    expect(photo.stage).toBe("antes");
+    const photo = await addDiagnosticPhoto(diagnostic.id, "pintura");
+    expect(photo.area).toBe("pintura");
     expect(photo.url).toBeNull();
 
     const photos = await listDiagnosticPhotos(diagnostic.id);
@@ -210,8 +213,8 @@ describe("fetchOrderDetail", () => {
   it("consolida ordem, visita, cliente, veículo, diagnóstico (com fotos) e recomendações", async () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Detalhe", customerPhone: "48999990060", vehiclePlate: "MMM3N33" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
-    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), "Observação real");
-    await addDiagnosticPhoto(diagnostic.id, "durante");
+    const diagnostic = await saveEmptyDiagnostic(visit.id, {}, "Observação real");
+    await addDiagnosticPhoto(diagnostic.id, "rodas");
     await addTechnicalRecommendation(visit.id, "polimento", null);
     const catalog = await fetchServiceCatalog();
     await startServiceOrder(visit.id);
@@ -247,7 +250,7 @@ describe("fetchCustomerTimeline", () => {
   it("traz todas as visitas do cliente com serviços e observações reais", async () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Timeline Cliente", customerPhone: "48999990080", vehiclePlate: "OOO5P55" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
-    await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), "Observação da visita.");
+    await saveEmptyDiagnostic(visit.id, {}, "Observação da visita.");
     const catalog = await fetchServiceCatalog();
     await startServiceOrder(visit.id);
     await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
@@ -268,9 +271,9 @@ describe("fetchVehicleTimeline", () => {
   it("traz veículo, cliente, linha do tempo e contagem real de fotos", async () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Timeline Veículo", customerPhone: "48999990090", vehiclePlate: "QQQ7R77" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
-    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), null);
-    await addDiagnosticPhoto(diagnostic.id, "antes");
-    await addDiagnosticPhoto(diagnostic.id, "depois");
+    const diagnostic = await saveEmptyDiagnostic(visit.id);
+    await addDiagnosticPhoto(diagnostic.id, "pintura");
+    await addDiagnosticPhoto(diagnostic.id, "motor");
 
     const detail = await fetchVehicleTimeline(vehicle.id);
     expect(detail?.vehicle.id).toBe(vehicle.id);
