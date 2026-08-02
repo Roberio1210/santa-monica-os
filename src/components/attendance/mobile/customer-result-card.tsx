@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Car, PlusCircle } from "lucide-react";
+import { Car, ChevronRight, PlusCircle, ShieldCheck } from "lucide-react";
 import type { SearchResult } from "@/lib/attendance/service";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 
@@ -40,13 +40,14 @@ export function CustomerResultCard({ result }: { result: SearchResult }) {
         <div className="space-y-1.5">
           <p className="text-xs text-foreground-subtle">Veículos cadastrados</p>
           {history.vehicles.map((vehicle) => (
-            <div key={vehicle.id} className="flex items-center gap-2 text-sm text-foreground">
+            <Link key={vehicle.id} href={`/atendimento/veiculos/${vehicle.id}`} className="flex items-center gap-2 text-sm text-foreground active:opacity-70">
               <Car className="h-4 w-4 shrink-0 text-foreground-subtle" />
-              <span>
+              <span className="flex-1">
                 {[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "Veículo"}
                 {vehicle.plate ? ` · ${vehicle.plate}` : ""}
               </span>
-            </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-foreground-subtle" />
+            </Link>
           ))}
         </div>
       ) : null}
@@ -57,6 +58,16 @@ export function CustomerResultCard({ result }: { result: SearchResult }) {
           <p className="mt-0.5 text-sm text-foreground">{history.observations[history.observations.length - 1]}</p>
         </div>
       ) : null}
+
+      <div className="flex items-center gap-1.5 text-xs text-foreground-subtle">
+        <ShieldCheck className="h-3.5 w-3.5" />
+        {history.activeProtections.length === 0 ? "Nenhuma proteção vigente registrada" : `${history.activeProtections.length} proteção(ões) vigente(s)`}
+      </div>
+
+      <Link href={`/atendimento/clientes/${customer.id}`} className="flex h-11 items-center justify-center gap-1 text-sm font-medium text-accent active:opacity-70">
+        Ver histórico completo
+        <ChevronRight className="h-4 w-4" />
+      </Link>
 
       <Link
         href={`/atendimento/novo?customerId=${customer.id}`}

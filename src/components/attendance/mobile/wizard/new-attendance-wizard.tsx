@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { registerVehicleAndStartVisitAction, saveWizardDiagnosticAction, startVisitAction } from "@/app/atendimento/actions";
+import { advanceServiceOrderStatusAction, registerVehicleAndStartVisitAction, saveWizardDiagnosticAction, startVisitAction } from "@/app/atendimento/actions";
 import { StepCliente } from "@/components/attendance/mobile/wizard/step-cliente";
 import { StepVeiculo } from "@/components/attendance/mobile/wizard/step-veiculo";
 import { StepDiagnostico } from "@/components/attendance/mobile/wizard/step-diagnostico";
@@ -21,6 +21,7 @@ const INITIAL_DATA: WizardData = {
   vehicle: null,
   mileage: "",
   visitId: null,
+  orderId: null,
   customerName: "",
   vehicleLabel: "",
   diagnosticId: null,
@@ -63,11 +64,12 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
       if (vehicle.kind === "existing" && customer.kind === "existing") {
         const existingVehicle = customer.result.vehicles.find((v) => v.id === vehicle.vehicleId);
         try {
-          const { visitId } = await startVisitAction(customer.result.customer.id, vehicle.vehicleId, mileageAtVisit);
+          const { visitId, orderId } = await startVisitAction(customer.result.customer.id, vehicle.vehicleId, mileageAtVisit);
           setData((prev) => ({
             ...prev,
             vehicle,
             visitId,
+            orderId,
             customerName: customer.result.customer.name ?? "Cliente",
             vehicleLabel: existingVehicle ? vehicleLabelFrom(existingVehicle.brand, existingVehicle.model, existingVehicle.plate) : "Veículo",
           }));
@@ -85,7 +87,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
       const customerCpf = customer.kind === "new" ? customer.cpf || null : null;
 
       try {
-        const { visitId } = await registerVehicleAndStartVisitAction(
+        const { visitId, orderId } = await registerVehicleAndStartVisitAction(
           {
             customerName,
             customerPhone,
@@ -102,6 +104,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
           ...prev,
           vehicle,
           visitId,
+          orderId,
           customerName,
           vehicleLabel: vehicleLabelFrom(vehicle.brand || null, vehicle.model || null, vehicle.plate),
         }));
@@ -113,14 +116,17 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
   }
 
   function handleDiagnosticoAdvance() {
-    if (!data.visitId) return;
+    const visitId = data.visitId;
+    const orderId = data.orderId;
+    if (!visitId || !orderId) return;
     setError(null);
     startTransition(async () => {
-      const result = await saveWizardDiagnosticAction(data.visitId!, data.exterior, data.interior, data.observations.trim() || null);
+      const result = await saveWizardDiagnosticAction(visitId, data.exterior, data.interior, data.observations.trim() || null);
       if (result.error || !result.diagnosticId) {
         setError(result.error ?? "Não foi possível salvar o diagnóstico.");
         return;
       }
+      await advanceServiceOrderStatusAction(orderId, "recebido");
       setData((prev) => ({ ...prev, diagnosticId: result.diagnosticId }));
       setStepIndex((i) => i + 1);
     });

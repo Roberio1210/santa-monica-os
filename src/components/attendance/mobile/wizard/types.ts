@@ -28,6 +28,7 @@ export interface WizardData {
   vehicle: VehicleSelection | null;
   mileage: string;
   visitId: string | null;
+  orderId: string | null;
   customerName: string;
   vehicleLabel: string;
   diagnosticId: string | null;

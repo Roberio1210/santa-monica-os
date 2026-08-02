@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { Phone, Camera } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Phone, Camera } from "lucide-react";
 import { MobileTopBar } from "@/components/attendance/mobile/top-bar";
 import { StatusAdvanceButton } from "@/components/attendance/mobile/status-advance-button";
 import { AREA_PROBLEM_LABELS, recommendationCategoryLabel } from "@/lib/attendance/catalog";
@@ -46,6 +47,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
           <p className="mt-2 text-sm text-foreground-subtle">
             {vehicleLabel} · {vehicle.plate ?? "Placa não informada"}
           </p>
+          <Link href={`/atendimento/veiculos/${vehicle.id}`} className="mt-2 flex h-9 items-center gap-1 text-sm font-medium text-accent active:opacity-70">
+            Ver histórico do veículo
+            <ChevronRight className="h-4 w-4" />
+          </Link>
         </div>
 
         {order.items.length > 0 ? (

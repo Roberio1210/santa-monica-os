@@ -12,6 +12,7 @@ import {
   searchByPhoneOrPlate,
   searchCustomersByText,
   startAttendance,
+  startServiceOrder,
   type QuickRegisterInput,
   type SearchResult,
 } from "@/lib/attendance/service";
@@ -30,17 +31,19 @@ export async function fetchCustomerByIdAction(customerId: string): Promise<Searc
   return fetchCustomerSearchResult(customerId);
 }
 
-/** Inicia o atendimento para um cliente/veículo já cadastrados — usado na Etapa 2 do wizard quando o gerente seleciona um veículo existente. */
-export async function startVisitAction(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<{ visitId: string }> {
+/** Inicia o atendimento (visita + Ordem de Serviço em `recebido`) para um cliente/veículo já cadastrados — usado na Etapa 2 do wizard quando o gerente seleciona um veículo existente. */
+export async function startVisitAction(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<{ visitId: string; orderId: string }> {
   const visit = await startAttendance(customerId, vehicleId, mileageAtVisit);
-  return { visitId: visit.id };
+  const order = await startServiceOrder(visit.id);
+  return { visitId: visit.id, orderId: order.id };
 }
 
-/** Cadastra cliente/veículo (reaproveitando por telefone/placa quando já existem) e já inicia o atendimento — usado na Etapa 2 do wizard para cliente novo ou veículo novo de cliente existente. */
-export async function registerVehicleAndStartVisitAction(input: QuickRegisterInput, mileageAtVisit: number | null): Promise<{ visitId: string }> {
+/** Cadastra cliente/veículo (reaproveitando por telefone/placa quando já existem) e já inicia o atendimento (visita + ordem em `recebido`) — usado na Etapa 2 do wizard para cliente novo ou veículo novo de cliente existente. */
+export async function registerVehicleAndStartVisitAction(input: QuickRegisterInput, mileageAtVisit: number | null): Promise<{ visitId: string; orderId: string }> {
   const { customer, vehicle } = await registerQuickCustomerAndVehicle(input);
   const visit = await startAttendance(customer.id, vehicle.id, mileageAtVisit);
-  return { visitId: visit.id };
+  const order = await startServiceOrder(visit.id);
+  return { visitId: visit.id, orderId: order.id };
 }
 
 /** `caption` sempre `null` — registra só o estágio da foto (estrutura preparada, sem upload real). */

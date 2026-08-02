@@ -25,11 +25,12 @@ export default async function AtendimentoHomePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatTile icon={Car} label="Carros previstos" value={String(summary.countsToday.aguardandoExecucao)} />
+        <StatTile icon={Car} label="Carros previstos" value={String(summary.countsToday.previstos)} />
+        <StatTile icon={Car} label="Aguardando atendimento" value={String(summary.countsToday.aguardandoAtendimento)} />
         <StatTile icon={Car} label="Em execução" value={String(summary.countsToday.emExecucao)} />
         <StatTile icon={Car} label="Aguardando conferência" value={String(summary.countsToday.aguardandoConferencia)} />
-        <StatTile icon={Car} label="Prontos para entrega" value={String(summary.countsToday.prontoEntrega)} />
       </div>
+      <StatTile icon={Car} label="Prontos para entrega" value={String(summary.countsToday.prontoEntrega)} />
 
       <div className="grid grid-cols-2 gap-3">
         <StatTile icon={Wallet} label="Faturamento do dia" value={formatCurrency(summary.dailyRevenue)} emphasis />
