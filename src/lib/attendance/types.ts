@@ -172,9 +172,16 @@ export interface AddRecommendationInput {
   observations?: string | null;
 }
 
-export type ServiceOrderStatus = "aguardando_execucao" | "em_execucao" | "aguardando_conferencia" | "pronto_entrega" | "entregue";
+/**
+ * Pipeline operacional completo — a ordem nasce junto com a visita (`recebido`), muito antes de
+ * ter serviços aprovados. `diagnostico` cobre o intervalo entre o diagnóstico salvo e a aprovação
+ * dos serviços. Nunca pula etapa: cada avanço é sempre para o próximo item deste array.
+ */
+export type ServiceOrderStatus = "recebido" | "diagnostico" | "aguardando_execucao" | "em_execucao" | "aguardando_conferencia" | "pronto_entrega" | "entregue";
 
 export const SERVICE_ORDER_STATUSES: ServiceOrderStatus[] = [
+  "recebido",
+  "diagnostico",
   "aguardando_execucao",
   "em_execucao",
   "aguardando_conferencia",
@@ -183,6 +190,8 @@ export const SERVICE_ORDER_STATUSES: ServiceOrderStatus[] = [
 ];
 
 export const SERVICE_ORDER_STATUS_LABELS: Record<ServiceOrderStatus, string> = {
+  recebido: "Recebido",
+  diagnostico: "Diagnóstico",
   aguardando_execucao: "Aguardando Execução",
   em_execucao: "Em Execução",
   aguardando_conferencia: "Aguardando Conferência",
@@ -207,10 +216,6 @@ export interface ServiceOrder {
   updatedAt: string;
 }
 
-export interface CreateServiceOrderInput {
-  serviceVisitId: string;
-  serviceIds: string[];
-}
 
 /**
  * Contexto exibido na Tela 1 quando um cliente/veículo já existe. `activeProtections` sempre
@@ -253,6 +258,8 @@ export interface ManagerBoardOrder {
   updatedAt: string;
   /** `service_visits.created_at` — quando o carro entrou, base real para "tempo desde entrada" (nunca `updatedAt`, que é só a última mudança de status). */
   visitCreatedAt: string;
+  /** Nomes dos serviços aprovados — vazio em `recebido`/`diagnostico`, quando ainda não há itens. */
+  serviceNames: string[];
 }
 
 /** Detalhe consolidado de um veículo/atendimento — tudo que a tela "Detalhe do Veículo" precisa, numa só busca. */
@@ -276,7 +283,10 @@ export interface HomeGoalEstimate {
 
 export interface HomeSummary {
   countsToday: {
-    aguardandoExecucao: number;
+    /** Recém-recebidos, ainda sem diagnóstico. */
+    previstos: number;
+    /** Diagnóstico feito + aguardando início da execução — ambos "esperando a equipe começar". */
+    aguardandoAtendimento: number;
     emExecucao: number;
     aguardandoConferencia: number;
     prontoEntrega: number;

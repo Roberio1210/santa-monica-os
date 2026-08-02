@@ -2,7 +2,6 @@ import type {
   AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
-  CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
@@ -46,6 +45,7 @@ export interface AttendanceRepository {
   createServiceVisit(input: { customerId: string; vehicleId: string; mileageAtVisit: number | null }): Promise<ServiceVisit>;
   getServiceVisit(id: string): Promise<ServiceVisit | null>;
   listVisitsByCustomer(customerId: string): Promise<ServiceVisit[]>;
+  listVisitsByVehicle(vehicleId: string): Promise<ServiceVisit[]>;
 
   /** Upsert por `serviceVisitId` (constraint única) — nunca duplica diagnóstico da mesma visita. */
   saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic>;
@@ -60,7 +60,10 @@ export interface AttendanceRepository {
   addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto>;
   listPhotosByDiagnostic(diagnosticId: string): Promise<DiagnosticPhoto[]>;
 
-  createServiceOrder(input: CreateServiceOrderInput): Promise<ServiceOrder>;
+  /** Cria a ordem assim que a visita começa — sempre `recebido`, sem itens ainda. */
+  startServiceOrder(serviceVisitId: string): Promise<ServiceOrder>;
+  /** Anexa os serviços aprovados a uma ordem já existente — nunca cria uma ordem nova. */
+  addServiceOrderItems(serviceOrderId: string, serviceIds: string[]): Promise<ServiceOrder>;
   getServiceOrder(id: string): Promise<ServiceOrder | null>;
   getServiceOrderByVisit(serviceVisitId: string): Promise<ServiceOrder | null>;
   listServiceOrdersByCustomer(customerId: string): Promise<ServiceOrder[]>;

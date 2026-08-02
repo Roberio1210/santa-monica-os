@@ -4,11 +4,13 @@ import {
   addTechnicalRecommendation,
   advanceServiceOrderStatus,
   createServiceOrderFromApprovedServices,
+  fetchCustomerTimeline,
   fetchHomeSummary,
   fetchManagerBoard,
   fetchOrderDetail,
   fetchServiceCatalog,
   fetchServiceVisitContext,
+  fetchVehicleTimeline,
   listDiagnosticPhotos,
   registerQuickCustomerAndVehicle,
   saveDiagnosticStep,
@@ -16,6 +18,7 @@ import {
   searchCustomersByText,
   setServiceOrderStatus,
   startAttendance,
+  startServiceOrder,
 } from "@/lib/attendance/service";
 import { emptyExteriorAssessment, emptyInteriorAssessment } from "@/lib/attendance/types";
 
@@ -115,6 +118,7 @@ describe("fluxo completo de atendimento", () => {
     const catalog = await fetchServiceCatalog();
     expect(catalog.length).toBeGreaterThan(0);
 
+    await startServiceOrder(visit.id);
     const order = await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
     expect(order.status).toBe("aguardando_execucao");
     expect(order.items).toHaveLength(1);
@@ -136,6 +140,7 @@ describe("status da Ordem de Serviço", () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Status", customerPhone: "48999990030", vehiclePlate: "III9J99" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
     const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
     const order = await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
 
     expect(order.status).toBe("aguardando_execucao");
@@ -149,6 +154,7 @@ describe("status da Ordem de Serviço", () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Correção Manual", customerPhone: "48999990031", vehiclePlate: "JJJ0K00" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
     const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
     const order = await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
     const corrected = await setServiceOrderStatus(order.id, "pronto_entrega");
     expect(corrected.status).toBe("pronto_entrega");
@@ -164,10 +170,18 @@ describe("fetchManagerBoard", () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Painel", customerPhone: "48999990040", vehiclePlate: "KKK1L11" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
     const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
     await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
 
     const board = await fetchManagerBoard();
-    expect(board.columns.map((c) => c.status)).toEqual(["aguardando_execucao", "em_execucao", "aguardando_conferencia", "pronto_entrega"]);
+    expect(board.columns.map((c) => c.status)).toEqual([
+      "recebido",
+      "diagnostico",
+      "aguardando_execucao",
+      "em_execucao",
+      "aguardando_conferencia",
+      "pronto_entrega",
+    ]);
     const aguardando = board.columns.find((c) => c.status === "aguardando_execucao");
     expect(aguardando?.orders.some((o) => o.customerName === "Painel")).toBe(true);
   });
@@ -196,6 +210,7 @@ describe("fetchOrderDetail", () => {
     await addDiagnosticPhoto(diagnostic.id, "durante");
     await addTechnicalRecommendation(visit.id, "polimento", null);
     const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
     const order = await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
 
     const detail = await fetchOrderDetail(order.id);
@@ -215,10 +230,52 @@ describe("fetchHomeSummary", () => {
     const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Home", customerPhone: "48999990070", vehiclePlate: "NNN4O44" });
     const visit = await startAttendance(customer.id, vehicle.id, null);
     const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
     await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
 
     const summary = await fetchHomeSummary();
     expect(summary.dailyRevenue).toBeGreaterThanOrEqual(catalog[0].defaultPrice ?? 0);
-    expect(summary.countsToday.aguardandoExecucao).toBeGreaterThanOrEqual(1);
+    expect(summary.countsToday.aguardandoAtendimento).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("fetchCustomerTimeline", () => {
+  it("traz todas as visitas do cliente com serviços e observações reais", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Timeline Cliente", customerPhone: "48999990080", vehiclePlate: "OOO5P55" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), "Observação da visita.");
+    const catalog = await fetchServiceCatalog();
+    await startServiceOrder(visit.id);
+    await createServiceOrderFromApprovedServices(visit.id, [catalog[0].id]);
+
+    const entries = await fetchCustomerTimeline(customer.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].services).toEqual([catalog[0].name]);
+    expect(entries[0].observations).toBe("Observação da visita.");
+  });
+
+  it("cliente sem nenhuma visita tem timeline vazia, nunca inventada", async () => {
+    const { customer } = await registerQuickCustomerAndVehicle({ customerName: "Sem Visita", customerPhone: "48999990081", vehiclePlate: "PPP6Q66" });
+    expect(await fetchCustomerTimeline(customer.id)).toEqual([]);
+  });
+});
+
+describe("fetchVehicleTimeline", () => {
+  it("traz veículo, cliente, linha do tempo e contagem real de fotos", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Timeline Veículo", customerPhone: "48999990090", vehiclePlate: "QQQ7R77" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const diagnostic = await saveDiagnosticStep(visit.id, emptyExteriorAssessment(), emptyInteriorAssessment(), null);
+    await addDiagnosticPhoto(diagnostic.id, "antes");
+    await addDiagnosticPhoto(diagnostic.id, "depois");
+
+    const detail = await fetchVehicleTimeline(vehicle.id);
+    expect(detail?.vehicle.id).toBe(vehicle.id);
+    expect(detail?.customer.id).toBe(customer.id);
+    expect(detail?.entries).toHaveLength(1);
+    expect(detail?.totalPhotos).toBe(2);
+  });
+
+  it("retorna null para um veículo inexistente, nunca inventa detalhe", async () => {
+    expect(await fetchVehicleTimeline("veiculo-que-nao-existe")).toBeNull();
   });
 });

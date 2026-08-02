@@ -15,6 +15,7 @@ function column(status: ManagerBoardColumn["status"], count: number): ManagerBoa
       vehiclePlate: null,
       updatedAt: "2026-08-01T10:00:00Z",
       visitCreatedAt: "2026-08-01T09:00:00Z",
+      serviceNames: [],
     })),
   };
 }
@@ -33,12 +34,30 @@ function order(id: string, serviceIds: string[]): ServiceOrder {
 describe("summarizeHome — contagens", () => {
   it("mapeia cada coluna do painel para o campo correto", () => {
     const summary = summarizeHome({
-      boardColumns: [column("aguardando_execucao", 3), column("em_execucao", 1), column("aguardando_conferencia", 2), column("pronto_entrega", 0)],
+      boardColumns: [
+        column("recebido", 2),
+        column("diagnostico", 1),
+        column("aguardando_execucao", 3),
+        column("em_execucao", 1),
+        column("aguardando_conferencia", 2),
+        column("pronto_entrega", 0),
+      ],
       todaysOrders: [],
       servicePriceById: {},
       activeGoal: null,
     });
-    expect(summary.countsToday).toEqual({ aguardandoExecucao: 3, emExecucao: 1, aguardandoConferencia: 2, prontoEntrega: 0 });
+    expect(summary.countsToday).toEqual({ previstos: 2, aguardandoAtendimento: 4, emExecucao: 1, aguardandoConferencia: 2, prontoEntrega: 0 });
+  });
+
+  it("nunca mistura carros de diagnóstico/aguardando execução no balde de previstos", () => {
+    const summary = summarizeHome({
+      boardColumns: [column("recebido", 5)],
+      todaysOrders: [],
+      servicePriceById: {},
+      activeGoal: null,
+    });
+    expect(summary.countsToday.previstos).toBe(5);
+    expect(summary.countsToday.aguardandoAtendimento).toBe(0);
   });
 });
 

@@ -5,7 +5,6 @@ import type {
   AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
-  CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
@@ -144,6 +143,10 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.visits.values()).filter((v) => v.customerId === customerId);
   }
 
+  async listVisitsByVehicle(vehicleId: string): Promise<ServiceVisit[]> {
+    return Array.from(this.visits.values()).filter((v) => v.vehicleId === vehicleId);
+  }
+
   async saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic> {
     const existing = this.diagnostics.get(input.serviceVisitId);
     const diagnostic: Diagnostic = {
@@ -206,26 +209,34 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.photos.values()).filter((p) => p.diagnosticId === diagnosticId);
   }
 
-  async createServiceOrder(input: CreateServiceOrderInput): Promise<ServiceOrder> {
-    const catalog = await this.listServiceCatalog();
-    const catalogById = new Map(catalog.map((s) => [s.id, s]));
+  async startServiceOrder(serviceVisitId: string): Promise<ServiceOrder> {
     const order: ServiceOrder = {
       id: randomUUID(),
-      serviceVisitId: input.serviceVisitId,
-      status: "aguardando_execucao",
-      items: input.serviceIds.map((serviceId) => ({
-        id: randomUUID(),
-        serviceOrderId: "",
-        serviceId,
-        serviceName: catalogById.get(serviceId)?.name ?? "Serviço",
-        notes: null,
-      })),
+      serviceVisitId,
+      status: "recebido",
+      items: [],
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
-    order.items = order.items.map((item) => ({ ...item, serviceOrderId: order.id }));
     this.orders.set(order.id, order);
     return order;
+  }
+
+  async addServiceOrderItems(serviceOrderId: string, serviceIds: string[]): Promise<ServiceOrder> {
+    const order = this.orders.get(serviceOrderId);
+    if (!order) throw new Error(`Ordem de serviço ${serviceOrderId} não encontrada.`);
+    const catalog = await this.listServiceCatalog();
+    const catalogById = new Map(catalog.map((s) => [s.id, s]));
+    const newItems = serviceIds.map((serviceId) => ({
+      id: randomUUID(),
+      serviceOrderId,
+      serviceId,
+      serviceName: catalogById.get(serviceId)?.name ?? "Serviço",
+      notes: null,
+    }));
+    const updated: ServiceOrder = { ...order, items: [...order.items, ...newItems], updatedAt: nowIso() };
+    this.orders.set(serviceOrderId, updated);
+    return updated;
   }
 
   async getServiceOrder(id: string): Promise<ServiceOrder | null> {
@@ -261,6 +272,7 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       vehiclePlate: vehicle?.plate ?? null,
       updatedAt: order.updatedAt,
       visitCreatedAt: visit?.createdAt ?? order.createdAt,
+      serviceNames: order.items.map((item) => item.serviceName),
     };
   }
 

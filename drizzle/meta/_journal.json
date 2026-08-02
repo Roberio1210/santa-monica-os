@@ -127,6 +127,20 @@
       "when": 1785631746817,
       "tag": "0017_square_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785681577819,
+      "tag": "0018_service_order_status_pipeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785681577820,
+      "tag": "0019_service_order_status_default",
+      "breakpoints": true
     }
   ]
 }

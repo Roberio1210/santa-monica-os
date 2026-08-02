@@ -4,6 +4,7 @@ import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
 import { summarizeCustomerHistory } from "@/lib/attendance/history";
 import { summarizeHome } from "@/lib/attendance/home";
 import { looksLikePhone, looksLikePlate } from "@/lib/attendance/search";
+import { summarizeTimeline, type TimelineEntry } from "@/lib/attendance/timeline";
 import {
   SERVICE_ORDER_STATUSES,
   SERVICE_ORDER_STATUS_LABELS,
@@ -144,6 +145,11 @@ export async function startAttendance(customerId: string, vehicleId: string, mil
   return getAttendanceRepository().createServiceVisit({ customerId, vehicleId, mileageAtVisit });
 }
 
+/** A Ordem de Serviço nasce junto com a visita, status `recebido` — muito antes de ter serviços aprovados. */
+export async function startServiceOrder(serviceVisitId: string): Promise<ServiceOrder> {
+  return getAttendanceRepository().startServiceOrder(serviceVisitId);
+}
+
 export async function fetchServiceVisitContext(serviceVisitId: string): Promise<{
   visit: ServiceVisit;
   customer: Customer;
@@ -185,12 +191,22 @@ export async function addTechnicalRecommendation(serviceVisitId: string, categor
   return getAttendanceRepository().addRecommendation({ serviceVisitId, category, observations });
 }
 
-/** Nunca cria Ordem de Serviço sem ao menos um serviço aprovado. */
+/**
+ * Anexa os serviços aprovados à ordem que já existe desde o início da visita (nunca cria uma
+ * ordem nova) e avança direto para `aguardando_execucao` — a etapa de diagnóstico já foi
+ * percorrida antes deste ponto no fluxo.
+ */
 export async function createServiceOrderFromApprovedServices(serviceVisitId: string, serviceIds: string[]): Promise<ServiceOrder> {
   if (serviceIds.length === 0) {
     throw new Error("Selecione ao menos um serviço aprovado para criar a Ordem de Serviço.");
   }
-  return getAttendanceRepository().createServiceOrder({ serviceVisitId, serviceIds });
+  const repo = getAttendanceRepository();
+  const order = await repo.getServiceOrderByVisit(serviceVisitId);
+  if (!order) {
+    throw new Error("Ordem de serviço não encontrada para esta visita — o atendimento não foi iniciado corretamente.");
+  }
+  await repo.addServiceOrderItems(order.id, serviceIds);
+  return repo.updateServiceOrderStatus(order.id, "aguardando_execucao");
 }
 
 export async function advanceServiceOrderStatus(serviceOrderId: string, currentStatus: ServiceOrderStatus): Promise<ServiceOrder> {
@@ -258,4 +274,60 @@ export async function fetchHomeSummary(): Promise<HomeSummary> {
   const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
 
   return summarizeHome({ boardColumns: board.columns, todaysOrders, servicePriceById, activeGoal });
+}
+
+/** Linha do tempo com todas as visitas do cliente (qualquer veículo), mais recente primeiro. */
+export async function fetchCustomerTimeline(customerId: string): Promise<TimelineEntry[]> {
+  const repo = getAttendanceRepository();
+  const [visits, diagnostics, recommendations, orders, catalog] = await Promise.all([
+    repo.listVisitsByCustomer(customerId),
+    repo.listDiagnosticsByCustomer(customerId),
+    repo.listRecommendationsByCustomer(customerId),
+    repo.listServiceOrdersByCustomer(customerId),
+    repo.listServiceCatalog(),
+  ]);
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+  return summarizeTimeline({ visits, diagnostics, recommendations, orders, servicePriceById });
+}
+
+export interface VehicleDetail {
+  vehicle: Vehicle;
+  customer: Customer;
+  entries: TimelineEntry[];
+  totalPhotos: number;
+}
+
+/**
+ * Tudo que a Timeline do Veículo precisa — mesmo cliente pode ter vários veículos, cada um com a
+ * sua própria linha do tempo. `totalPhotos` soma as fotos de todos os diagnósticos do veículo
+ * (contagem real, nunca estimada — a foto em si continua sem upload nesta sprint).
+ */
+export async function fetchVehicleTimeline(vehicleId: string): Promise<VehicleDetail | null> {
+  const repo = getAttendanceRepository();
+  const vehicle = await repo.getVehicle(vehicleId);
+  if (!vehicle) return null;
+
+  const [customer, visits, catalog] = await Promise.all([repo.getCustomer(vehicle.customerId), repo.listVisitsByVehicle(vehicleId), repo.listServiceCatalog()]);
+  if (!customer) return null;
+
+  const [diagnostics, recommendationLists, orders] = await Promise.all([
+    Promise.all(visits.map((v) => repo.getDiagnosticByVisit(v.id))),
+    Promise.all(visits.map((v) => repo.listRecommendationsByVisit(v.id))),
+    Promise.all(visits.map((v) => repo.getServiceOrderByVisit(v.id))),
+  ]);
+  const foundDiagnostics = diagnostics.filter((d): d is NonNullable<typeof d> => d !== null);
+
+  const photoLists = await Promise.all(foundDiagnostics.map((d) => repo.listPhotosByDiagnostic(d.id)));
+  const totalPhotos = photoLists.reduce((sum, photos) => sum + photos.length, 0);
+
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+  const entries = summarizeTimeline({
+    visits,
+    diagnostics: foundDiagnostics,
+    recommendations: recommendationLists.flat(),
+    orders: orders.filter((o): o is NonNullable<typeof o> => o !== null),
+    servicePriceById,
+  });
+
+  return { vehicle, customer, entries, totalPhotos };
 }

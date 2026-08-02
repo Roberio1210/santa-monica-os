@@ -90,7 +90,14 @@ export const technicalRecommendations = pgTable("technical_recommendations", {
   ...timestamps,
 });
 
+/**
+ * Pipeline operacional completo — a ordem nasce junto com a visita (status `recebido`), muito
+ * antes de ter serviços aprovados. `diagnostico` cobre o intervalo entre o diagnóstico salvo e a
+ * aprovação dos serviços. Nunca pula etapa: cada avanço é um toque só (ver status.ts).
+ */
 export const serviceOrderStatusEnum = pgEnum("service_order_status", [
+  "recebido",
+  "diagnostico",
   "aguardando_execucao",
   "em_execucao",
   "aguardando_conferencia",
@@ -98,13 +105,13 @@ export const serviceOrderStatusEnum = pgEnum("service_order_status", [
   "entregue",
 ]);
 
-/** Criada automaticamente a partir dos serviços aprovados pelo cliente. Nunca excluída (só o status muda). */
+/** Criada assim que a visita começa (status `recebido`, sem itens) — nunca excluída, só o status/itens mudam. */
 export const serviceOrders = pgTable("service_orders", {
   id: id(),
   serviceVisitId: uuid("service_visit_id")
     .notNull()
     .references(() => serviceVisits.id),
-  status: serviceOrderStatusEnum("status").notNull().default("aguardando_execucao"),
+  status: serviceOrderStatusEnum("status").notNull().default("recebido"),
   active: active(),
   source: source(),
   externalId: externalId(),

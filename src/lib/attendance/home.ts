@@ -25,7 +25,11 @@ export function summarizeHome(params: {
 
   return {
     countsToday: {
-      aguardandoExecucao: countByStatus["aguardando_execucao"] ?? 0,
+      // "Previstos" = carros recém-recebidos, ainda sem diagnóstico.
+      previstos: countByStatus["recebido"] ?? 0,
+      // "Aguardando atendimento" junta diagnóstico feito + aguardando execução — ambos "esperando
+      // a equipe começar", só que em pontos diferentes do fluxo (nunca dois baldes para o mesmo carro).
+      aguardandoAtendimento: (countByStatus["diagnostico"] ?? 0) + (countByStatus["aguardando_execucao"] ?? 0),
       emExecucao: countByStatus["em_execucao"] ?? 0,
       aguardandoConferencia: countByStatus["aguardando_conferencia"] ?? 0,
       prontoEntrega: countByStatus["pronto_entrega"] ?? 0,

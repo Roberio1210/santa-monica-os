@@ -7,7 +7,6 @@ import type {
   AddPhotoInput,
   AddRecommendationInput,
   CreateCustomerInput,
-  CreateServiceOrderInput,
   CreateVehicleInput,
   Customer,
   Diagnostic,
@@ -198,6 +197,11 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toServiceVisit);
   }
 
+  async listVisitsByVehicle(vehicleId: string): Promise<ServiceVisit[]> {
+    const rows = await this.db().select().from(serviceVisits).where(eq(serviceVisits.vehicleId, vehicleId)).orderBy(desc(serviceVisits.createdAt));
+    return rows.map(toServiceVisit);
+  }
+
   async saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic> {
     const [row] = await this.db()
       .insert(diagnostics)
@@ -275,14 +279,20 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return { id: row.id, serviceVisitId: row.serviceVisitId, status: row.status, items, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }
 
-  async createServiceOrder(input: CreateServiceOrderInput): Promise<ServiceOrder> {
-    const [orderRow] = await this.db().insert(serviceOrders).values({ serviceVisitId: input.serviceVisitId, status: "aguardando_execucao", source: "manual" }).returning();
-    if (input.serviceIds.length > 0) {
+  async startServiceOrder(serviceVisitId: string): Promise<ServiceOrder> {
+    const [orderRow] = await this.db().insert(serviceOrders).values({ serviceVisitId, status: "recebido", source: "manual" }).returning();
+    return this.toServiceOrderWithItems(orderRow);
+  }
+
+  async addServiceOrderItems(serviceOrderId: string, serviceIds: string[]): Promise<ServiceOrder> {
+    if (serviceIds.length > 0) {
       await this.db()
         .insert(serviceOrderItems)
-        .values(input.serviceIds.map((serviceId) => ({ serviceOrderId: orderRow.id, serviceId, source: "manual" })));
+        .values(serviceIds.map((serviceId) => ({ serviceOrderId, serviceId, source: "manual" })));
     }
-    return this.toServiceOrderWithItems(orderRow);
+    const [row] = await this.db().select().from(serviceOrders).where(eq(serviceOrders.id, serviceOrderId)).limit(1);
+    if (!row) throw new Error(`Ordem de serviço ${serviceOrderId} não encontrada.`);
+    return this.toServiceOrderWithItems(row);
   }
 
   async getServiceOrder(id: string): Promise<ServiceOrder | null> {
@@ -325,14 +335,34 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .innerJoin(vehicles, eq(serviceVisits.vehicleId, vehicles.id));
   }
 
+  /** Busca os nomes dos serviços aprovados de várias ordens numa única query — evita N+1 no Painel/Execução. */
+  private async loadServiceNamesByOrder(serviceOrderIds: string[]): Promise<Map<string, string[]>> {
+    const namesByOrder = new Map<string, string[]>();
+    if (serviceOrderIds.length === 0) return namesByOrder;
+    const rows = await this.db()
+      .select({ serviceOrderId: serviceOrderItems.serviceOrderId, serviceName: services.name })
+      .from(serviceOrderItems)
+      .innerJoin(services, eq(serviceOrderItems.serviceId, services.id))
+      .where(inArray(serviceOrderItems.serviceOrderId, serviceOrderIds));
+    for (const row of rows) {
+      const existing = namesByOrder.get(row.serviceOrderId) ?? [];
+      existing.push(row.serviceName);
+      namesByOrder.set(row.serviceOrderId, existing);
+    }
+    return namesByOrder;
+  }
+
   async listBoardOrders(): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(ne(serviceOrders.status, "entregue"));
-    return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString() }));
+    const namesByOrder = await this.loadServiceNamesByOrder(rows.map((r) => r.serviceOrderId));
+    return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString(), serviceNames: namesByOrder.get(r.serviceOrderId) ?? [] }));
   }
 
   async listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(eq(serviceOrders.status, "entregue"));
-    return rows.filter((r) => saoPauloDateISO(r.updatedAt) === dateIso).map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString() }));
+    const todaysRows = rows.filter((r) => saoPauloDateISO(r.updatedAt) === dateIso);
+    const namesByOrder = await this.loadServiceNamesByOrder(todaysRows.map((r) => r.serviceOrderId));
+    return todaysRows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString(), serviceNames: namesByOrder.get(r.serviceOrderId) ?? [] }));
   }
 
   /** Mesma estratégia de `listDeliveredOnDate`: filtra em JS pela data de `service_visits.created_at`, sem depender de fuso do banco. */
