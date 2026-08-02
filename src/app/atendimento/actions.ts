@@ -16,7 +16,17 @@ import {
   type QuickRegisterInput,
   type SearchResult,
 } from "@/lib/attendance/service";
-import type { DiagnosticPhoto, ExteriorAssessment, InteriorAssessment, PhotoStage, ServiceOrderStatus } from "@/lib/attendance/types";
+import type {
+  DiagnosticArea,
+  DiagnosticPhoto,
+  EngineAssessment,
+  GlassAssessment,
+  InteriorChecklist,
+  PaintAssessment,
+  ServiceOrderStatus,
+  TiresAssessment,
+  WheelsAssessment,
+} from "@/lib/attendance/types";
 
 export async function searchAttendanceAction(query: string): Promise<SearchResult | null> {
   return searchByPhoneOrPlate(query);
@@ -46,9 +56,9 @@ export async function registerVehicleAndStartVisitAction(input: QuickRegisterInp
   return { visitId: visit.id, orderId: order.id };
 }
 
-/** `caption` sempre `null` — registra só o estágio da foto (estrutura preparada, sem upload real). */
-export async function addPhotoAction(diagnosticId: string, stage: PhotoStage): Promise<DiagnosticPhoto> {
-  return addDiagnosticPhoto(diagnosticId, stage, null);
+/** `caption` sempre `null` — registra só a área da foto (estrutura preparada, sem upload real). */
+export async function addPhotoAction(diagnosticId: string, area: DiagnosticArea): Promise<DiagnosticPhoto> {
+  return addDiagnosticPhoto(diagnosticId, area, null);
 }
 
 export interface DiagnosticFormState {
@@ -59,12 +69,16 @@ export interface DiagnosticFormState {
 /** Devolve o `diagnosticId` — a Etapa 4 (Fotos) do wizard precisa dele para anexar fotos ao diagnóstico certo. */
 export async function saveWizardDiagnosticAction(
   serviceVisitId: string,
-  exterior: ExteriorAssessment,
-  interior: InteriorAssessment,
+  pintura: PaintAssessment,
+  rodas: WheelsAssessment,
+  pneus: TiresAssessment,
+  vidros: GlassAssessment,
+  motor: EngineAssessment,
+  interior: InteriorChecklist,
   observations: string | null,
 ): Promise<{ diagnosticId: string | null; error: string | null }> {
   try {
-    const diagnostic = await saveDiagnosticStep(serviceVisitId, exterior, interior, observations);
+    const diagnostic = await saveDiagnosticStep(serviceVisitId, pintura, rodas, pneus, vidros, motor, interior, observations);
     return { diagnosticId: diagnostic.id, error: null };
   } catch (err) {
     return { diagnosticId: null, error: err instanceof Error ? err.message : "Falha ao salvar o diagnóstico." };

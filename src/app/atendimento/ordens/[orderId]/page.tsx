@@ -5,18 +5,9 @@ import { MobileTopBar } from "@/components/attendance/mobile/top-bar";
 import { StatusAdvanceButton } from "@/components/attendance/mobile/status-advance-button";
 import { OrderTimers } from "@/components/attendance/mobile/order-timers";
 import { DiscountForm } from "@/components/attendance/mobile/discount-form";
-import { AREA_PROBLEM_LABELS, recommendationCategoryLabel } from "@/lib/attendance/catalog";
+import { recommendationCategoryLabel } from "@/lib/attendance/catalog";
 import { fetchOrderDetail } from "@/lib/attendance/service";
-import {
-  CONDITION_LABELS,
-  EXTERIOR_AREAS,
-  EXTERIOR_AREA_LABELS,
-  INTERIOR_AREAS,
-  INTERIOR_AREA_LABELS,
-  PHOTO_STAGES,
-  PHOTO_STAGE_LABELS,
-  SEVERITY_LABELS,
-} from "@/lib/attendance/types";
+import { CONDITION_LABELS, DIAGNOSTIC_AREAS, DIAGNOSTIC_AREA_LABELS, ENGINE_CONDITION_LABELS, type Diagnostic } from "@/lib/attendance/types";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +19,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
   const { order, visit, customer, vehicle, diagnostic, recommendations, totalValue } = detail;
   const vehicleLabel = [vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "Veículo";
 
-  const assessedExterior = EXTERIOR_AREAS.filter((area) => diagnostic?.exterior[area]?.condition);
-  const assessedInterior = INTERIOR_AREAS.filter((area) => diagnostic?.interior[area]?.condition);
+  const diagnosticLines = diagnostic ? DIAGNOSTIC_AREAS.map((area) => ({ area, text: describeDiagnosticArea(diagnostic, area) })).filter((l) => l.text !== null) : [];
 
   return (
     <div>
@@ -72,15 +62,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
 
         {totalValue > 0 ? <DiscountForm serviceOrderId={order.id} originalValue={totalValue} /> : null}
 
-        {assessedExterior.length > 0 || assessedInterior.length > 0 ? (
+        {diagnosticLines.length > 0 ? (
           <div className="rounded-2xl border border-border-subtle bg-background-panel p-4">
             <p className="text-xs text-foreground-subtle">Diagnóstico</p>
             <div className="mt-2 space-y-1.5">
-              {assessedExterior.map((area) => (
-                <DiagnosticLine key={area} label={EXTERIOR_AREA_LABELS[area]} assessment={diagnostic!.exterior[area]} />
-              ))}
-              {assessedInterior.map((area) => (
-                <DiagnosticLine key={area} label={INTERIOR_AREA_LABELS[area]} assessment={diagnostic!.interior[area]} />
+              {diagnosticLines.map((line) => (
+                <p key={line.area} className="text-sm text-foreground">
+                  <span className="text-foreground-subtle">{DIAGNOSTIC_AREA_LABELS[line.area]}:</span> {line.text}
+                </p>
               ))}
             </div>
           </div>
@@ -111,10 +100,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
           <div className="rounded-2xl border border-border-subtle bg-background-panel p-4">
             <p className="text-xs text-foreground-subtle">Fotos</p>
             <div className="mt-2 space-y-1.5">
-              {PHOTO_STAGES.filter((stage) => diagnostic.photos.some((p) => p.stage === stage)).map((stage) => (
-                <div key={stage} className="flex items-center gap-2 text-sm text-foreground">
+              {DIAGNOSTIC_AREAS.filter((area) => diagnostic.photos.some((p) => p.area === area)).map((area) => (
+                <div key={area} className="flex items-center gap-2 text-sm text-foreground">
                   <Camera className="h-4 w-4 text-foreground-subtle" />
-                  {PHOTO_STAGE_LABELS[stage]} · {diagnostic.photos.filter((p) => p.stage === stage).length} foto(s)
+                  {DIAGNOSTIC_AREA_LABELS[area]} · {diagnostic.photos.filter((p) => p.area === area).length} foto(s)
                 </div>
               ))}
             </div>
@@ -125,16 +114,58 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
   );
 }
 
-function DiagnosticLine({ label, assessment }: { label: string; assessment: { condition: string | null; problems: { type: string; severity: string }[] } }) {
-  if (!assessment.condition) return null;
-  const problemsText =
-    assessment.problems.length > 0
-      ? ` — ${assessment.problems.map((p) => `${AREA_PROBLEM_LABELS[p.type] ?? p.type} (${SEVERITY_LABELS[p.severity as keyof typeof SEVERITY_LABELS] ?? p.severity})`).join(", ")}`
-      : "";
-  return (
-    <p className="text-sm text-foreground">
-      <span className="text-foreground-subtle">{label}:</span> {CONDITION_LABELS[assessment.condition as keyof typeof CONDITION_LABELS] ?? assessment.condition}
-      {problemsText}
-    </p>
-  );
+const ISSUE_LEVEL_TEXT: Record<string, string> = { leve: "leve", media: "média", alta: "alta" };
+
+/** `null` quando a área não tem nada a mostrar (nunca renderiza uma linha vazia). */
+function describeDiagnosticArea(diagnostic: Diagnostic, area: (typeof DIAGNOSTIC_AREAS)[number]): string | null {
+  switch (area) {
+    case "pintura": {
+      const { chuvaAcida, riscos, hologramas, manchas } = diagnostic.pintura;
+      const parts: string[] = [];
+      if (chuvaAcida !== "nenhuma") parts.push(`Chuva ácida (${ISSUE_LEVEL_TEXT[chuvaAcida]})`);
+      if (riscos !== "nenhuma") parts.push(`Riscos (${ISSUE_LEVEL_TEXT[riscos]})`);
+      if (hologramas !== "nenhuma") parts.push(`Hologramas (${ISSUE_LEVEL_TEXT[hologramas]})`);
+      if (manchas !== "nenhuma") parts.push(`Manchas (${ISSUE_LEVEL_TEXT[manchas]})`);
+      return parts.length > 0 ? parts.join(", ") : null;
+    }
+    case "rodas": {
+      const { sujeiraPesada, contaminacao, oxidacao, freioImpregnado } = diagnostic.rodas;
+      const parts: string[] = [];
+      if (sujeiraPesada) parts.push("Sujeira pesada");
+      if (contaminacao) parts.push("Contaminação");
+      if (oxidacao) parts.push("Oxidação");
+      if (freioImpregnado) parts.push("Freio impregnado");
+      return parts.length > 0 ? parts.join(", ") : null;
+    }
+    case "pneus":
+      return diagnostic.pneus.condition ? CONDITION_LABELS[diagnostic.pneus.condition] : null;
+    case "vidros": {
+      const { contaminacao, marcasDagua, cristalizacaoExistente } = diagnostic.vidros;
+      const parts: string[] = [];
+      if (contaminacao) parts.push("Contaminação");
+      if (marcasDagua) parts.push("Marcas d'água");
+      if (cristalizacaoExistente) parts.push("Cristalização existente");
+      return parts.length > 0 ? parts.join(", ") : null;
+    }
+    case "motor":
+      return diagnostic.motor.condition ? ENGINE_CONDITION_LABELS[diagnostic.motor.condition] : null;
+    case "interior": {
+      const labels: Record<string, string> = {
+        plasticos: "Plásticos",
+        couro: "Couro",
+        tecidos: "Tecidos",
+        tapetes: "Tapetes",
+        teto: "Teto",
+        portaMalas: "Porta-malas",
+        vidrosInternos: "Vidros internos",
+        odor: "Odor",
+        pelosAnimais: "Pelos de animais",
+        areia: "Areia",
+      };
+      const parts = Object.entries(diagnostic.interior)
+        .filter(([, marked]) => marked)
+        .map(([key]) => labels[key]);
+      return parts.length > 0 ? parts.join(", ") : null;
+    }
+  }
 }

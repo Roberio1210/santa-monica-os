@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
 import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
@@ -8,14 +9,25 @@ export function StepServicos({
   serviceCatalog,
   selectedServiceIds,
   onToggle,
+  showUpgradeHint,
 }: {
   serviceCatalog: ServiceCatalogEntry[];
   selectedServiceIds: Set<string>;
   onToggle: (serviceId: string) => void;
+  showUpgradeHint: boolean;
 }) {
   return (
     <div className="space-y-2.5">
       <p className="text-sm text-foreground-subtle">Selecione os serviços aprovados pelo cliente.</p>
+
+      {showUpgradeHint ? (
+        <div className="flex items-start gap-2.5 rounded-xl border border-accent/40 bg-background-panel p-3">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <p className="text-xs text-foreground-subtle">
+            Este veículo está com necessidades acima do padrão da Lavagem de Manutenção (Bronze). Silver, Gold ou Premium Detail podem entregar um resultado mais adequado — a decisão é sua.
+          </p>
+        </div>
+      ) : null}
       {serviceCatalog.map((service) => {
         const selected = selectedServiceIds.has(service.id);
         return (

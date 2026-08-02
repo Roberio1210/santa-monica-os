@@ -13,7 +13,8 @@ import { StepServicos } from "@/components/attendance/mobile/wizard/step-servico
 import { StepConfirmar } from "@/components/attendance/mobile/wizard/step-confirmar";
 import { WIZARD_STEPS, WIZARD_STEP_LABELS, type WizardData, type WizardStep } from "@/components/attendance/mobile/wizard/types";
 import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
-import { emptyExteriorAssessment, emptyInteriorAssessment, type ExteriorArea, type ExteriorAssessment, type InteriorArea, type InteriorAssessment } from "@/lib/attendance/types";
+import { emptyTechnicalDiagnostic } from "@/lib/attendance/types";
+import { shouldSuggestPackageUpgrade } from "@/lib/attendance/diagnosticRecommendations";
 import type { SearchResult } from "@/lib/attendance/service";
 
 const INITIAL_DATA: WizardData = {
@@ -25,8 +26,7 @@ const INITIAL_DATA: WizardData = {
   customerName: "",
   vehicleLabel: "",
   diagnosticId: null,
-  exterior: emptyExteriorAssessment(),
-  interior: emptyInteriorAssessment(),
+  diagnostic: emptyTechnicalDiagnostic(),
   observations: "",
   photos: [],
   recommendations: [],
@@ -121,7 +121,8 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
     if (!visitId || !orderId) return;
     setError(null);
     startTransition(async () => {
-      const result = await saveWizardDiagnosticAction(visitId, data.exterior, data.interior, data.observations.trim() || null);
+      const { pintura, rodas, pneus, vidros, motor, interior } = data.diagnostic;
+      const result = await saveWizardDiagnosticAction(visitId, pintura, rodas, pneus, vidros, motor, interior, data.observations.trim() || null);
       if (result.error || !result.diagnosticId) {
         setError(result.error ?? "Não foi possível salvar o diagnóstico.");
         return;
@@ -179,11 +180,9 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
 
         {step === "diagnostico" ? (
           <StepDiagnostico
-            exterior={data.exterior}
-            interior={data.interior}
+            diagnostic={data.diagnostic}
             observations={data.observations}
-            onExteriorChange={(area: ExteriorArea, next: ExteriorAssessment[ExteriorArea]) => setData((prev) => ({ ...prev, exterior: { ...prev.exterior, [area]: next } }))}
-            onInteriorChange={(area: InteriorArea, next: InteriorAssessment[InteriorArea]) => setData((prev) => ({ ...prev, interior: { ...prev.interior, [area]: next } }))}
+            onChange={(diagnostic) => setData((prev) => ({ ...prev, diagnostic }))}
             onObservationsChange={(observations) => setData((prev) => ({ ...prev, observations }))}
           />
         ) : null}
@@ -195,6 +194,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
         {step === "recomendacoes" && data.visitId ? (
           <StepRecomendacoes
             visitId={data.visitId}
+            diagnostic={data.diagnostic}
             recommendations={data.recommendations}
             onAdded={(recommendation) => setData((prev) => ({ ...prev, recommendations: [...prev.recommendations, recommendation] }))}
           />
@@ -204,6 +204,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
           <StepServicos
             serviceCatalog={serviceCatalog}
             selectedServiceIds={data.selectedServiceIds}
+            showUpgradeHint={shouldSuggestPackageUpgrade(data.diagnostic)}
             onToggle={(serviceId) =>
               setData((prev) => {
                 const next = new Set(prev.selectedServiceIds);

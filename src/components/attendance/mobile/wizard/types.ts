@@ -1,4 +1,4 @@
-import type { DiagnosticPhoto, ExteriorAssessment, InteriorAssessment, TechnicalRecommendation } from "@/lib/attendance/types";
+import type { DiagnosticPhoto, TechnicalDiagnosticInput, TechnicalRecommendation } from "@/lib/attendance/types";
 import type { SearchResult } from "@/lib/attendance/service";
 
 export const WIZARD_STEPS = ["cliente", "veiculo", "diagnostico", "fotos", "recomendacoes", "servicos", "confirmar"] as const;
@@ -32,8 +32,7 @@ export interface WizardData {
   customerName: string;
   vehicleLabel: string;
   diagnosticId: string | null;
-  exterior: ExteriorAssessment;
-  interior: InteriorAssessment;
+  diagnostic: TechnicalDiagnosticInput;
   observations: string;
   photos: DiagnosticPhoto[];
   recommendations: TechnicalRecommendation[];
