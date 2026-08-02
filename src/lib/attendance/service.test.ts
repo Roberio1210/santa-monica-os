@@ -8,6 +8,7 @@ import {
   fetchDayManagement,
   fetchHomeSummary,
   fetchManagerBoard,
+  fetchOperationsCenter,
   fetchOrderDetail,
   fetchRecentVehicles,
   fetchServiceCatalog,
@@ -326,5 +327,38 @@ describe("fetchTimelineFeed", () => {
 
     const ontem = await fetchTimelineFeed("ontem");
     expect(ontem.entries.some((e) => e.customerName === "Timeline Feed")).toBe(false);
+  });
+});
+
+describe("fetchOperationsCenter", () => {
+  it("isOperating é true quando há ao menos uma ordem ativa", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Operação Ativa", customerPhone: "48999990104", vehiclePlate: "GDD5E55" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    await startServiceOrder(visit.id);
+
+    const center = await fetchOperationsCenter();
+    expect(center.isOperating).toBe(true);
+    expect(center.atendimentosHoje).toBeGreaterThanOrEqual(1);
+  });
+
+  it("separa execução/conferência/prontos e deriva alertas a partir dos mesmos cards", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Operação Conferência", customerPhone: "48999990105", vehiclePlate: "GDD6F66" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    const order = await startServiceOrder(visit.id);
+    await setServiceOrderStatus(order.id, "aguardando_conferencia");
+
+    const center = await fetchOperationsCenter();
+    expect(center.aguardandoConferencia.some((o) => o.serviceOrderId === order.id)).toBe(true);
+    // Acabou de mudar de status agora — não passou dos 30 minutos, não deve gerar alerta.
+    expect(center.alerts.some((a) => a.serviceOrderId === order.id)).toBe(false);
+  });
+
+  it("timeline inclui o evento de chegada da ordem criada hoje", async () => {
+    const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: "Operação Timeline", customerPhone: "48999990106", vehiclePlate: "GDD7G77" });
+    const visit = await startAttendance(customer.id, vehicle.id, null);
+    await startServiceOrder(visit.id);
+
+    const center = await fetchOperationsCenter();
+    expect(center.timeline.some((e) => e.label.includes("Operação Timeline") && e.label.includes("chegou"))).toBe(true);
   });
 });

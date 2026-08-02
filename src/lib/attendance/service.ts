@@ -6,6 +6,7 @@ import { summarizeHome } from "@/lib/attendance/home";
 import { looksLikePhone, looksLikePlate } from "@/lib/attendance/search";
 import { summarizeTimeline, type TimelineEntry } from "@/lib/attendance/timeline";
 import { resolveDayPeriod, type DayPeriodKey, type DayPeriodRange } from "@/lib/attendance/period";
+import { buildDayTimeline, deriveOperationalAlerts, type OperationalAlert, type OperationsEvent } from "@/lib/attendance/operationsCenter";
 import {
   SERVICE_ORDER_STATUSES,
   SERVICE_ORDER_STATUS_LABELS,
@@ -335,6 +336,59 @@ export async function fetchTimelineFeed(periodKey: DayPeriodKey = "hoje"): Promi
   const period = resolveDayPeriod(periodKey, saoPauloDateISO());
   const entries = await repo.listOrdersInRange(period.from, period.to);
   return { entries: [...entries].sort((a, b) => b.visitCreatedAt.localeCompare(a.visitCreatedAt)), period };
+}
+
+export interface OperationsCenter {
+  generatedAt: string;
+  /** `false` só quando não há nenhuma ordem ativa (qualquer status antes de `entregue`) — "Sem atendimentos em andamento". */
+  isOperating: boolean;
+  /** Total de ordens cuja visita aconteceu hoje, qualquer status — não confundir com as contagens por estágio de `summary`. */
+  atendimentosHoje: number;
+  summary: HomeSummary;
+  /** Já vem ordenado do mais antigo (mesmo sort de `fetchManagerBoard`, por `updatedAt` — desde quando entrou no estágio atual). */
+  emExecucao: ManagerBoardOrder[];
+  aguardandoConferencia: ManagerBoardOrder[];
+  prontos: ManagerBoardOrder[];
+  timeline: OperationsEvent[];
+  alerts: OperationalAlert[];
+}
+
+/**
+ * Orquestrador da Central de Operações (`/operacao`) — visão ao vivo, sempre de hoje. Reaproveita
+ * `fetchManagerBoard`/`summarizeHome` (mesmas consultas da Gestão do Dia, nenhuma duplicada) e
+ * soma só o que falta: o feed de entradas de hoje (para a timeline) e os alertas derivados dos
+ * mesmos cards já carregados.
+ */
+export async function fetchOperationsCenter(): Promise<OperationsCenter> {
+  const repo = getAttendanceRepository();
+  const today = saoPauloDateISO();
+
+  const [board, todaysOrders, catalog, activeGoal, todaysEntries] = await Promise.all([
+    fetchManagerBoard(),
+    repo.listServiceOrdersVisitedOnDate(today),
+    repo.listServiceCatalog(),
+    fetchActiveGoal("consolidado", today),
+    repo.listOrdersInRange(today, today),
+  ]);
+
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+  const summary = summarizeHome({ boardColumns: board.columns, todaysOrders, deliveredToday: board.deliveredToday, servicePriceById, activeGoal });
+
+  const emExecucao = board.columns.find((c) => c.status === "em_execucao")?.orders ?? [];
+  const aguardandoConferencia = board.columns.find((c) => c.status === "aguardando_conferencia")?.orders ?? [];
+  const prontos = board.columns.find((c) => c.status === "pronto_entrega")?.orders ?? [];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    isOperating: board.columns.some((c) => c.orders.length > 0),
+    atendimentosHoje: todaysOrders.length,
+    summary,
+    emExecucao,
+    aguardandoConferencia,
+    prontos,
+    timeline: buildDayTimeline(todaysEntries),
+    alerts: deriveOperationalAlerts({ emExecucao, aguardandoConferencia, prontos }),
+  };
 }
 
 /** Linha do tempo com todas as visitas do cliente (qualquer veículo), mais recente primeiro. */

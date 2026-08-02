@@ -18,16 +18,20 @@ export interface OrderTimers {
   totalMinutes: number | null;
 }
 
+/** Minutos entre um timestamp ISO e `now` — nunca negativo. Base de todo cronômetro do módulo. */
+export function minutesSince(iso: string, now: Date = new Date()): number {
+  return Math.max(0, (now.getTime() - Date.parse(iso)) / 60_000);
+}
+
 export function computeOrderTimers(
   params: { status: ServiceOrderStatus; visitCreatedAt: string; updatedAt: string },
   now: Date = new Date(),
 ): OrderTimers {
   const { status, visitCreatedAt, updatedAt } = params;
-  const minutesBetween = (fromIso: string, toMs: number) => Math.max(0, (toMs - Date.parse(fromIso)) / 60_000);
 
   return {
-    sinceEntryMinutes: minutesBetween(visitCreatedAt, now.getTime()),
-    inExecutionMinutes: status === "em_execucao" ? minutesBetween(updatedAt, now.getTime()) : null,
-    totalMinutes: status === "entregue" ? minutesBetween(visitCreatedAt, Date.parse(updatedAt)) : null,
+    sinceEntryMinutes: minutesSince(visitCreatedAt, now),
+    inExecutionMinutes: status === "em_execucao" ? minutesSince(updatedAt, now) : null,
+    totalMinutes: status === "entregue" ? Math.max(0, (Date.parse(updatedAt) - Date.parse(visitCreatedAt)) / 60_000) : null,
   };
 }

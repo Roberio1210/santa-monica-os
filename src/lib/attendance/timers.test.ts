@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { computeOrderTimers } from "@/lib/attendance/timers";
+import { computeOrderTimers, minutesSince } from "@/lib/attendance/timers";
 
 const NOW = new Date("2026-08-02T12:00:00Z");
+
+describe("minutesSince", () => {
+  it("calcula minutos entre um timestamp ISO e agora", () => {
+    expect(minutesSince("2026-08-02T11:00:00Z", NOW)).toBe(60);
+  });
+
+  it("nunca retorna negativo com timestamp futuro", () => {
+    expect(minutesSince("2026-08-02T13:00:00Z", NOW)).toBe(0);
+  });
+});
 
 describe("computeOrderTimers", () => {
   it("sinceEntryMinutes sempre reflete agora - visitCreatedAt, qualquer que seja o status", () => {
