@@ -4,6 +4,7 @@ import { ChevronRight, Phone, Camera } from "lucide-react";
 import { MobileTopBar } from "@/components/attendance/mobile/top-bar";
 import { StatusAdvanceButton } from "@/components/attendance/mobile/status-advance-button";
 import { OrderTimers } from "@/components/attendance/mobile/order-timers";
+import { DiscountForm } from "@/components/attendance/mobile/discount-form";
 import { AREA_PROBLEM_LABELS, recommendationCategoryLabel } from "@/lib/attendance/catalog";
 import { fetchOrderDetail } from "@/lib/attendance/service";
 import {
@@ -24,7 +25,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
   const detail = await fetchOrderDetail(orderId);
   if (!detail) notFound();
 
-  const { order, visit, customer, vehicle, diagnostic, recommendations } = detail;
+  const { order, visit, customer, vehicle, diagnostic, recommendations, totalValue } = detail;
   const vehicleLabel = [vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "Veículo";
 
   const assessedExterior = EXTERIOR_AREAS.filter((area) => diagnostic?.exterior[area]?.condition);
@@ -68,6 +69,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
             </ul>
           </div>
         ) : null}
+
+        {totalValue > 0 ? <DiscountForm serviceOrderId={order.id} originalValue={totalValue} /> : null}
 
         {assessedExterior.length > 0 || assessedInterior.length > 0 ? (
           <div className="rounded-2xl border border-border-subtle bg-background-panel p-4">

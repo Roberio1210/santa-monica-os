@@ -7,7 +7,9 @@ import { OperationsOrderCard } from "@/components/operations-center/order-card";
 import { AlertsList } from "@/components/operations-center/alerts-list";
 import { QuickSearch } from "@/components/operations-center/quick-search";
 import { DayTimeline } from "@/components/operations-center/day-timeline";
+import { OwnerAttentionBlock } from "@/components/manager-assistant/owner-attention-block";
 import { fetchOperationsCenter } from "@/lib/attendance/service";
+import { fetchOwnerAttentionSnapshot } from "@/lib/manager-assistant/service";
 import type { ManagerBoardOrder } from "@/lib/attendance/types";
 import { formatCurrency, formatDateBR, formatDurationMinutes } from "@/lib/utils/format";
 import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
@@ -16,7 +18,7 @@ import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
 export const dynamic = "force-dynamic";
 
 export default async function OperacaoPage() {
-  const center = await fetchOperationsCenter();
+  const [center, ownerAttention] = await Promise.all([fetchOperationsCenter(), fetchOwnerAttentionSnapshot()]);
   const now = new Date(center.generatedAt);
 
   return (
@@ -44,6 +46,8 @@ export default async function OperacaoPage() {
         <StatCard label="Ticket médio" icon={Receipt} value={center.summary.averageTicket !== null ? formatCurrency(center.summary.averageTicket) : "—"} />
         <StatCard label="Tempo médio" icon={Timer} value={center.summary.averageServiceDurationMinutes !== null ? formatDurationMinutes(center.summary.averageServiceDurationMinutes) : "—"} />
       </div>
+
+      <OwnerAttentionBlock snapshot={ownerAttention} />
 
       <AlertsList alerts={center.alerts} />
 
