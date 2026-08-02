@@ -29,11 +29,14 @@ export const serviceVisits = pgTable("service_visits", {
 });
 
 /**
- * Avaliação técnica de um atendimento. `exteriorAssessment`/`interiorAssessment` são jsonb —
- * mesmo padrão já usado no projeto para estrutura semi-fixa e sujeita a evolução (ex.:
- * `stone_reconciliation_results.favorable_signals`, `operational_orders.metadata` planejado).
- * Formato de cada área: `{ condition: "excelente"|"boa"|"regular"|"ruim"|null, problems:
- * [{ type: string, severity: "leve"|"moderada"|"severa" }] }` — ver src/lib/attendance/types.ts.
+ * Diagnóstico Técnico Inteligente (Missão 19) — checklist estruturado sempre de fora para dentro:
+ * Pintura → Rodas → Pneus → Vidros → Motor → Interior. `exteriorAssessment`/`interiorAssessment`
+ * continuam jsonb — mesmo padrão já usado no projeto para estrutura semi-fixa e sujeita a evolução
+ * (ex.: `stone_reconciliation_results.favorable_signals`) — mas o conteúdo mudou:
+ * `exteriorAssessment` guarda `{ pintura, rodas, pneus, vidros, motor }` (uma chave por área, cada
+ * uma no formato específico daquela área) e `interiorAssessment` guarda o checklist do interior
+ * diretamente (plásticos/couro/tecidos/tapetes/teto/porta-malas/vidros internos/odor/pelos/areia).
+ * Ver `src/lib/attendance/types.ts` para os tipos exatos de cada área.
  */
 export const diagnostics = pgTable("diagnostics", {
   id: id(),
@@ -51,19 +54,19 @@ export const diagnostics = pgTable("diagnostics", {
   ...timestamps,
 });
 
-export const photoStageEnum = pgEnum("photo_stage", ["antes", "durante", "depois"]);
+/** Ordem obrigatória do diagnóstico (sempre de fora para dentro) — mesma lista de `DIAGNOSTIC_AREAS`. */
+export const diagnosticAreaEnum = pgEnum("diagnostic_area", ["pintura", "rodas", "pneus", "vidros", "motor", "interior"]);
 
 /**
- * Estrutura preparada para fotos (antes/durante/depois) — sem upload real nesta sprint. `url`
- * fica nulo até existir um mecanismo de upload; a tabela já está pronta para recebê-lo depois
- * sem migration nova.
+ * Foto anexada a uma área do diagnóstico — sem upload real nesta sprint. `url` fica nulo até
+ * existir um mecanismo de upload; a tabela já está pronta para recebê-lo depois sem migration nova.
  */
 export const diagnosticPhotos = pgTable("diagnostic_photos", {
   id: id(),
   diagnosticId: uuid("diagnostic_id")
     .notNull()
     .references(() => diagnostics.id),
-  stage: photoStageEnum("stage").notNull(),
+  area: diagnosticAreaEnum("area").notNull(),
   url: text("url"),
   caption: text("caption"),
   active: active(),

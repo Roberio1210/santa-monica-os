@@ -17,6 +17,10 @@ const SEED_SERVICES: SeedService[] = [
   { externalId: "bronze", name: "Bronze", category: "Pacote" },
   { externalId: "silver", name: "Silver", category: "Pacote" },
   { externalId: "gold", name: "Gold", category: "Pacote" },
+  /** Missão 19 — Diagnóstico Técnico Inteligente: novo pacote, sem preço definido pelo negócio. */
+  { externalId: "premium-detail", name: "Premium Detail", category: "Pacote" },
+  /** Missão 19 — alvo real do catálogo para a recomendação "couro ressecado → hidratação". */
+  { externalId: "hidratacao-couro", name: "Hidratação de Couro", category: "Higienização" },
   { externalId: "lavagem-externa", name: "Lavagem Externa", category: "Lavagem" },
   { externalId: "lavagem-interna", name: "Lavagem Interna", category: "Lavagem" },
   { externalId: "higienizacao-interna", name: "Higienização Interna", category: "Higienização" },
