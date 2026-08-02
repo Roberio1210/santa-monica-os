@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsedTime } from "@/lib/utils/format";
+import { formatDurationMinutes, formatElapsedTime } from "@/lib/utils/format";
+
+describe("formatDurationMinutes", () => {
+  it("arredonda minutos fracionados", () => {
+    expect(formatDurationMinutes(24.6)).toBe("25 min");
+  });
+
+  it("nunca mostra duração negativa", () => {
+    expect(formatDurationMinutes(-10)).toBe("0 min");
+  });
+
+  it("formata horas e dias como formatElapsedTime", () => {
+    expect(formatDurationMinutes(135)).toBe("2h 15min");
+    expect(formatDurationMinutes(2880)).toBe("2 dias");
+  });
+});
 
 describe("formatElapsedTime", () => {
   const now = new Date("2026-08-01T15:00:00Z");

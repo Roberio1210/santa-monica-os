@@ -25,6 +25,7 @@ import type {
 import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
 import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
+import type { RecentVehicleEntry } from "@/lib/attendance/repository";
 
 function toCustomer(row: typeof customers.$inferSelect): Customer {
   return {
@@ -335,34 +336,51 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .innerJoin(vehicles, eq(serviceVisits.vehicleId, vehicles.id));
   }
 
-  /** Busca os nomes dos serviços aprovados de várias ordens numa única query — evita N+1 no Painel/Execução. */
-  private async loadServiceNamesByOrder(serviceOrderIds: string[]): Promise<Map<string, string[]>> {
-    const namesByOrder = new Map<string, string[]>();
-    if (serviceOrderIds.length === 0) return namesByOrder;
+  /** Busca nomes e valor total dos serviços aprovados de várias ordens numa única query — evita N+1 no Painel/Execução/Gestão do Dia. `defaultPrice` nulo conta como 0 — mesma regra usada em `dailyRevenue`. */
+  private async loadServiceSummaryByOrder(serviceOrderIds: string[]): Promise<Map<string, { names: string[]; totalValue: number }>> {
+    const summaryByOrder = new Map<string, { names: string[]; totalValue: number }>();
+    if (serviceOrderIds.length === 0) return summaryByOrder;
     const rows = await this.db()
-      .select({ serviceOrderId: serviceOrderItems.serviceOrderId, serviceName: services.name })
+      .select({ serviceOrderId: serviceOrderItems.serviceOrderId, serviceName: services.name, defaultPrice: services.defaultPrice })
       .from(serviceOrderItems)
       .innerJoin(services, eq(serviceOrderItems.serviceId, services.id))
       .where(inArray(serviceOrderItems.serviceOrderId, serviceOrderIds));
     for (const row of rows) {
-      const existing = namesByOrder.get(row.serviceOrderId) ?? [];
-      existing.push(row.serviceName);
-      namesByOrder.set(row.serviceOrderId, existing);
+      const existing = summaryByOrder.get(row.serviceOrderId) ?? { names: [], totalValue: 0 };
+      existing.names.push(row.serviceName);
+      existing.totalValue += row.defaultPrice !== null ? Number(row.defaultPrice) : 0;
+      summaryByOrder.set(row.serviceOrderId, existing);
     }
-    return namesByOrder;
+    return summaryByOrder;
+  }
+
+  private async toManagerBoardOrders(
+    rows: Array<{
+      serviceOrderId: string;
+      status: ServiceOrderStatus;
+      customerName: string | null;
+      vehicleModel: string | null;
+      vehiclePlate: string | null;
+      updatedAt: Date;
+      visitCreatedAt: Date;
+    }>,
+  ): Promise<ManagerBoardOrder[]> {
+    const summaryByOrder = await this.loadServiceSummaryByOrder(rows.map((r) => r.serviceOrderId));
+    return rows.map((r) => {
+      const summary = summaryByOrder.get(r.serviceOrderId) ?? { names: [], totalValue: 0 };
+      return { ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString(), serviceNames: summary.names, totalValue: summary.totalValue };
+    });
   }
 
   async listBoardOrders(): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(ne(serviceOrders.status, "entregue"));
-    const namesByOrder = await this.loadServiceNamesByOrder(rows.map((r) => r.serviceOrderId));
-    return rows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString(), serviceNames: namesByOrder.get(r.serviceOrderId) ?? [] }));
+    return this.toManagerBoardOrders(rows);
   }
 
   async listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]> {
     const rows = await this.boardSelect().where(eq(serviceOrders.status, "entregue"));
     const todaysRows = rows.filter((r) => saoPauloDateISO(r.updatedAt) === dateIso);
-    const namesByOrder = await this.loadServiceNamesByOrder(todaysRows.map((r) => r.serviceOrderId));
-    return todaysRows.map((r) => ({ ...r, updatedAt: r.updatedAt.toISOString(), visitCreatedAt: r.visitCreatedAt.toISOString(), serviceNames: namesByOrder.get(r.serviceOrderId) ?? [] }));
+    return this.toManagerBoardOrders(todaysRows);
   }
 
   /** Mesma estratégia de `listDeliveredOnDate`: filtra em JS pela data de `service_visits.created_at`, sem depender de fuso do banco. */
@@ -373,6 +391,26 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .innerJoin(serviceVisits, eq(serviceOrders.serviceVisitId, serviceVisits.id));
     const todaysRows = rows.filter((r) => saoPauloDateISO(r.visitCreatedAt) === dateIso);
     return Promise.all(todaysRows.map((r) => this.toServiceOrderWithItems(r.order)));
+  }
+
+  /** Qualquer status (inclusive `entregue`) cuja visita caiu no intervalo `[fromIso, toIso]` — base da seção "Entradas"/tela "Timeline" da Gestão do Dia. */
+  async listOrdersInRange(fromIso: string, toIso: string): Promise<ManagerBoardOrder[]> {
+    const rows = await this.boardSelect();
+    const inRange = rows.filter((r) => {
+      const day = saoPauloDateISO(r.visitCreatedAt);
+      return day >= fromIso && day <= toIso;
+    });
+    return this.toManagerBoardOrders(inRange);
+  }
+
+  async listRecentVehiclesWithCustomer(limit: number): Promise<RecentVehicleEntry[]> {
+    const rows = await this.db()
+      .select({ vehicle: vehicles, customer: customers })
+      .from(vehicles)
+      .innerJoin(customers, eq(vehicles.customerId, customers.id))
+      .orderBy(desc(vehicles.updatedAt))
+      .limit(limit);
+    return rows.map((r) => ({ vehicle: toVehicle(r.vehicle), customer: toCustomer(r.customer) }));
   }
 
   async listServiceCatalog(): Promise<ServiceCatalogEntry[]> {

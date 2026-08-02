@@ -15,6 +15,11 @@ import type {
   Vehicle,
 } from "@/lib/attendance/types";
 
+export interface RecentVehicleEntry {
+  vehicle: Vehicle;
+  customer: Customer;
+}
+
 export interface ServiceCatalogEntry {
   id: string;
   name: string;
@@ -75,6 +80,11 @@ export interface AttendanceRepository {
   listDeliveredOnDate(dateIso: string): Promise<ManagerBoardOrder[]>;
   /** Ordens cuja visita (`service_visits.created_at`) cai no dia informado — usado no faturamento do dia da Home. */
   listServiceOrdersVisitedOnDate(dateIso: string): Promise<ServiceOrder[]>;
+  /** Todas as ordens (qualquer status, incluindo `entregue`) cuja visita caiu no intervalo — base da seção "Entradas" da Gestão do Dia, mostra o status ATUAL de cada uma (não há histórico de status por dia). */
+  listOrdersInRange(fromIso: string, toIso: string): Promise<ManagerBoardOrder[]>;
+
+  /** Veículos mais recentemente atualizados, com o cliente dono — base da tela "Veículos". */
+  listRecentVehiclesWithCustomer(limit: number): Promise<RecentVehicleEntry[]>;
 
   listServiceCatalog(): Promise<ServiceCatalogEntry[]>;
 }

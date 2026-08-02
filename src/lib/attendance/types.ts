@@ -260,6 +260,8 @@ export interface ManagerBoardOrder {
   visitCreatedAt: string;
   /** Nomes dos serviços aprovados — vazio em `recebido`/`diagnostico`, quando ainda não há itens. */
   serviceNames: string[];
+  /** Soma do preço padrão dos itens aprovados — `0` quando ainda não há itens (nunca um valor estimado). */
+  totalValue: number;
 }
 
 /** Detalhe consolidado de um veículo/atendimento — tudo que a tela "Detalhe do Veículo" precisa, numa só busca. */
@@ -290,7 +292,19 @@ export interface HomeSummary {
     emExecucao: number;
     aguardandoConferencia: number;
     prontoEntrega: number;
+    /** Entregues hoje — mesma contagem da tela Entregas. */
+    entregue: number;
   };
   dailyRevenue: number;
+  /**
+   * Valor médio das ordens de hoje que já têm ao menos um item aprovado — `null` quando nenhuma
+   * ordem de hoje tem itens ainda (nunca `0`, que sugeriria ticket médio real igual a zero).
+   */
+  averageTicket: number | null;
+  /**
+   * Minutos médios entre entrada e entrega das ordens entregues hoje — `null` quando nada foi
+   * entregue hoje ainda (não estimado a partir de ordens em aberto).
+   */
+  averageServiceDurationMinutes: number | null;
   goal: HomeGoalEstimate | null;
 }

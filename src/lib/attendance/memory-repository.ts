@@ -20,6 +20,7 @@ import type {
 import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
 import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
+import type { RecentVehicleEntry } from "@/lib/attendance/repository";
 
 /** Catálogo mínimo para desenvolvimento sem banco (`DATABASE_URL` ausente) — nunca usado em produção. */
 const DEV_SERVICE_CATALOG: ServiceCatalogEntry[] = [
@@ -264,6 +265,9 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     const visit = this.visits.get(order.serviceVisitId);
     const customer = visit ? this.customers.get(visit.customerId) : null;
     const vehicle = visit ? this.vehicles.get(visit.vehicleId) : null;
+    const catalog = await this.listServiceCatalog();
+    const priceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+    const totalValue = order.items.reduce((sum, item) => sum + (priceById[item.serviceId] ?? 0), 0);
     return {
       serviceOrderId: order.id,
       status: order.status,
@@ -273,6 +277,7 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       updatedAt: order.updatedAt,
       visitCreatedAt: visit?.createdAt ?? order.createdAt,
       serviceNames: order.items.map((item) => item.serviceName),
+      totalValue,
     };
   }
 
@@ -289,6 +294,27 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
   async listServiceOrdersVisitedOnDate(dateIso: string): Promise<ServiceOrder[]> {
     const visitIdsToday = new Set(Array.from(this.visits.values()).filter((v) => saoPauloDateISO(new Date(v.createdAt)) === dateIso).map((v) => v.id));
     return Array.from(this.orders.values()).filter((o) => visitIdsToday.has(o.serviceVisitId));
+  }
+
+  async listOrdersInRange(fromIso: string, toIso: string): Promise<ManagerBoardOrder[]> {
+    const visitIdsInRange = new Set(
+      Array.from(this.visits.values())
+        .filter((v) => {
+          const day = saoPauloDateISO(new Date(v.createdAt));
+          return day >= fromIso && day <= toIso;
+        })
+        .map((v) => v.id),
+    );
+    const inRange = Array.from(this.orders.values()).filter((o) => visitIdsInRange.has(o.serviceVisitId));
+    return Promise.all(inRange.map((o) => this.boardEntry(o)));
+  }
+
+  async listRecentVehiclesWithCustomer(limit: number): Promise<RecentVehicleEntry[]> {
+    return Array.from(this.vehicles.values())
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((vehicle) => ({ vehicle, customer: this.customers.get(vehicle.customerId) ?? null }))
+      .filter((entry): entry is RecentVehicleEntry => entry.customer !== null)
+      .slice(0, limit);
   }
 
   async listServiceCatalog(): Promise<ServiceCatalogEntry[]> {

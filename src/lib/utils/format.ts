@@ -17,13 +17,18 @@ export function formatDateBR(dateIso: string | null): string {
   return `${day}/${month}/${year}`;
 }
 
-/** Tempo decorrido desde um timestamp ISO, em texto curto (ex.: "35 min", "2h 15min", "1 dia"). `now` é parâmetro para manter a função pura e testável. */
-export function formatElapsedTime(sinceIso: string, now: Date = new Date()): string {
-  const minutes = Math.max(0, Math.round((now.getTime() - Date.parse(sinceIso)) / 60_000));
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
+/** Duração em minutos → texto curto (ex.: "35 min", "2h 15min", "1 dia"). Base de `formatElapsedTime` e de qualquer outra duração já calculada em minutos (ex.: cronômetro, tempo médio de atendimento). */
+export function formatDurationMinutes(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m} min`;
+  const hours = Math.floor(m / 60);
+  const remainingMinutes = m % 60;
   if (hours < 24) return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}min` : `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days} dia${days > 1 ? "s" : ""}`;
+}
+
+/** Tempo decorrido desde um timestamp ISO, em texto curto. `now` é parâmetro para manter a função pura e testável. */
+export function formatElapsedTime(sinceIso: string, now: Date = new Date()): string {
+  return formatDurationMinutes((now.getTime() - Date.parse(sinceIso)) / 60_000);
 }
