@@ -1,4 +1,4 @@
-import { Car, History, PackageCheck, PlusCircle, Receipt, Search, Sparkles, Target, Timer, Wallet } from "lucide-react";
+import { Car, CalendarClock, History, PackageCheck, PlusCircle, Receipt, Search, Sparkles, Target, Timer, Wallet } from "lucide-react";
 import { ActionButton } from "@/components/attendance/mobile/action-button";
 import { StatTile } from "@/components/attendance/mobile/stat-tile";
 import { CheckIn } from "@/components/attendance/mobile/check-in";
@@ -94,6 +94,7 @@ export default async function GestaoDoDiaPage({ searchParams }: { searchParams: 
       <div className="space-y-2.5 pb-4">
         <ActionButton href="/atendimento/novo" icon={PlusCircle} label="Novo Atendimento" variant="primary" />
         <ActionButton href="/assistente-gerente" icon={Sparkles} label="Assistente do Gerente" />
+        <ActionButton href="/planejamento" icon={CalendarClock} label="Planejamento Operacional" />
         <ActionButton href="/atendimento/buscar" icon={Search} label="Pesquisar Cliente" />
         <ActionButton href="/atendimento/entregas" icon={PackageCheck} label="Entregas" />
         <ActionButton href="/atendimento/veiculos" icon={Car} label="Veículos" />
