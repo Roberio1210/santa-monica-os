@@ -139,4 +139,65 @@ describe("summarizeCustomerHistory", () => {
     const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [], diagnostics: [], recommendations: [], orders: [], servicePriceById: {} });
     expect(summary.lastOrderValue).toBeNull();
   });
+
+  it("visitCount reflete o total real de visitas, nunca estimado", () => {
+    const summary = summarizeCustomerHistory({
+      customer,
+      vehicles: [vehicle],
+      visits: [visit("v1", "2026-01-01T10:00:00Z"), visit("v2", "2026-02-01T10:00:00Z"), visit("v3", "2026-03-01T10:00:00Z")],
+      diagnostics: [],
+      recommendations: [],
+      orders: [],
+      servicePriceById: {},
+    });
+    expect(summary.visitCount).toBe(3);
+  });
+
+  it("hasOpenOrder é true quando existe ordem não entregue", () => {
+    const summary = summarizeCustomerHistory({
+      customer,
+      vehicles: [vehicle],
+      visits: [visit("v1", "2026-01-01T10:00:00Z")],
+      diagnostics: [],
+      recommendations: [],
+      orders: [order("v1", "2026-01-01T11:00:00Z", [{ serviceId: "s1", serviceName: "Lavação" }])],
+      servicePriceById: {},
+    });
+    expect(summary.hasOpenOrder).toBe(true);
+  });
+
+  it("hasOpenOrder é false quando todas as ordens estão entregues", () => {
+    const entregue: ServiceOrder = { id: "o1", serviceVisitId: "v1", status: "entregue", items: [], createdAt: "2026-01-01T11:00:00Z", updatedAt: "2026-01-01T12:00:00Z" };
+    const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [visit("v1", "2026-01-01T10:00:00Z")], diagnostics: [], recommendations: [], orders: [entregue], servicePriceById: {} });
+    expect(summary.hasOpenOrder).toBe(false);
+  });
+
+  it("purchasedServiceNames junta os serviços de todas as ordens", () => {
+    const summary = summarizeCustomerHistory({
+      customer,
+      vehicles: [vehicle],
+      visits: [visit("v1", "2026-01-01T10:00:00Z"), visit("v2", "2026-02-01T10:00:00Z")],
+      diagnostics: [],
+      recommendations: [],
+      orders: [order("v1", "2026-01-01T11:00:00Z", [{ serviceId: "s1", serviceName: "Vitrificação" }]), order("v2", "2026-02-01T11:00:00Z", [{ serviceId: "s2", serviceName: "Premium Detail" }])],
+      servicePriceById: {},
+    });
+    expect(summary.purchasedServiceNames).toEqual(["Vitrificação", "Premium Detail"]);
+  });
+
+  it("lastDiagnosticIssues vem sempre do diagnóstico mais recente, nunca do mais antigo", () => {
+    const old = diagnostic("v1", null);
+    old.pintura.chuvaAcida = "leve";
+    old.createdAt = "2026-01-01T10:00:00Z";
+    const recent = diagnostic("v2", null);
+    recent.motor.condition = "muito_sujo";
+    recent.createdAt = "2026-06-01T10:00:00Z";
+    const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [], diagnostics: [old, recent], recommendations: [], orders: [], servicePriceById: {} });
+    expect(summary.lastDiagnosticIssues).toEqual(["Motor: Muito sujo"]);
+  });
+
+  it("lastDiagnosticIssues é [] quando não há diagnóstico algum", () => {
+    const summary = summarizeCustomerHistory({ customer, vehicles: [vehicle], visits: [], diagnostics: [], recommendations: [], orders: [], servicePriceById: {} });
+    expect(summary.lastDiagnosticIssues).toEqual([]);
+  });
 });

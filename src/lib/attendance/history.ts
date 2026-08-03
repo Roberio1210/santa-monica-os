@@ -1,3 +1,4 @@
+import { summarizeDiagnosticIssues } from "@/lib/attendance/diagnosticSummary";
 import type { Customer, CustomerHistorySummary, Diagnostic, ServiceOrder, ServiceVisit, TechnicalRecommendation, Vehicle } from "@/lib/attendance/types";
 
 /**
@@ -34,6 +35,12 @@ export function summarizeCustomerHistory(params: {
   // "Pendente" = recomendação de uma visita que nunca resultou em Ordem de Serviço nenhuma.
   const pendingRecommendations = recommendations.filter((r) => !visitIdsWithOrder.has(r.serviceVisitId));
 
+  const hasOpenOrder = orders.some((o) => o.status !== "entregue");
+  const purchasedServiceNames = orders.flatMap((o) => o.items.map((item) => item.serviceName));
+
+  const sortedDiagnostics = [...diagnostics].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const lastDiagnosticIssues = sortedDiagnostics[0] ? summarizeDiagnosticIssues(sortedDiagnostics[0]) : [];
+
   return {
     customer,
     vehicles,
@@ -44,5 +51,9 @@ export function summarizeCustomerHistory(params: {
     observations,
     pendingRecommendations,
     activeProtections: [],
+    visitCount: visits.length,
+    hasOpenOrder,
+    purchasedServiceNames,
+    lastDiagnosticIssues,
   };
 }

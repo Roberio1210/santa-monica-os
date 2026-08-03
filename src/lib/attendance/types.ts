@@ -266,6 +266,14 @@ export interface CustomerHistorySummary {
   observations: string[];
   pendingRecommendations: TechnicalRecommendation[];
   activeProtections: VehicleProtection[];
+  /** Nº total de visitas já registradas — usado pelo Planejamento Operacional para "recorrente"/"primeira visita". */
+  visitCount: number;
+  /** Existe alguma Ordem de Serviço deste cliente ainda não `entregue` agora (Planejamento Operacional — "serviço em andamento"). */
+  hasOpenOrder: boolean;
+  /** Nomes de todos os serviços já comprados pelo cliente, em qualquer visita — base para sinalizar Premium Detail/Vitrificação. */
+  purchasedServiceNames: string[];
+  /** Achados do diagnóstico mais recente (ex.: "Pintura: Riscos (leve)") — `[]` quando não há diagnóstico ou nenhum achado. */
+  lastDiagnosticIssues: string[];
 }
 
 /** Estrutura preparada, sem escritor nesta sprint — ver CustomerHistorySummary. */

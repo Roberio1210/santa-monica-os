@@ -17,6 +17,10 @@ function history(overrides: Partial<CustomerHistorySummary> = {}): CustomerHisto
     observations: [],
     pendingRecommendations: [],
     activeProtections: [],
+    visitCount: 0,
+    hasOpenOrder: false,
+    purchasedServiceNames: [],
+    lastDiagnosticIssues: [],
     ...overrides,
   };
 }
