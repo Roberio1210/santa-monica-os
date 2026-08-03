@@ -96,6 +96,8 @@ export interface NewRecipeInput {
 
 /** Campos que o repositório aceita alterar — identidade da receita (serviço/categoria/etapa/produto) nunca muda após criada; para isso, ver createNewVersion. */
 export interface RecipePatch {
+  /** Missão 23 — usada só para redirecionar uma receita ao produto mestre durante uma consolidação explícita. */
+  itemId?: string;
   status?: RecipeStatus;
   version?: number;
   isActiveVersion?: boolean;

@@ -169,6 +169,13 @@
       "when": 1785783723064,
       "tag": "0023_magical_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785796735834,
+      "tag": "0024_purple_apocalypse",
+      "breakpoints": true
     }
   ]
 }

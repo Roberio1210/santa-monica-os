@@ -8,6 +8,7 @@ import type {
   InventoryCondition,
   InventoryItem,
   InventoryUnit,
+  ItemClassification,
   MovementType,
   QuantityStatus,
   StockMovement,
@@ -30,6 +31,9 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
     idealStock: row.idealStock !== null ? Number(row.idealStock) : null,
     supplier: row.supplier,
     location: row.location,
+    classification: row.classification as ItemClassification | null,
+    canonicalItemId: row.canonicalItemId,
+    consolidatedAt: row.consolidatedAt !== null ? row.consolidatedAt.toISOString() : null,
     notes: row.notes,
     lastCountDate: row.lastCountDate,
     unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
@@ -123,16 +127,30 @@ export class PostgresInventoryRepository implements InventoryRepository {
     });
   }
 
-  async updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem> {
+  async updateItemDetails(
+    id: string,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+  ): Promise<InventoryItem> {
     const values: Partial<typeof inventoryItems.$inferInsert> = { updatedAt: new Date() };
     if ("supplier" in patch) values.supplier = patch.supplier ?? null;
     if ("location" in patch) values.location = patch.location ?? null;
     if ("minimumStock" in patch) values.minimumStock = patch.minimumStock !== null && patch.minimumStock !== undefined ? String(patch.minimumStock) : null;
     if ("idealStock" in patch) values.idealStock = patch.idealStock !== null && patch.idealStock !== undefined ? String(patch.idealStock) : null;
     if ("unitCost" in patch) values.unitCost = patch.unitCost !== null && patch.unitCost !== undefined ? String(patch.unitCost) : null;
+    if ("classification" in patch) values.classification = patch.classification ?? null;
+    if ("canonicalItemId" in patch) values.canonicalItemId = patch.canonicalItemId ?? null;
+    if ("consolidatedAt" in patch) values.consolidatedAt = patch.consolidatedAt !== null && patch.consolidatedAt !== undefined ? new Date(patch.consolidatedAt) : null;
+    if ("name" in patch && patch.name !== undefined) values.name = patch.name;
+    if ("brand" in patch && patch.brand !== undefined) values.brand = patch.brand;
+    if ("category" in patch && patch.category !== undefined) values.category = patch.category;
 
     const [row] = await this.db().update(inventoryItems).set(values).where(eq(inventoryItems.id, id)).returning();
     if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);
     return toItem(row);
+  }
+
+  async setItemActive(id: string, active: boolean): Promise<void> {
+    const [row] = await this.db().update(inventoryItems).set({ active, updatedAt: new Date() }).where(eq(inventoryItems.id, id)).returning();
+    if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);
   }
 }

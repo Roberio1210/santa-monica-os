@@ -1,4 +1,4 @@
-import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 
 /**
@@ -62,6 +62,26 @@ export const movementTypeEnum = pgEnum("movement_type", [
 export const quantityStatusEnum = pgEnum("inventory_quantity_status", ["confirmed", "measurement_pending"]);
 
 /**
+ * Missão 23 (Auditoria e Consolidação) — como cada produto deve ser tratado. Definida aqui (não em
+ * inventoryAudit.ts) porque `inventoryItems.classification` também usa este enum e
+ * inventoryAudit.ts já importa de inventory.ts — evita import circular. Nunca mistura
+ * patrimônio/ferramenta com consumo químico controlado em estoque.
+ */
+export const itemClassificationEnum = pgEnum("item_classification", [
+  "quimico_volume",
+  "solido_peso",
+  "consumivel_unidade",
+  "epi",
+  "ferramenta",
+  "equipamento",
+  "patrimonio",
+  "manutencao",
+  "material_divulgacao",
+  "brinde_cliente",
+  "nao_controlado",
+]);
+
+/**
  * FASE B — motor de receitas e calibração. Espelha src/lib/recipes/types.ts.
  */
 export const vehicleCategoryEnum = pgEnum("vehicle_category", ["hatch", "sedan", "suv", "caminhonete"]);
@@ -117,6 +137,16 @@ export const inventoryItems = pgTable("inventory_items", {
   supplier: text("supplier"),
   /** Localização física (Missão 22) — ex.: "Prateleira A", "Box 1". Texto livre, editável manualmente. */
   location: text("location"),
+  /** Missão 23 — classificação opcional (nunca inferida automaticamente para os 65 produtos existentes). */
+  classification: itemClassificationEnum("classification"),
+  /**
+   * Missão 23 — quando preenchido, este item foi incorporado a outro (o produto mestre) numa
+   * consolidação. O item nunca é excluído: fica `active=false`, aponta para o mestre, e todo o
+   * histórico de movimentações permanece rastreável através dele. Null = item não consolidado
+   * (pode ser mestre de outros, ou nunca ter passado por consolidação).
+   */
+  canonicalItemId: uuid("canonical_item_id").references((): AnyPgColumn => inventoryItems.id),
+  consolidatedAt: timestamp("consolidated_at", { withTimezone: true }),
   lastCountDate: date("last_count_date").notNull(),
   /** "measurement_pending" quando o conteúdo real da embalagem ainda não foi medido — nunca inventado. */
   quantityStatus: quantityStatusEnum("quantity_status").notNull().default("confirmed"),

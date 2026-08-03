@@ -7,7 +7,10 @@ import type { InventoryItem, QuantityStatus } from "@/lib/inventory/types";
  * contagem física original — nunca inventados aqui, sempre `null` até serem cadastrados via
  * entrada manual ou edição do produto.
  */
-export type InitialCountRecord = Omit<InventoryItem, "originalName" | "quantityStatus" | "supplier" | "location" | "idealStock"> & {
+export type InitialCountRecord = Omit<
+  InventoryItem,
+  "originalName" | "quantityStatus" | "supplier" | "location" | "idealStock" | "classification" | "canonicalItemId" | "consolidatedAt"
+> & {
   originalName?: string | null;
   quantityStatus?: QuantityStatus;
 };

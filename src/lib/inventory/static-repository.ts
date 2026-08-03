@@ -26,6 +26,9 @@ export class StaticInventoryRepository implements InventoryRepository {
     supplier: null,
     location: null,
     idealStock: null,
+    classification: null,
+    canonicalItemId: null,
+    consolidatedAt: null,
   }));
   private movements: StockMovement[] = [];
   private nextMovementId = 1;
@@ -57,10 +60,16 @@ export class StaticInventoryRepository implements InventoryRepository {
     return { ...recorded };
   }
 
-  async updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem> {
+  async updateItemDetails(
+    id: string,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+  ): Promise<InventoryItem> {
     const item = this.items.find((i) => i.id === id);
     if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);
     Object.assign(item, patch);
     return { ...item };
   }
+
+  /** Modo memória não rastreia `active` por item (sem persistência real) — no-op documentado, nunca lança erro. */
+  async setItemActive(): Promise<void> {}
 }

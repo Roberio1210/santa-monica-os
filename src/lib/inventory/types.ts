@@ -52,6 +52,73 @@ export type PhysicalState = "liquido" | "massa" | "peca";
  */
 export type QuantityStatus = "confirmed" | "measurement_pending";
 
+/**
+ * Missão 23 (Auditoria e Consolidação) — como o produto deve ser tratado. Opcional, nunca
+ * inferida automaticamente para um item já cadastrado. Fundamental para nunca misturar
+ * patrimônio/ferramenta com consumo químico controlado em estoque (ver purchase-import-service.ts).
+ */
+export type ItemClassification =
+  | "quimico_volume"
+  | "solido_peso"
+  | "consumivel_unidade"
+  | "epi"
+  | "ferramenta"
+  | "equipamento"
+  | "patrimonio"
+  | "manutencao"
+  | "material_divulgacao"
+  | "brinde_cliente"
+  | "nao_controlado";
+
+export const itemClassifications: ItemClassification[] = [
+  "quimico_volume",
+  "solido_peso",
+  "consumivel_unidade",
+  "epi",
+  "ferramenta",
+  "equipamento",
+  "patrimonio",
+  "manutencao",
+  "material_divulgacao",
+  "brinde_cliente",
+  "nao_controlado",
+];
+
+export const itemClassificationLabels: Record<ItemClassification, string> = {
+  quimico_volume: "Produto químico (volume)",
+  solido_peso: "Produto sólido (peso)",
+  consumivel_unidade: "Consumível (unidade)",
+  epi: "EPI",
+  ferramenta: "Ferramenta",
+  equipamento: "Equipamento",
+  patrimonio: "Patrimônio",
+  manutencao: "Manutenção",
+  material_divulgacao: "Material de divulgação",
+  brinde_cliente: "Brinde entregue ao cliente",
+  nao_controlado: "Item não controlado em estoque",
+};
+
+/** Classificações tratadas como consumo químico/consumível real de estoque — as demais (EPI em diante) nunca entram em cálculos de consumo automático/receita. */
+export const STOCK_CONSUMABLE_CLASSIFICATIONS: ItemClassification[] = ["quimico_volume", "solido_peso", "consumivel_unidade"];
+
+/** Missão 23, seção 8 — decisão do usuário para cada linha da importação de compras, na Etapa 2 (confirmação). */
+export type PurchaseLineDecision = "vincular_existente" | "criar_produto" | "ignorar" | "patrimonio" | "despesa_manutencao" | "revisar_depois";
+
+export const purchaseLineDecisions: PurchaseLineDecision[] = ["vincular_existente", "criar_produto", "ignorar", "patrimonio", "despesa_manutencao", "revisar_depois"];
+
+export const purchaseLineDecisionLabels: Record<PurchaseLineDecision, string> = {
+  vincular_existente: "Vincular a produto existente",
+  criar_produto: "Criar novo produto",
+  ignorar: "Ignorar esta linha",
+  patrimonio: "Marcar como equipamento/patrimônio",
+  despesa_manutencao: "Marcar como despesa ou manutenção",
+  revisar_depois: "Revisar depois",
+};
+
+export type PurchaseLineStatus = "pendente" | "confirmado" | "ignorado" | "duplicado";
+
+export type PurchaseImportStatus = "previa" | "parcial" | "concluido";
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -74,6 +141,12 @@ export interface InventoryItem {
   supplier: string | null;
   /** Localização física (Missão 22) — ex.: "Prateleira A". Texto livre. */
   location: string | null;
+  /** Missão 23 — nunca inferida automaticamente. */
+  classification: ItemClassification | null;
+  /** Missão 23 — quando preenchido, este item foi incorporado a outro (consolidação) e não deve mais receber movimentações diretamente. */
+  canonicalItemId: string | null;
+  /** Missão 23 — data/hora ISO da consolidação, quando `canonicalItemId` está preenchido. */
+  consolidatedAt: string | null;
   notes: string | null;
   /** Data da última contagem física, formato ISO (YYYY-MM-DD). */
   lastCountDate: string;

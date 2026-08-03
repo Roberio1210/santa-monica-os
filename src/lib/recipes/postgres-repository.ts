@@ -121,6 +121,7 @@ export class PostgresRecipeRepository implements RecipeRepository {
 
   async updateRecipe(id: string, patch: RecipePatch): Promise<Recipe> {
     const values: Partial<typeof serviceConsumptionRules.$inferInsert> = { updatedAt: new Date() };
+    if (patch.itemId !== undefined) values.itemId = patch.itemId;
     if (patch.status !== undefined) values.status = patch.status;
     if (patch.version !== undefined) values.version = patch.version;
     if (patch.isActiveVersion !== undefined) values.isActiveVersion = patch.isActiveVersion;

@@ -23,5 +23,14 @@ export interface InventoryRepository {
    * mudam via `recordMovement`. Usada tanto pela edição manual (fornecedor/localização/estoque
    * mínimo/estoque ideal) quanto pela atualização automática do custo médio após uma entrada.
    */
-  updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem>;
+  updateItemDetails(
+    id: string,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+  ): Promise<InventoryItem>;
+  /**
+   * Missão 23 — só usada para desativar um item incorporado numa consolidação (nunca exclusão
+   * destrutiva). `getItem`/histórico continuam funcionando normalmente para um item inativo;
+   * apenas `listItems()` deixa de trazê-lo na listagem padrão.
+   */
+  setItemActive(id: string, active: boolean): Promise<void>;
 }

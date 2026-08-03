@@ -227,6 +227,12 @@ export default async function EstoquePage() {
           <Button asChild variant="outline">
             <Link href="/estoque/compras-sugeridas">Compras sugeridas</Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href="/estoque/auditoria">
+              <ShieldCheck className="h-4 w-4" />
+              Auditoria do estoque
+            </Link>
+          </Button>
         </CardContent>
       </Card>
     </div>
