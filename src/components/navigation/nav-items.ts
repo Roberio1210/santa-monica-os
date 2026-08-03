@@ -35,6 +35,7 @@ import {
   Radio,
   Sparkles,
   CalendarClock,
+  Contact,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,6 +51,7 @@ export const navItems: NavItem[] = [
   { href: "/operacao", label: "Operação ao Vivo", icon: Radio },
   { href: "/assistente-gerente", label: "Assistente do Gerente", icon: Sparkles },
   { href: "/planejamento", label: "Planejamento Operacional", icon: CalendarClock },
+  { href: "/crm", label: "CRM Inteligente", icon: Contact },
   { href: "/painel-gerencial", label: "Painel Gerencial", icon: Gauge },
   { href: "/movimentacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
