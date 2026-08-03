@@ -11,3 +11,4 @@ export * from "./organizationalMemory";
 export * from "./stone";
 export * from "./attendance";
 export * from "./managerAssistant";
+export * from "./planning";

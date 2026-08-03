@@ -155,6 +155,13 @@
       "when": 1785711598352,
       "tag": "0021_robust_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785716875335,
+      "tag": "0022_curvy_rawhide_kid",
+      "breakpoints": true
     }
   ]
 }
