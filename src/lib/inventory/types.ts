@@ -68,6 +68,12 @@ export interface InventoryItem {
   condition: InventoryCondition;
   /** Estoque mínimo definido manualmente. Nunca deve ser inferido — null significa "sem mínimo definido". */
   minimumStock: number | null;
+  /** Estoque ideal (Missão 22) — nível confortável de operação, distinto do mínimo. Definido manualmente, nunca inferido. */
+  idealStock: number | null;
+  /** Fornecedor mais recente conhecido (Missão 22) — atualizado automaticamente a cada entrada com fornecedor informado. */
+  supplier: string | null;
+  /** Localização física (Missão 22) — ex.: "Prateleira A". Texto livre. */
+  location: string | null;
   notes: string | null;
   /** Data da última contagem física, formato ISO (YYYY-MM-DD). */
   lastCountDate: string;
@@ -91,6 +97,8 @@ export interface InventoryItemView extends InventoryItem {
  * Taxa completa de tipos do livro-razão (ver docs do módulo). Todo tipo além dos 6 originais
  * (entrada, saida, ajuste_inventario, perda, consumo_interno, compra) foi adicionado de forma
  * aditiva para suportar contagem inicial, calibração e correções sem perder histórico.
+ * "descarte"/"outros" (Missão 22) cobrem os motivos de baixa manual que não tinham tipo
+ * correspondente ainda.
  */
 export type MovementType =
   | "entrada"
@@ -107,7 +115,9 @@ export type MovementType =
   | "devolucao"
   | "transferencia"
   | "consumo_teste_calibracao"
-  | "correcao_inventario";
+  | "correcao_inventario"
+  | "descarte"
+  | "outros";
 
 export interface StockMovement {
   id: string;
@@ -125,8 +135,12 @@ export interface StockMovement {
   date: string;
   notes: string | null;
   responsible: string | null;
-  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15"). */
+  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15") — a Missão 22 reaproveita este campo para "número da nota". */
   reference: string | null;
+  /** Fornecedor desta movimentação (Missão 22) — só em entradas/compras. Opcional: movimentações de outros tipos/anteriores à Missão 22 nunca precisam informar. */
+  supplier?: string | null;
+  /** Preço unitário pago nesta movimentação (Missão 22) — só em entradas/compras; base do custo médio ponderado. Opcional pelo mesmo motivo de `supplier`. */
+  unitPricePaid?: number | null;
   /** Saldo do item imediatamente antes desta movimentação. Null só na 1ª movimentação já existente antes deste campo existir. */
   previousBalance: number | null;
   /** Saldo do item imediatamente após esta movimentação. */

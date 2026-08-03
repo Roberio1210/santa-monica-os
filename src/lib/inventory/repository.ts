@@ -18,4 +18,10 @@ export interface InventoryRepository {
    * claro que o efeito não sobrevive a um novo cold start em ambiente serverless.
    */
   recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement>;
+  /**
+   * Atualiza só metadados complementares do item (Missão 22) — nunca quantidade/saldo, que só
+   * mudam via `recordMovement`. Usada tanto pela edição manual (fornecedor/localização/estoque
+   * mínimo/estoque ideal) quanto pela atualização automática do custo médio após uma entrada.
+   */
+  updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem>;
 }

@@ -20,6 +20,8 @@ export interface ProductDetail {
   relatedItems: InventoryItemView[];
   lastEntryDate: string | null;
   lastConsumptionDate: string | null;
+  /** Última entrada/compra completa (Missão 22) — usada para "Preço da última compra"/"Data da última compra" no detalhe do produto. Null quando nunca houve entrada registrada. */
+  lastPurchase: StockMovement | null;
   autonomy: AutonomyResult;
 }
 
@@ -61,6 +63,7 @@ export async function fetchProductDetail(id: string): Promise<ProductDetail | nu
     relatedItems,
     lastEntryDate: entries[0]?.date ?? null,
     lastConsumptionDate: consumptions[0]?.date ?? null,
+    lastPurchase: entries[0] ?? null,
     autonomy: computeItemAutonomy(
       itemView,
       recipes.map((r) => r.recipe),

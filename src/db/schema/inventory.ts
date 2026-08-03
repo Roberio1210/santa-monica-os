@@ -33,6 +33,12 @@ export const inventoryConditionEnum = pgEnum("inventory_condition", [
   "estimado",
 ]);
 
+/**
+ * "descarte"/"outros" adicionados na Missão 22 (Estoque Inteligente) para a baixa manual por
+ * motivo (Consumo/Perda/Descarte/Teste/Outros) — os demais motivos já reaproveitam tipos
+ * existentes (consumo→consumo_interno, perda→perda, teste→consumo_teste_calibracao). Aditivo:
+ * nenhum valor existente foi removido ou renomeado.
+ */
 export const movementTypeEnum = pgEnum("movement_type", [
   "entrada",
   "saida",
@@ -49,6 +55,8 @@ export const movementTypeEnum = pgEnum("movement_type", [
   "transferencia",
   "consumo_teste_calibracao",
   "correcao_inventario",
+  "descarte",
+  "outros",
 ]);
 
 export const quantityStatusEnum = pgEnum("inventory_quantity_status", ["confirmed", "measurement_pending"]);
@@ -102,7 +110,13 @@ export const inventoryItems = pgTable("inventory_items", {
   condition: inventoryConditionEnum("condition").notNull(),
   /** Nunca inferido. Null = "Sem mínimo definido" (ver computeStatus em src/lib/inventory/status.ts). */
   minimumStock: numeric("minimum_stock", { precision: 12, scale: 3 }),
+  /** Estoque ideal (Missão 22) — nível confortável de operação, distinto do mínimo (limiar de compra). Nunca inferido. */
+  idealStock: numeric("ideal_stock", { precision: 12, scale: 3 }),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }),
+  /** Fornecedor mais recente conhecido (Missão 22) — atualizado automaticamente a cada entrada com fornecedor informado, editável manualmente enquanto não houver entrada. */
+  supplier: text("supplier"),
+  /** Localização física (Missão 22) — ex.: "Prateleira A", "Box 1". Texto livre, editável manualmente. */
+  location: text("location"),
   lastCountDate: date("last_count_date").notNull(),
   /** "measurement_pending" quando o conteúdo real da embalagem ainda não foi medido — nunca inventado. */
   quantityStatus: quantityStatusEnum("quantity_status").notNull().default("confirmed"),
@@ -129,8 +143,12 @@ export const inventoryMovements = pgTable("inventory_movements", {
   unit: inventoryUnitEnum("unit").notNull(),
   date: date("date").notNull(),
   responsible: text("responsible"),
-  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15"). */
+  /** Documento/lote de referência (ex.: "STOCKTAKE-2026-07-10", "RECEIPT-2026-07-15") — a Missão 22 reaproveita este campo para "número da nota" nas entradas manuais. */
   reference: text("reference"),
+  /** Fornecedor desta movimentação (Missão 22) — só preenchido em entradas/compras; null nos demais tipos. */
+  supplier: text("supplier"),
+  /** Preço unitário pago nesta movimentação (Missão 22) — só preenchido em entradas/compras; usado para recalcular o custo médio ponderado do item. Null nos demais tipos. */
+  unitPricePaid: numeric("unit_price_paid", { precision: 12, scale: 2 }),
   /** Saldo do item imediatamente antes desta movimentação — sempre calculado pelo repositório, nunca informado pelo chamador. */
   previousBalance: numeric("previous_balance", { precision: 12, scale: 3 }),
   /** Saldo do item imediatamente após esta movimentação — sempre calculado pelo repositório. */

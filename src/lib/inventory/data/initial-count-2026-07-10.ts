@@ -1,7 +1,13 @@
 import type { InventoryItem, QuantityStatus } from "@/lib/inventory/types";
 
-/** Registro de origem da contagem — `originalName`/`quantityStatus` têm default aplicado em runtime (ver static-repository.ts e db/seed/inventory.ts) para não obrigar cada item a repetir os mesmos valores padrão. */
-export type InitialCountRecord = Omit<InventoryItem, "originalName" | "quantityStatus"> & {
+/**
+ * Registro de origem da contagem — `originalName`/`quantityStatus` têm default aplicado em
+ * runtime (ver static-repository.ts e db/seed/inventory.ts) para não obrigar cada item a repetir
+ * os mesmos valores padrão. `supplier`/`location`/`idealStock` (Missão 22) não existiam na
+ * contagem física original — nunca inventados aqui, sempre `null` até serem cadastrados via
+ * entrada manual ou edição do produto.
+ */
+export type InitialCountRecord = Omit<InventoryItem, "originalName" | "quantityStatus" | "supplier" | "location" | "idealStock"> & {
   originalName?: string | null;
   quantityStatus?: QuantityStatus;
 };

@@ -36,6 +36,8 @@ import {
   Sparkles,
   CalendarClock,
   Contact,
+  PackagePlus,
+  PackageMinus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -70,6 +72,8 @@ export const navItems: NavItem[] = [
   { href: "/marketing", label: "Marketing", icon: Megaphone },
   { href: "/estoque", label: "Estoque", icon: Boxes },
   { href: "/estoque/produtos", label: "Produtos", icon: Package },
+  { href: "/estoque/entradas", label: "Entradas", icon: PackagePlus },
+  { href: "/estoque/saidas", label: "Saídas", icon: PackageMinus },
   { href: "/estoque/movimentacoes", label: "Movimentações de Estoque", icon: History },
   { href: "/estoque/contagem", label: "Contagem física", icon: ClipboardCheck },
   { href: "/estoque/receitas", label: "Receitas", icon: FlaskConical },

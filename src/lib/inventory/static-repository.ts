@@ -23,6 +23,9 @@ export class StaticInventoryRepository implements InventoryRepository {
     ...item,
     originalName: item.originalName ?? null,
     quantityStatus: item.quantityStatus ?? "confirmed",
+    supplier: null,
+    location: null,
+    idealStock: null,
   }));
   private movements: StockMovement[] = [];
   private nextMovementId = 1;
@@ -52,5 +55,12 @@ export class StaticInventoryRepository implements InventoryRepository {
     const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++), previousBalance, newBalance };
     this.movements.push(recorded);
     return { ...recorded };
+  }
+
+  async updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);
+    Object.assign(item, patch);
+    return { ...item };
   }
 }

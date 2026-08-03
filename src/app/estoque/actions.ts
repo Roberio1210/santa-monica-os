@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { MANUAL_MOVEMENT_TYPES, recordManualMovement } from "@/lib/inventory/manual-movement";
 import { confirmStocktake, type StocktakeLineInput } from "@/lib/inventory/stocktake";
+import { recordManualEntry } from "@/lib/inventory/manual-entry";
+import { EXIT_REASONS, recordManualExit, type ExitReason } from "@/lib/inventory/manual-exit";
+import { updateItemDetails } from "@/lib/inventory/item-details";
 import type { InventoryUnit, MovementType } from "@/lib/inventory/types";
 
 export interface FormActionState {
@@ -79,4 +82,91 @@ export async function confirmStocktakeAction(_prevState: StocktakeActionState, f
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha ao confirmar contagem.", success: null, movementsCreated: 0 };
   }
+}
+
+/** "Entradas" (Missão 22) — sempre uma compra; nunca passa pelo formulário genérico de ajustes. */
+export async function recordManualEntryAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const itemId = String(formData.get("itemId") ?? "");
+  const quantityRaw = String(formData.get("quantity") ?? "").replace(",", ".");
+  const unit = String(formData.get("unit") ?? "") as InventoryUnit;
+  const date = String(formData.get("date") ?? "");
+  const responsible = String(formData.get("responsible") ?? "");
+  const supplier = parseOptionalString(formData.get("supplier"));
+  const unitPricePaidRaw = parseOptionalString(formData.get("unitPricePaid"));
+  const invoiceNumber = parseOptionalString(formData.get("invoiceNumber"));
+  const notes = parseOptionalString(formData.get("notes"));
+
+  if (!itemId) return { error: "Selecione um produto.", success: null };
+  const quantity = Number(quantityRaw);
+  if (!Number.isFinite(quantity) || quantity <= 0) return { error: "Quantidade deve ser maior que zero.", success: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "Data inválida.", success: null };
+  const unitPricePaid = unitPricePaidRaw !== null ? Number(unitPricePaidRaw.replace(",", ".")) : null;
+  if (unitPricePaid !== null && !Number.isFinite(unitPricePaid)) return { error: "Valor pago inválido.", success: null };
+
+  try {
+    await recordManualEntry({ itemId, quantity, unit, date, responsible, supplier, unitPricePaid, invoiceNumber, notes });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao registrar entrada.", success: null };
+  }
+
+  revalidatePath("/estoque/movimentacoes");
+  revalidatePath("/estoque");
+  revalidatePath("/estoque/produtos");
+  revalidatePath(`/estoque/produtos/${itemId}`);
+  return { error: null, success: "Entrada registrada." };
+}
+
+/** "Saídas" (Missão 22) — baixa manual por motivo, mais direta que o formulário genérico de ajustes. */
+export async function recordManualExitAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const itemId = String(formData.get("itemId") ?? "");
+  const quantityRaw = String(formData.get("quantity") ?? "").replace(",", ".");
+  const unit = String(formData.get("unit") ?? "") as InventoryUnit;
+  const reason = String(formData.get("reason") ?? "") as ExitReason;
+  const date = String(formData.get("date") ?? "");
+  const responsible = String(formData.get("responsible") ?? "");
+  const notes = parseOptionalString(formData.get("notes"));
+
+  if (!itemId) return { error: "Selecione um produto.", success: null };
+  if (!EXIT_REASONS.includes(reason)) return { error: "Motivo inválido.", success: null };
+  const quantity = Number(quantityRaw);
+  if (!Number.isFinite(quantity) || quantity <= 0) return { error: "Quantidade deve ser maior que zero.", success: null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "Data inválida.", success: null };
+
+  try {
+    await recordManualExit({ itemId, quantity, unit, reason, date, responsible, notes });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao registrar saída.", success: null };
+  }
+
+  revalidatePath("/estoque/movimentacoes");
+  revalidatePath("/estoque");
+  revalidatePath("/estoque/produtos");
+  revalidatePath(`/estoque/produtos/${itemId}`);
+  return { error: null, success: "Saída registrada." };
+}
+
+/** Edição de metadados complementares do produto (Missão 22) — fornecedor, localização, estoque mínimo/ideal. */
+export async function updateItemDetailsAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const itemId = String(formData.get("itemId") ?? "");
+  const supplier = parseOptionalString(formData.get("supplier"));
+  const location = parseOptionalString(formData.get("location"));
+  const minimumStockRaw = parseOptionalString(formData.get("minimumStock"));
+  const idealStockRaw = parseOptionalString(formData.get("idealStock"));
+
+  if (!itemId) return { error: "Produto não identificado.", success: null };
+  const minimumStock = minimumStockRaw !== null ? Number(minimumStockRaw.replace(",", ".")) : null;
+  const idealStock = idealStockRaw !== null ? Number(idealStockRaw.replace(",", ".")) : null;
+  if (minimumStock !== null && !Number.isFinite(minimumStock)) return { error: "Estoque mínimo inválido.", success: null };
+  if (idealStock !== null && !Number.isFinite(idealStock)) return { error: "Estoque ideal inválido.", success: null };
+
+  try {
+    await updateItemDetails({ itemId, supplier, location, minimumStock, idealStock });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao salvar dados do produto.", success: null };
+  }
+
+  revalidatePath("/estoque");
+  revalidatePath("/estoque/produtos");
+  revalidatePath(`/estoque/produtos/${itemId}`);
+  return { error: null, success: "Dados do produto atualizados." };
 }

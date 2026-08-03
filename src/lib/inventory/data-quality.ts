@@ -21,9 +21,9 @@ export interface DataQualitySummary {
 
 /**
  * Painel de qualidade de dados (Fase C, seção 9) — tudo calculado ao vivo a partir do que já
- * existe (Fases A/B), nada persistido, nada inventado. Localização e fornecedor não aparecem
- * aqui item a item porque esses campos ainda não existem no cadastro de produto (ver relatório
- * da Fase C) — mostrados como uma nota estrutural única, não uma lista de 65 itens repetidos.
+ * existe (Fases A/B), nada persistido, nada inventado. Fornecedor e localização passaram a
+ * existir no cadastro de produto na Missão 22 (Estoque Inteligente) — ver
+ * `src/app/estoque/produtos/[id]/page.tsx` para a edição desses campos.
  */
 export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
   const [rawItems, recipes, services, suggestions] = await Promise.all([

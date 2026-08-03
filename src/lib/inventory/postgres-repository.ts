@@ -27,6 +27,9 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
     packageCount: row.packageCount,
     condition: row.condition as InventoryCondition,
     minimumStock: row.minimumStock !== null ? Number(row.minimumStock) : null,
+    idealStock: row.idealStock !== null ? Number(row.idealStock) : null,
+    supplier: row.supplier,
+    location: row.location,
     notes: row.notes,
     lastCountDate: row.lastCountDate,
     unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
@@ -45,6 +48,8 @@ function toMovement(row: typeof inventoryMovements.$inferSelect): StockMovement 
     notes: row.notes,
     responsible: row.responsible,
     reference: row.reference,
+    supplier: row.supplier,
+    unitPricePaid: row.unitPricePaid !== null ? Number(row.unitPricePaid) : null,
     previousBalance: row.previousBalance !== null ? Number(row.previousBalance) : null,
     newBalance: row.newBalance !== null ? Number(row.newBalance) : null,
   };
@@ -107,6 +112,8 @@ export class PostgresInventoryRepository implements InventoryRepository {
           notes: movement.notes,
           responsible: movement.responsible,
           reference: movement.reference,
+          supplier: movement.supplier ?? null,
+          unitPricePaid: movement.unitPricePaid !== undefined && movement.unitPricePaid !== null ? String(movement.unitPricePaid) : null,
           previousBalance: String(previousBalance),
           newBalance: String(newBalance),
         })
@@ -114,5 +121,18 @@ export class PostgresInventoryRepository implements InventoryRepository {
 
       return toMovement(inserted);
     });
+  }
+
+  async updateItemDetails(id: string, patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost">>): Promise<InventoryItem> {
+    const values: Partial<typeof inventoryItems.$inferInsert> = { updatedAt: new Date() };
+    if ("supplier" in patch) values.supplier = patch.supplier ?? null;
+    if ("location" in patch) values.location = patch.location ?? null;
+    if ("minimumStock" in patch) values.minimumStock = patch.minimumStock !== null && patch.minimumStock !== undefined ? String(patch.minimumStock) : null;
+    if ("idealStock" in patch) values.idealStock = patch.idealStock !== null && patch.idealStock !== undefined ? String(patch.idealStock) : null;
+    if ("unitCost" in patch) values.unitCost = patch.unitCost !== null && patch.unitCost !== undefined ? String(patch.unitCost) : null;
+
+    const [row] = await this.db().update(inventoryItems).set(values).where(eq(inventoryItems.id, id)).returning();
+    if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);
+    return toItem(row);
   }
 }

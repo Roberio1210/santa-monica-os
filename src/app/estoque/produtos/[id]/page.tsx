@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Unavailable } from "@/components/shared/unavailable";
+import { ItemDetailsForm } from "@/components/inventory/item-details-form";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { fetchProductDetail } from "@/lib/inventory/product-detail";
 import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
@@ -34,6 +35,8 @@ const movementLabels: Record<MovementType, string> = {
   transferencia: "Transferência",
   consumo_teste_calibracao: "Consumo de calibração",
   correcao_inventario: "Correção de inventário",
+  descarte: "Descarte",
+  outros: "Outros",
 };
 
 function IndicatorCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -51,7 +54,7 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
   const detail = await fetchProductDetail(id);
   if (!detail) notFound();
 
-  const { item, movements, recipes, relatedItems, lastEntryDate, lastConsumptionDate, autonomy } = detail;
+  const { item, movements, recipes, relatedItems, lastEntryDate, lastConsumptionDate, lastPurchase, autonomy } = detail;
 
   return (
     <div className="space-y-6">
@@ -78,8 +81,13 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
           hint={autonomy.consumptionPerService !== null ? `${autonomy.consumptionPerService} ${item.unit}/serviço` : undefined}
         />
         <IndicatorCard label="Estoque mínimo" value={item.minimumStock !== null ? `${item.minimumStock} ${item.unit}` : "Estoque mínimo ainda não configurado"} />
+        <IndicatorCard label="Estoque ideal" value={item.idealStock !== null ? `${item.idealStock} ${item.unit}` : "Estoque ideal ainda não configurado"} />
         <IndicatorCard label="Última contagem" value={formatDateBR(item.lastCountDate)} />
+        <IndicatorCard label="Preço da última compra" value={lastPurchase?.unitPricePaid != null ? formatCurrency(lastPurchase.unitPricePaid) : "Não informado"} />
+        <IndicatorCard label="Data da última compra" value={lastPurchase ? formatDateBR(lastPurchase.date) : "Sem registro"} />
       </div>
+
+      <ItemDetailsForm item={item} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
@@ -95,8 +103,8 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
             <Row label="Unidade-base" value={item.unit} />
             <Row label="Embalagem" value={item.packageCapacity !== null ? `${item.packageCapacity} ${item.unit} × ${item.packageCount ?? 1}` : "Não informado"} />
             <Row label="Condição" value={item.condition} />
-            <Row label="Localização" value="Não informado" />
-            <Row label="Fornecedor" value="Não informado" />
+            <Row label="Localização" value={item.location ?? "Não informado"} />
+            <Row label="Fornecedor" value={item.supplier ?? "Não informado"} />
             <Row label="Observações" value={item.notes ?? "—"} />
           </CardContent>
         </Card>
@@ -197,6 +205,8 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
                     </span>
                     {m.reference ? <span>Ref.: {m.reference}</span> : null}
                     {m.responsible ? <span>Responsável: {m.responsible}</span> : null}
+                    {m.supplier ? <span>Fornecedor: {m.supplier}</span> : null}
+                    {m.unitPricePaid != null ? <span>Preço pago: {formatCurrency(m.unitPricePaid)}</span> : null}
                   </div>
                   {m.notes ? <p className="mt-1 text-xs text-foreground-muted">{m.notes}</p> : null}
                 </li>

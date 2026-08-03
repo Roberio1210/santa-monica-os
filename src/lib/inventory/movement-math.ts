@@ -6,7 +6,7 @@ import type { MovementType } from "@/lib/inventory/types";
  *
  * Somam: entrada, compra, ajuste_positivo, devolucao (produto retorna ao estoque).
  * Subtraem: saida, perda, consumo_interno, ajuste_negativo, avaria, vencimento, transferencia
- * (sai deste estoque), consumo_teste_calibracao.
+ * (sai deste estoque), consumo_teste_calibracao, descarte, outros (Missão 22 — baixa manual).
  * Absolutos (substituem o saldo, não são delta): ajuste_inventario, contagem_fisica_inicial,
  * correcao_inventario.
  */
@@ -25,6 +25,8 @@ export function applyMovementDelta(current: number, type: MovementType, quantity
     case "vencimento":
     case "transferencia":
     case "consumo_teste_calibracao":
+    case "descarte":
+    case "outros":
       return current - quantity;
     case "ajuste_inventario":
     case "contagem_fisica_inicial":

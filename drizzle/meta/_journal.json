@@ -162,6 +162,13 @@
       "when": 1785716875335,
       "tag": "0022_curvy_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785783723064,
+      "tag": "0023_magical_nightmare",
+      "breakpoints": true
     }
   ]
 }

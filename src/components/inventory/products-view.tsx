@@ -62,7 +62,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
       if (withoutMovement && movementSet.has(item.id)) return false;
       if (usedInRecipe && !recipeSet.has(item.id)) return false;
       if (withoutRecipe && recipeSet.has(item.id)) return false;
-      if (query && !`${item.name} ${item.brand}`.toLowerCase().includes(query)) return false;
+      if (query && !`${item.name} ${item.brand} ${item.category} ${item.supplier ?? ""}`.toLowerCase().includes(query)) return false;
       return true;
     });
 
@@ -113,9 +113,9 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por produto ou marca"
+              placeholder="Buscar por nome, marca, categoria ou fornecedor"
               className={cn(fieldClasses, "min-w-[220px] flex-1")}
-              aria-label="Buscar por produto ou marca"
+              aria-label="Buscar por nome, marca, categoria ou fornecedor"
             />
             <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} className={fieldClasses} aria-label="Filtrar por marca">
               <option value="all">Todas as marcas</option>
@@ -207,6 +207,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                     <th className="pb-2 pr-3 font-medium">Mínimo</th>
                     <th className="pb-2 pr-3 font-medium">Custo médio</th>
                     <th className="pb-2 pr-3 font-medium">Última movimentação</th>
+                    <th className="pb-2 pr-3 font-medium">Fornecedor</th>
                     <th className="pb-2 pr-3 font-medium">Localização</th>
                     <th className="pb-2 font-medium">Status</th>
                   </tr>
@@ -234,7 +235,8 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                       <td className="py-2 pr-3 text-foreground-muted">{item.minimumStock !== null ? `${item.minimumStock} ${item.unit}` : "Estoque mínimo ainda não configurado"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.unitCost !== null ? formatCurrency(item.unitCost) : "Não informado"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{lastMovementByItem[item.id] ? formatDateBR(lastMovementByItem[item.id]) : "Sem movimentação"}</td>
-                      <td className="py-2 pr-3 text-foreground-subtle">Não informado</td>
+                      <td className="py-2 pr-3 text-foreground-muted">{item.supplier ?? "Não informado"}</td>
+                      <td className="py-2 pr-3 text-foreground-muted">{item.location ?? "Não informado"}</td>
                       <td className="py-2">
                         <Badge variant={statusMeta[item.status].variant}>{statusMeta[item.status].label}</Badge>
                       </td>

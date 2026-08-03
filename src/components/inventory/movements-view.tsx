@@ -29,6 +29,8 @@ const movementLabels: Record<MovementType, string> = {
   transferencia: "Transferência",
   consumo_teste_calibracao: "Consumo de calibração",
   correcao_inventario: "Correção de inventário",
+  descarte: "Descarte",
+  outros: "Outros",
 };
 
 const fieldClasses =
