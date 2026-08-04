@@ -3,6 +3,8 @@
  * Este módulo NUNCA deve ser importado por Client Components.
  */
 
+import { jumpParkLogger } from "@/lib/integrations/jumppark/logger";
+
 export interface JumpParkEnv {
   baseUrl: string;
   token: string;
@@ -12,6 +14,12 @@ export interface JumpParkEnv {
   origin: string | null;
 }
 
+/**
+ * Missão de estabilização (04/08/2026) — diagnóstico honesto do estado real das variáveis.
+ * Loga só os NOMES das variáveis ausentes/vazias, nunca o valor (mesmo quando presente). Isso
+ * responde diretamente "quais variáveis foram encontradas / se estão vazias" nos logs de
+ * produção, sem nunca expor token, userId ou establishmentId.
+ */
 export function getJumpParkEnv(): JumpParkEnv | null {
   const baseUrl = process.env.JUMPPARK_API_BASE_URL;
   const token = process.env.JUMPPARK_API_TOKEN;
@@ -19,7 +27,15 @@ export function getJumpParkEnv(): JumpParkEnv | null {
   const establishmentId = process.env.JUMPPARK_ESTABLISHMENT_ID;
   const origin = process.env.JUMPPARK_API_ORIGIN || null;
 
-  if (!baseUrl || !token || !userId || !establishmentId) {
+  const missing = [
+    !baseUrl && "JUMPPARK_API_BASE_URL",
+    !token && "JUMPPARK_API_TOKEN",
+    !userId && "JUMPPARK_API_USER_ID",
+    !establishmentId && "JUMPPARK_ESTABLISHMENT_ID",
+  ].filter((v): v is string => Boolean(v));
+
+  if (missing.length > 0 || !baseUrl || !token || !userId || !establishmentId) {
+    jumpParkLogger.warn("Variáveis de ambiente ausentes ou vazias — integração não configurada.", { missingVars: missing });
     return null;
   }
 

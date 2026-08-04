@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { JumpParkConnectionTest } from "@/components/configuracoes/jumppark-connection-test";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
 import { fetchJumpParkDiagnostics } from "@/lib/integrations/jumppark/diagnostics";
@@ -62,6 +64,11 @@ export default async function StatusPage() {
       <PageHeader
         title="Status do projeto"
         description="Visão administrativa do que está conectado, configurado e planejado. Nenhum valor sensível é exibido nesta página."
+        actions={
+          <Button asChild variant="outline">
+            <Link href="/admin/diagnostico">Painel de diagnóstico</Link>
+          </Button>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

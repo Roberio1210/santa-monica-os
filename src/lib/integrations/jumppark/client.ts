@@ -1,5 +1,6 @@
 import "server-only";
 import { getJumpParkEnv } from "@/lib/config/env";
+import { jumpParkLogger } from "./logger";
 
 /**
  * Cliente HTTP para a API pública do JumpPark.
@@ -60,6 +61,8 @@ async function request<T>(
     headers.Referer = env.origin.endsWith("/") ? env.origin : `${env.origin}/`;
   }
 
+  jumpParkLogger.info("Chamando endpoint JumpPark.", { path, hasOrigin: env.origin !== null });
+
   try {
     const response = await fetch(url, {
       method: "GET",
@@ -69,14 +72,22 @@ async function request<T>(
     });
 
     if (!response.ok) {
-      // Nunca inclui o token nesta mensagem de erro.
+      // Nunca inclui o token nesta mensagem de erro — só status HTTP e corpo já sanitizado.
+      const bodySnippet = await response.text().catch(() => "");
+      jumpParkLogger.error("JumpPark respondeu com erro.", { path, status: response.status, statusText: response.statusText, bodySnippet: bodySnippet.slice(0, 300) });
       throw new JumpParkRequestError(
         response.status,
         `JumpPark request failed: ${response.status} ${response.statusText}`,
       );
     }
 
+    jumpParkLogger.info("JumpPark respondeu com sucesso.", { path, status: response.status });
     return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof JumpParkRequestError) throw error;
+    const reason = error instanceof Error && error.name === "AbortError" ? "timeout" : "network_error";
+    jumpParkLogger.error("Falha ao chamar JumpPark (sem resposta HTTP).", { path, reason, message: error instanceof Error ? error.message : String(error) });
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

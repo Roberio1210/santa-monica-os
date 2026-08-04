@@ -12,3 +12,5 @@ export type {
   OperationServiceItem,
 } from "./service";
 export type * from "./types";
+export { fetchJumpParkDiagnostics, classifyJumpParkError } from "./diagnostics";
+export type { JumpParkDiagnostics, JumpParkDiagnosticsCause } from "./diagnostics";

@@ -52,7 +52,7 @@ export function CentralHeader({ overview, situation, storageMode }: CentralHeade
         {overview.jumpparkConfigured ? (
           <Badge variant={overview.jumppark.error ? "critical" : "positive"}>
             {overview.jumppark.error ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}
-            JumpPark {overview.jumppark.error ? "com falha de conexão" : "conectado"}
+            JumpPark {overview.jumppark.error ? (overview.jumppark.cause === "token_rejeitado" ? "com token expirado" : "com falha de conexão") : "conectado"}
           </Badge>
         ) : (
           <Badge variant="outline">

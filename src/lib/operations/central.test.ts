@@ -18,7 +18,7 @@ function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview
     asOfDate: "2026-07-15",
     checkedAt: "2026-07-15T10:00:00.000Z",
     jumpparkConfigured: true,
-    jumppark: { data: { dailyRevenue: 500, vehicles: 4, orders: [] }, error: null },
+    jumppark: { data: { dailyRevenue: 500, vehicles: 4, orders: [] }, error: null, cause: null, recommendedAction: null },
     cashFlow: {
       data: {
         dashboard: {
@@ -259,6 +259,39 @@ describe("computeConsolidatedAlerts", () => {
     const overview = baseOverview({ cashFlow: { data: null, error: "Falha ao consultar o Fluxo de Caixa" } });
     const alerts = computeConsolidatedAlerts(overview);
     expect(alerts.some((a) => a.title.includes("Fluxo de Caixa"))).toBe(true);
+  });
+
+  it("JumpPark com token rejeitado (401) gera alerta CRÍTICO com título específico, nunca 'falha de conexão' genérica", () => {
+    const overview = baseOverview({
+      jumppark: {
+        data: null,
+        error: "O token do JumpPark foi rejeitado — provavelmente expirou ou foi revogado.",
+        cause: "token_rejeitado",
+        recommendedAction: "Renove o token em admin.jumppark.com.br > Configurações > API Aberta e atualize JUMPPARK_API_TOKEN na Vercel.",
+      },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    const jumpparkAlert = alerts.find((a) => a.module === "JumpPark");
+    expect(jumpparkAlert?.severity).toBe("critico");
+    expect(jumpparkAlert?.title).toMatch(/token.*expirado/i);
+    expect(jumpparkAlert?.description).toContain("admin.jumppark.com.br");
+  });
+
+  it("JumpPark não configurado nunca gera alerta na lista consolidada (é estado esperado, não uma falha)", () => {
+    const overview = baseOverview({
+      jumpparkConfigured: false,
+      jumppark: { data: null, error: "JumpPark não configurado neste ambiente.", cause: "nao_configurado", recommendedAction: "Configure as variáveis na Vercel." },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    expect(alerts.some((a) => a.module === "JumpPark")).toBe(false);
+  });
+
+  it("situação geral nunca é 'normal' quando existe um alerta crítico de JumpPark (token rejeitado)", () => {
+    const overview = baseOverview({
+      jumppark: { data: null, error: "Token rejeitado.", cause: "token_rejeitado", recommendedAction: "Renove o token." },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    expect(computeSituation(alerts)).toBe("critica");
   });
 });
 

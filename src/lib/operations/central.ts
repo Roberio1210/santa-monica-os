@@ -1,6 +1,6 @@
 import "server-only";
 import { isJumpParkConfigured } from "@/lib/config/env";
-import { fetchDailyFinancial, fetchTodayOperations, JumpParkNotConfiguredError, type OperationOrder } from "@/lib/integrations/jumppark";
+import { classifyJumpParkError, fetchDailyFinancial, fetchTodayOperations, JumpParkNotConfiguredError, type JumpParkDiagnosticsCause, type OperationOrder } from "@/lib/integrations/jumppark";
 import {
   computePayableAlerts,
   computeReceivableAlerts,
@@ -33,11 +33,19 @@ export interface JumpParkTodayData {
   orders: OperationOrder[];
 }
 
+/** Igual a `SectionResult`, mas nunca só um texto genérico de erro — sempre a causa técnica classificada (ver diagnostics.ts), para a Central e /configuracoes/status nunca divergirem na explicação. */
+export interface JumpParkSectionResult {
+  data: JumpParkTodayData | null;
+  error: string | null;
+  cause: JumpParkDiagnosticsCause;
+  recommendedAction: string | null;
+}
+
 export interface CentralOverview {
   asOfDate: string;
   checkedAt: string;
   jumpparkConfigured: boolean;
-  jumppark: SectionResult<JumpParkTodayData>;
+  jumppark: JumpParkSectionResult;
   cashFlow: SectionResult<Awaited<ReturnType<typeof fetchCashFlowOverview>>>;
   accountsPayable: SectionResult<{ items: AccountsPayableView[]; summary: AccountsPayableSummary; alerts: PayableAlert[] }>;
   accountsReceivable: SectionResult<{ items: AccountsReceivableView[]; summary: AccountsReceivableSummary; alerts: ReceivableAlert[] }>;
@@ -58,6 +66,17 @@ async function settle<T>(promise: Promise<T>): Promise<SectionResult<T>> {
   }
 }
 
+/** Igual a `settle`, mas classifica a causa real do erro (ver diagnostics.ts) em vez de só guardar `err.message` — nunca mostra "falha de conexão" genérica quando a causa (ex.: token expirado) já é conhecida. */
+async function settleJumpPark(promise: Promise<JumpParkTodayData>): Promise<JumpParkSectionResult> {
+  try {
+    const data = await promise;
+    return { data, error: null, cause: null, recommendedAction: null };
+  } catch (err) {
+    const { message, cause, recommendedAction } = classifyJumpParkError(err);
+    return { data: null, error: message, cause, recommendedAction };
+  }
+}
+
 /**
  * Agregador de leitura da Central de Operações — só leitura, nunca grava nada. Cada fonte é
  * buscada em paralelo e isolada com try/catch próprio (settle), então uma falha pontual (ex.:
@@ -75,7 +94,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     : Promise.reject(new JumpParkNotConfiguredError());
 
   const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory, inventoryQuality, ordersConsumption] = await Promise.all([
-    settle(jumpparkPromise),
+    settleJumpPark(jumpparkPromise),
     settle(fetchCashFlowOverview(asOfDate)),
     settle(fetchAccountsPayableOverview(asOfDate)),
     settle(fetchAccountsReceivableOverview(asOfDate)),
@@ -105,7 +124,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     asOfDate,
     checkedAt: new Date().toISOString(),
     jumpparkConfigured,
-    jumppark: jumpparkConfigured ? jumppark : { data: null, error: "JumpPark não configurado neste ambiente." },
+    jumppark,
     cashFlow,
     accountsPayable,
     accountsReceivable,
@@ -335,10 +354,20 @@ export function computeConsolidatedAlerts(overview: CentralOverview): Consolidat
   }
 
   if (overview.jumpparkConfigured && overview.jumppark.error) {
+    const titles: Record<Exclude<JumpParkDiagnosticsCause, null>, string> = {
+      nao_configurado: "JumpPark não configurado",
+      token_rejeitado: "Token do JumpPark expirado ou revogado",
+      endpoint_nao_encontrado: "Endpoint do JumpPark não encontrado",
+      erro_http: "Falha ao consultar o JumpPark",
+      timeout: "JumpPark não respondeu a tempo",
+      erro_desconhecido: "Falha de conexão com o JumpPark",
+    };
+    const critical: Exclude<JumpParkDiagnosticsCause, null>[] = ["token_rejeitado", "endpoint_nao_encontrado", "erro_http"];
+    const cause = overview.jumppark.cause ?? "erro_desconhecido";
     alerts.push({
-      severity: "atencao",
-      title: "Falha de conexão com o JumpPark",
-      description: overview.jumppark.error,
+      severity: critical.includes(cause) ? "critico" : "atencao",
+      title: titles[cause],
+      description: overview.jumppark.recommendedAction ? `${overview.jumppark.error} ${overview.jumppark.recommendedAction}` : overview.jumppark.error,
       date: null,
       module: "JumpPark",
       href: "/configuracoes/status",

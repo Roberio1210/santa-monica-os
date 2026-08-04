@@ -1,4 +1,5 @@
 import "server-only";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
@@ -30,4 +31,29 @@ export function getDb(): Database | null {
   const client = postgres(url, { max: 1, prepare: false });
   cached = drizzle(client, { schema });
   return cached;
+}
+
+export interface DatabasePing {
+  configured: boolean;
+  reachable: boolean | null;
+  latencyMs: number | null;
+  error: string | null;
+}
+
+/**
+ * Missão de estabilização (04/08/2026) — verifica conectividade REAL com o Neon (consulta
+ * mínima), não só se DATABASE_URL está definida. Usado em /admin/diagnostico. Nunca inclui a
+ * connection string na mensagem de erro.
+ */
+export async function pingDatabase(): Promise<DatabasePing> {
+  const db = getDb();
+  if (!db) return { configured: isDatabaseConfigured(), reachable: null, latencyMs: null, error: null };
+
+  const start = Date.now();
+  try {
+    await db.execute(sql`select 1`);
+    return { configured: true, reachable: true, latencyMs: Date.now() - start, error: null };
+  } catch (err) {
+    return { configured: true, reachable: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message.replace(/postgres(ql)?:\/\/\S+/gi, "[connection string omitida]") : "Falha desconhecida ao consultar o banco." };
+  }
 }
