@@ -17,10 +17,16 @@
   - `GET /serviceorders/export/json?startDate&endDate` — ordens de serviço (estacionamento,
     lavação, martelinho)
 - **Variáveis de ambiente**: `JUMPPARK_API_BASE_URL`, `JUMPPARK_API_TOKEN`,
-  `JUMPPARK_API_USER_ID`, `JUMPPARK_ESTABLISHMENT_ID`, `JUMPPARK_API_ORIGIN` (opcional —
-  origem autorizada no painel JumpPark, enviada em `Origin`/`Referer`)
+  `JUMPPARK_API_USER_ID`, `JUMPPARK_ESTABLISHMENT_ID`, `JUMPPARK_API_ORIGIN` (tecnicamente
+  opcional no código, mas **na prática obrigatória**: sem ela, credenciais corretas ainda
+  tomam HTTP 401 — o painel "API Aberta" da JumpPark exige Origin/Referer autorizados. Ver
+  `docs/jumppark-integration-audit-2026-08-04.md`.)
 - **Implementação**: `src/lib/integrations/jumppark/`
 - **Riscos**: nenhum nesta fase (somente leitura, sem exposição de token ao frontend)
+- **Auditoria completa (04/08/2026)**: `docs/jumppark-integration-audit-2026-08-04.md` — linha do
+  tempo confirmada por commits, teste real contra a API de produção, e achado de que
+  `GET /reports/financial` está retornando HTTP 404 (endpoint possivelmente descontinuado pela
+  JumpPark) mesmo com credenciais válidas.
 
 ## Meta Ads / Instagram / Facebook (planejado)
 

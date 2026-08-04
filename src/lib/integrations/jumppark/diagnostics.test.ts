@@ -14,10 +14,10 @@ describe("classifyJumpParkError", () => {
     expect(result.recommendedAction).toContain("JUMPPARK_API_TOKEN");
   });
 
-  it("HTTP 401 vira causa 'token_rejeitado' com instrução de renovação no painel JumpPark", () => {
+  it("HTTP 401 vira causa 'token_rejeitado' e sugere checar JUMPPARK_API_ORIGIN antes de assumir token expirado (achado real de auditoria)", () => {
     const result = classifyJumpParkError(new JumpParkRequestError(401, "JumpPark request failed: 401"));
     expect(result.cause).toBe("token_rejeitado");
-    expect(result.message).toMatch(/expirou|revogado/i);
+    expect(result.recommendedAction).toContain("JUMPPARK_API_ORIGIN");
     expect(result.recommendedAction).toContain("admin.jumppark.com.br");
   });
 

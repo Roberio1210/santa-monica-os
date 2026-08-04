@@ -6,8 +6,10 @@ import { SAO_PAULO_TZ, saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
  * Causa técnica classificada — permite à UI mostrar a ação certa (nunca só "falha de conexão"
- * genérica quando a causa real é sabida). `token_rejeitado` é o caso mais acionável: exige
- * renovar o token no painel JumpPark, não é um problema de rede.
+ * genérica quando a causa real é sabida). `token_rejeitado` cobre HTTP 401/403 — na prática,
+ * segundo auditoria real (docs/jumppark-integration-audit-2026-08-04.md), a causa mais comum
+ * NÃO é token expirado, é `JUMPPARK_API_ORIGIN` ausente (a JumpPark exige Origin/Referer
+ * autorizados desde 10/07/2026 — ver `recommendedAction` abaixo, que já reflete isso).
  */
 export type JumpParkDiagnosticsCause = "nao_configurado" | "token_rejeitado" | "endpoint_nao_encontrado" | "erro_http" | "timeout" | "erro_desconhecido" | null;
 
@@ -87,9 +89,13 @@ export function classifyJumpParkError(error: unknown): { message: string; cause:
   if (error instanceof JumpParkRequestError) {
     if (error.status === 401 || error.status === 403) {
       return {
-        message: "O token do JumpPark foi rejeitado — provavelmente expirou ou foi revogado.",
+        message: "As credenciais do JumpPark foram rejeitadas (HTTP 401/403).",
         cause: "token_rejeitado",
-        recommendedAction: "Renove o token em admin.jumppark.com.br > Configurações > API Aberta e atualize JUMPPARK_API_TOKEN (e JUMPPARK_API_USER_ID, se um novo userId for gerado) na Vercel.",
+        // Achado real em auditoria (ver docs/jumppark-integration-audit-2026-08-04.md): um token/userId/establishmentId
+        // corretos ainda tomam 401 quando JUMPPARK_API_ORIGIN está vazia — o painel "API Aberta" da JumpPark exige
+        // Origin/Referer autorizados. Verificar isso ANTES de assumir token expirado.
+        recommendedAction:
+          "Verifique primeiro se JUMPPARK_API_ORIGIN está configurada com a origem autorizada no painel JumpPark (Configurações > API Aberta) — sem ela, credenciais corretas também tomam 401. Se já estiver configurada e o erro persistir, aí sim renove o token em admin.jumppark.com.br > Configurações > API Aberta e atualize JUMPPARK_API_TOKEN (e JUMPPARK_API_USER_ID, se um novo userId for gerado) na Vercel.",
       };
     }
     if (error.status === 404) {
