@@ -1,10 +1,21 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { DemoDataBadge } from "@/components/shared/demo-data-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { mockPurchaseOpportunities } from "@/data/mock/purchases";
 import { formatCurrency, formatPercent } from "@/lib/utils/format";
 import type { PurchaseRecommendation } from "@/types/purchase";
+
+/**
+ * Missão 25 (04/08/2026) — renomeada de "Compras" para "Pesquisa de Preços" para nunca mais
+ * conviver com o mesmo nome de `/estoque/compras-sugeridas` (a tela oficial de sugestão de
+ * compra, com cálculo real). Esta tela cobre um conceito diferente e ainda não implementado
+ * (comparação de preço externo via Mercado Livre — ver `src/lib/integrations/mercadolivre/`,
+ * planejado) — mantida como protótipo demonstrativo, não removida. Ver
+ * `docs/mission-25-decisions.md`.
+ */
 
 const recommendationMeta: Record<PurchaseRecommendation, { label: string; variant: "positive" | "warning" | "outline" }> = {
   comprar: { label: "Comprar", variant: "positive" },
@@ -16,9 +27,16 @@ export default function ComprasPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Compras"
-        description="Pesquisa de preços e oportunidades. Nenhuma compra é realizada automaticamente."
-        actions={<DemoDataBadge />}
+        title="Pesquisa de Preços (Mercado Livre)"
+        description="Comparação de preço externo — conceito diferente de Compras Sugeridas (estoque). Nenhuma compra é realizada automaticamente."
+        actions={
+          <div className="flex items-center gap-2">
+            <DemoDataBadge />
+            <Button asChild variant="outline" size="sm">
+              <Link href="/estoque/compras-sugeridas">Ver Compras Sugeridas (real)</Link>
+            </Button>
+          </div>
+        }
       />
 
       <Card>

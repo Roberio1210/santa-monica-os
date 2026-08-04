@@ -7,7 +7,6 @@ import { StoneIntegrationCard } from "@/components/configuracoes/stone-integrati
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { getStoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
 import { computeSyncStatus } from "@/lib/integrations/stone/syncStatus";
-import { agentProfiles } from "@/data/mock/agents";
 import { metaIntegration } from "@/lib/integrations/meta";
 import { googleIntegration } from "@/lib/integrations/google";
 import { mercadoLivreIntegration } from "@/lib/integrations/mercadolivre";
@@ -111,19 +110,25 @@ export default async function ConfiguracoesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Agentes</CardTitle>
+          <CardTitle>Assistente</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {agentProfiles.map((agent) => (
-              <div key={agent.id} className="rounded-lg border border-border-subtle p-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-foreground">{agent.name}</p>
-                  <Badge variant="outline">{agent.role}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-foreground-muted">{agent.description}</p>
-              </div>
-            ))}
+          {/*
+            Missão 25 (04/08/2026) — este card mostrava 11 "Agentes" fictícios (src/data/mock/agents.ts,
+            todos status "planejado"), sem nenhum aviso de dado demonstrativo, dando a impressão de uma
+            arquitetura multiagente que não existe. O Santa Monica OS tem um único assistente
+            operacional real: o Zézinho (src/lib/zezinho/*, com "diretoria" interna de módulos, não
+            agentes nomeados). Substituído por este card único, honesto. Ver docs/mission-25-decisions.md.
+          */}
+          <div className="rounded-lg border border-border-subtle p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-foreground">Zézinho</p>
+              <Badge variant="positive">Ativo</Badge>
+            </div>
+            <p className="mt-1 text-xs text-foreground-muted">Assistente operacional real do Santa Monica OS — responde perguntas gerenciais com dados reais, sem geração de texto por IA externa nesta fase.</p>
+            <Button asChild variant="outline" size="sm" className="mt-2">
+              <Link href="/zezinho">Abrir Zézinho</Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
