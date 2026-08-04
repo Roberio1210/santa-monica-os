@@ -1,3 +1,4 @@
+/** DEPRECADO (Missão 25, 04/08/2026) — ver nota completa em `./service.ts`. Preservado sem exclusão. */
 import type { AccountsReceivableStatus, FinancePaymentMethod } from "@/lib/finance/types";
 
 export type CustomerStatus = "novo" | "ativo" | "vip" | "em_risco" | "perdido";

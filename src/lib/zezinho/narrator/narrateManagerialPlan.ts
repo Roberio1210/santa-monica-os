@@ -268,7 +268,7 @@ function linksFor(plan: ManagerialPlan): ZezinhoLink[] {
   if (plan.toolsSelected.includes("cash_ledger_totals")) links.push({ label: "Ver Fluxo de Caixa", href: "/financeiro/fluxo-de-caixa" });
   if (plan.toolsSelected.includes("goal_progress")) links.push({ label: "Ver metas", href: "/dashboard" });
   if (plan.toolsSelected.includes("inventory_overview")) links.push({ label: "Ver Estoque", href: "/estoque" });
-  if (plan.toolsSelected.includes("crm_customers")) links.push({ label: "Ver Clientes", href: "/clientes" });
+  if (plan.toolsSelected.includes("crm_customers")) links.push({ label: "Ver Clientes", href: "/crm" });
   return links;
 }
 

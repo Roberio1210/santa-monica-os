@@ -164,6 +164,11 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
       .map(toCustomer);
   }
 
+  async listCustomers(): Promise<Customer[]> {
+    const rows = await this.db().select().from(customers).orderBy(customers.name);
+    return rows.map(toCustomer);
+  }
+
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
     const normalized = normalizePlate(plate);
     if (!normalized) return null;

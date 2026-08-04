@@ -34,10 +34,10 @@ describe("executeTool — todo resultado carrega status/collectedAt/limitations 
     expect(result.error).toMatch(/período/i);
   });
 
-  it("crm_customers reflete jumpparkConfigured no status (not_configured, nunca 'ok' silencioso)", async () => {
+  it("crm_customers volta no_data (nunca 'ok' silencioso) quando a carteira de clientes está vazia — fonte é Atendimento, não mais JumpPark (Missão 25)", async () => {
     const result = await executeTool(call("crm_customers"));
-    expect(result.status).toBe("not_configured");
-    if (result.id === "crm_customers") expect(result.jumpparkConfigured).toBe(false);
+    expect(result.status).toBe("no_data");
+    if (result.id === "crm_customers") expect(result.customers).toEqual([]);
   });
 
   it("weather_forecast reflete o status do WeatherForecastResult (not_configured sem chave)", async () => {

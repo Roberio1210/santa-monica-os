@@ -1,5 +1,10 @@
 import type { Customer, ServiceOrder, ServiceVisit, Vehicle } from "@/lib/attendance/types";
-import type { CustomerProfile } from "@/lib/crm-intelligente/types";
+import type { CustomerProfile, CustomerStatus } from "@/lib/crm-intelligente/types";
+
+/** Acima deste número de dias sem retorno, o cliente é considerado perdido. */
+export const LOST_CUSTOMER_DAYS = 90;
+/** Acima deste número de dias sem retorno (e até `LOST_CUSTOMER_DAYS`), o cliente está em risco. */
+export const AT_RISK_CUSTOMER_DAYS = 45;
 
 /** Mesmo limiar de "cliente recorrente" já usado em manager-assistant/clientAttention.ts e planning/clientSignals.ts — decisão consistente do projeto. */
 export const RECORRENTE_VISIT_THRESHOLD = 3;
@@ -65,4 +70,26 @@ export function computeCustomerProfile(params: {
     isRecurring,
     isVip,
   };
+}
+
+/** Status categórico + motivo em linguagem direta — mesmos limiares documentados acima de `computeCustomerProfile`. */
+export function computeCustomerStatus(profile: Pick<CustomerProfile, "visitCount" | "daysSinceLastVisit">): { status: CustomerStatus; reason: string } {
+  const { visitCount, daysSinceLastVisit } = profile;
+
+  if (daysSinceLastVisit === null) {
+    return { status: "novo", reason: "Sem data de última visita conhecida." };
+  }
+  if (daysSinceLastVisit > LOST_CUSTOMER_DAYS) {
+    return { status: "perdido", reason: `Sem atendimento há ${daysSinceLastVisit} dias.` };
+  }
+  if (daysSinceLastVisit > AT_RISK_CUSTOMER_DAYS) {
+    return { status: "em_risco", reason: `Sem atendimento há ${daysSinceLastVisit} dias.` };
+  }
+  if (visitCount >= VIP_VISIT_THRESHOLD) {
+    return { status: "vip", reason: `${visitCount} atendimentos conhecidos — última visita há ${daysSinceLastVisit} dia(s).` };
+  }
+  if (visitCount === 1) {
+    return { status: "novo", reason: `Primeiro atendimento conhecido há ${daysSinceLastVisit} dia(s).` };
+  }
+  return { status: "ativo", reason: `${visitCount} atendimentos conhecidos — última visita há ${daysSinceLastVisit} dia(s).` };
 }

@@ -7,6 +7,22 @@ import type { Discount } from "@/lib/manager-assistant/types";
  * Nenhum tipo aqui tem escritor/tabela própria: este módulo é só leitura e composição.
  */
 
+/**
+ * Classificação categórica do cliente (Missão 25) — mesma régua de limiares já usada e validada
+ * na implementação anterior derivada do JumpPark (`src/lib/crm/aggregate.ts`, agora substituída
+ * por esta, única fonte oficial): só reaproveita os campos já calculados em `CustomerProfile`
+ * (`visitCount`, `daysSinceLastVisit`), nunca um dado novo.
+ */
+export type CustomerStatus = "novo" | "ativo" | "vip" | "em_risco" | "perdido";
+
+export const CUSTOMER_STATUS_LABEL: Record<CustomerStatus, string> = {
+  novo: "Novo",
+  ativo: "Ativo",
+  vip: "VIP",
+  em_risco: "Em risco",
+  perdido: "Perdido",
+};
+
 export interface CustomerProfile {
   customer: Customer;
   firstVisitAt: string | null;

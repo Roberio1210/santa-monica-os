@@ -3,7 +3,7 @@ import { fetchOperationalOrders, computeOperationalSummary } from "@/lib/integra
 import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
 import { computeHistoricalPattern } from "@/lib/integrations/jumppark/historical-pattern";
 import { fetchCashLedger, fetchDreReport } from "@/lib/finance/service";
-import { fetchCrmCustomers } from "@/lib/crm/service";
+import { listCustomerOverviews } from "@/lib/crm-intelligente/overview";
 import { fetchInventoryOverview } from "@/lib/inventory/service";
 import { fetchCentralOverview, computeConsolidatedAlerts } from "@/lib/operations/central";
 import { isJumpParkConfigured } from "@/lib/config/env";
@@ -145,9 +145,14 @@ async function runDreResult(call: ToolCall): Promise<ToolResult> {
 
 async function runCrmCustomers(): Promise<ToolResult> {
   const source = TOOL_REGISTRY.crm_customers.source;
-  const result = await fetchCrmCustomers();
-  const status: ToolResultStatus = !result.jumpparkConfigured ? "not_configured" : result.error ? "temporary_failure" : "ok";
-  return { id: "crm_customers", source, error: result.error, ...meta(status), jumpparkConfigured: result.jumpparkConfigured, customers: result.customers };
+  try {
+    const customers = await listCustomerOverviews();
+    const status: ToolResultStatus = customers.length === 0 ? "no_data" : "ok";
+    const limitations = customers.length === 0 ? ["Nenhum cliente cadastrado via Atendimento ainda — a carteira de clientes só existe a partir de visitas registradas no módulo Atendimento."] : [];
+    return { id: "crm_customers", source, error: null, ...meta(status, limitations), customers };
+  } catch {
+    return { id: "crm_customers", source, error: "Não foi possível consultar a carteira de clientes.", ...meta("temporary_failure"), customers: [] };
+  }
 }
 
 async function runInventoryOverview(): Promise<ToolResult> {

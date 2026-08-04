@@ -28,9 +28,9 @@ export type ObjectiveDataAvailability = "real" | "proxy_only";
  * etapas precisa vir marcado como inferência (ex.: usar volume de veículos e concentração de
  * horário de pico como indício indireto de capacidade), nunca como medição direta.
  *
- * `client_retention` é `real` porque `fetchCrmCustomers` (src/lib/crm/service.ts) já existe e é
- * dado real, mesmo sem nenhuma tela o consumindo ainda (decisão do usuário, item 3: integrar
- * imediatamente qualquer fonte real já existente).
+ * `client_retention` é `real` porque `listCustomerOverviews` (src/lib/crm-intelligente/overview.ts,
+ * fonte oficial única do CRM desde a Missão 25) já existe e é dado real, consumido tanto por /crm
+ * quanto por esta ferramenta.
  */
 export const OBJECTIVE_DATA_AVAILABILITY: Record<BusinessObjective, ObjectiveDataAvailability> = {
   increase_ticket: "real",

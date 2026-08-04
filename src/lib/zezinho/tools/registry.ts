@@ -84,8 +84,8 @@ export const TOOL_REGISTRY: Record<ToolId, ToolDefinition> = {
   crm_customers: {
     id: "crm_customers",
     label: "Clientes (CRM)",
-    source: "CRM (JumpPark + Contas a Receber)",
-    reuses: "fetchCrmCustomers (src/lib/crm/service.ts)",
+    source: "CRM Inteligente (Atendimento)",
+    reuses: "listCustomerOverviews (src/lib/crm-intelligente/overview.ts) — fonte oficial única desde a Missão 25, mesma usada por /crm",
     objectives: ["client_retention"],
     requiresPeriod: false,
     costHint: "medium",

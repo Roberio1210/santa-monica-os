@@ -41,6 +41,8 @@ export interface AttendanceRepository {
   createCustomer(input: CreateCustomerInput): Promise<Customer>;
   /** Busca livre por nome do cliente OU marca/modelo de veículo — usada quando a query não é telefone nem placa. Limitada a poucos resultados. */
   searchCustomersByText(query: string): Promise<Customer[]>;
+  /** Todos os clientes cadastrados (Missão 25) — usada pelas visões de carteira completa (Clientes sem retorno, Fidelização), nunca paginada implicitamente para não esconder registros. */
+  listCustomers(): Promise<Customer[]>;
 
   findVehicleByPlate(plate: string): Promise<Vehicle | null>;
   getVehicle(id: string): Promise<Vehicle | null>;

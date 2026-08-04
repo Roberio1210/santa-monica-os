@@ -97,6 +97,10 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       .slice(0, SEARCH_RESULT_LIMIT);
   }
 
+  async listCustomers(): Promise<Customer[]> {
+    return Array.from(this.customers.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  }
+
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
     const normalized = normalizePlate(plate);
     if (!normalized) return null;

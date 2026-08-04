@@ -48,10 +48,11 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
             isProxy: false,
           });
           for (const c of atRisk.slice(0, 5)) {
+            const name = c.customer.name ?? "Cliente sem nome";
             facts.push({
-              key: `crm_customer_${c.id}`,
-              label: c.name,
-              statement: `${c.name}: ${c.statusReason}${c.daysSinceLastVisit !== null ? ` (${c.daysSinceLastVisit} dia(s) sem retorno)` : ""}.`,
+              key: `crm_customer_${c.customer.id}`,
+              label: name,
+              statement: `${name}: ${c.statusReason}${c.profile.daysSinceLastVisit !== null ? ` (${c.profile.daysSinceLastVisit} dia(s) sem retorno)` : ""}.`,
               direction: "indisponivel",
               source: result.source,
               isProxy: false,

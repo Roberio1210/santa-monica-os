@@ -1,4 +1,7 @@
 /**
+ * DEPRECADO (Missão 25, 04/08/2026) — ver nota completa em `./service.ts`. Preservado sem
+ * exclusão; nenhum arquivo fora de `src/lib/crm/` importa este módulo hoje.
+ *
  * Agregação pura (sem I/O) do CRM: recebe ordens já buscadas do JumpPark e itens de Contas a
  * Receber já buscados, e deriva clientes, veículos, timeline, financeiro, status e sugestões —
  * tudo calculado ao vivo, nada persistido, nada inventado.

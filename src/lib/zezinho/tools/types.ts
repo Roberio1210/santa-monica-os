@@ -1,7 +1,7 @@
 import type { PeriodRange } from "@/lib/utils/timezone";
 import type { ComparisonMetric, ComparisonReport, PackageCounts, PeakHour } from "@/lib/zezinho/comparison-engine";
 import type { BusinessObjective } from "@/lib/zezinho/objective/types";
-import type { CrmCustomer } from "@/lib/crm/types";
+import type { CustomerOverviewEntry } from "@/lib/crm-intelligente/overview";
 import type { InventorySummary } from "@/lib/inventory/service";
 import type { ConsolidatedAlert } from "@/lib/operations/central";
 import type { WeatherForecastResult } from "@/lib/integrations/weather/types";
@@ -109,7 +109,7 @@ export type ToolResult =
   | (ToolResultBase & { id: "jumppark_wash_packages"; jumpparkConfigured: boolean; packageCountsA: PackageCounts; packageCountsB: PackageCounts })
   | (ToolResultBase & { id: "cash_ledger_totals"; metrics: ComparisonMetric[] })
   | (ToolResultBase & { id: "dre_result"; metrics: ComparisonMetric[] })
-  | (ToolResultBase & { id: "crm_customers"; jumpparkConfigured: boolean; customers: CrmCustomer[] })
+  | (ToolResultBase & { id: "crm_customers"; customers: CustomerOverviewEntry[] })
   | (ToolResultBase & { id: "inventory_overview"; summary: InventorySummary })
   | (ToolResultBase & { id: "central_alerts"; alerts: ConsolidatedAlert[] })
   | (ToolResultBase & { id: "full_period_comparison"; report: ComparisonReport })

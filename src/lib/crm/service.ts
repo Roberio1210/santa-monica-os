@@ -1,4 +1,15 @@
 import "server-only";
+/**
+ * DEPRECADO (Missão 25, 04/08/2026) — este módulo era uma segunda fonte de "CRM", derivada ao
+ * vivo do JumpPark + Contas a Receber, consumida só pela ferramenta `crm_customers` do Zézinho.
+ * A Missão 25 unificou o CRM: `/crm` (`src/lib/crm-intelligente/*`, Postgres via
+ * AttendanceRepository) é agora a ÚNICA fonte oficial de identidade/histórico de cliente —
+ * `crm_customers` do Zézinho passou a consumir `listCustomerOverviews`
+ * (`src/lib/crm-intelligente/overview.ts`) em vez desta função. Preservado sem exclusão (nenhum
+ * outro arquivo importa `fetchCrmCustomers`/`fetchCrmCustomerById` hoje — confira com
+ * `grep -rn "lib/crm/service"` antes de remover) por decisão explícita de nunca excluir código
+ * sem comprovação. Ver `docs/mission-25-decisions.md` para o racional completo da decisão.
+ */
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchServiceOrders, JumpParkNotConfiguredError } from "@/lib/integrations/jumppark";
 import { fetchAccountsReceivableOverview } from "@/lib/finance/service";
