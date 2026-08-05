@@ -38,6 +38,7 @@ import {
   Contact,
   PackagePlus,
   PackageMinus,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -55,6 +56,7 @@ export const navItems: NavItem[] = [
   { href: "/planejamento", label: "Planejamento Operacional", icon: CalendarClock },
   { href: "/crm", label: "CRM Inteligente", icon: Contact },
   { href: "/painel-gerencial", label: "Painel Gerencial", icon: Gauge },
+  { href: "/ordens", label: "Central de Ordens", icon: FileText },
   { href: "/movimentacoes", label: "Movimentações", icon: ClipboardList },
   { href: "/lavacao", label: "Lavação", icon: Droplets },
   { href: "/estacionamento", label: "Estacionamento", icon: ParkingSquare },
