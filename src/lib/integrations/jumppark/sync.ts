@@ -1,8 +1,8 @@
 import "server-only";
 import { count, desc, eq, inArray } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
-import { jumpParkServiceOrders, jumpParkSyncLogs } from "@/db/schema/jumppark";
-import { fetchServiceOrders, mapOperationOrders, JumpParkNotConfiguredError, JumpParkRequestError } from "./service";
+import { jumpParkServiceOrders, jumpParkServiceOrderItems, jumpParkSyncLogs } from "@/db/schema/jumppark";
+import { fetchServiceOrders, mapServiceOrderForPersistence, JumpParkNotConfiguredError, JumpParkRequestError } from "./service";
 import { jumpParkLogger } from "./logger";
 import { refreshJumpParkCustomers } from "./customersRefresh";
 
@@ -63,6 +63,8 @@ export interface SyncServiceOrdersResult {
   finishedAt: string;
   durationMs: number;
   errorMessage: string | null;
+  /** Missão 27 — total de itens de serviço individuais persistidos (soma de todas as ordens deste lote). */
+  serviceItemsPersisted: number;
   /** Resultado do recálculo automático de Clientes/Veículos (Missão 26) — null quando a sincronização de ordens falhou antes de chegar nessa etapa. */
   customersRefresh: { customersUpserted: number; vehiclesUpserted: number; ordersLinked: number } | null;
 }
@@ -97,6 +99,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: new Date().toISOString(),
       durationMs: 0,
       errorMessage: "Banco de dados (Neon) não configurado neste ambiente.",
+      serviceItemsPersisted: 0,
       customersRefresh: null,
     };
   }
@@ -112,42 +115,78 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
   try {
     jumpParkLogger.info("Iniciando sincronização de Service Orders.", { dateRangeStart, dateRangeEnd });
     const rawOrders = await fetchServiceOrders(dateRangeStart, dateRangeEnd);
-    const orders = mapOperationOrders(rawOrders);
+    // Só ordens finalizadas (com saída registrada) — mesma regra de sempre (docs/jumppark-sync-strategy.md).
+    const finalizedOrders = rawOrders.filter((order) => !!order.exitDateTime);
+    const orders = finalizedOrders.map(mapServiceOrderForPersistence);
 
     let ordersInserted = 0;
     let ordersUpdated = 0;
+    let serviceItemsPersisted = 0;
 
     if (orders.length > 0) {
-      const externalIds = orders.map((o) => o.id);
+      const externalIds = orders.map((o) => o.externalId);
       const existingRows = await db.select({ externalId: jumpParkServiceOrders.externalId }).from(jumpParkServiceOrders).where(inArray(jumpParkServiceOrders.externalId, externalIds));
       const existingIds = new Set(existingRows.map((r) => r.externalId));
 
       for (const order of orders) {
         const values = {
-          externalId: order.id,
+          externalId: order.externalId,
           code: order.code,
           entryTime: order.entryTime,
           exitTime: order.exitTime,
-          orderDate: order.date ?? dateRangeEnd,
+          orderDate: order.orderDate || dateRangeEnd,
           plateMasked: order.plateMasked,
           vehicleModel: order.vehicleModel,
+          vehicleColor: order.vehicleColor,
           clientName: order.clientName,
           clientPhoneMasked: order.clientPhoneMasked,
+          clientEmail: order.clientEmail,
           parkingAmount: String(order.parkingAmount),
           servicesAmount: String(order.servicesAmount),
           totalAmount: String(order.totalAmount),
           paymentMethod: order.paymentMethod,
           situation: order.situation,
+          operationSituationName: order.operationSituationName,
+          situationId: order.situationId,
+          financialSituationId: order.financialSituationId,
+          discountAmount: order.discountAmount === null ? null : String(order.discountAmount),
+          discountType: order.discountType,
+          typePrice: order.typePrice,
+          cardCode: order.cardCode,
+          staffEntryName: order.staffEntryName,
+          staffExitName: order.staffExitName,
+          establishmentId: order.establishmentId,
+          establishmentName: order.establishmentName,
+          observations: order.observations,
           source: "jumppark" as const,
         };
 
-        await db
+        const [orderRow] = await db
           .insert(jumpParkServiceOrders)
           .values(values)
-          .onConflictDoUpdate({ target: jumpParkServiceOrders.externalId, set: { ...values, updatedAt: new Date() } });
+          .onConflictDoUpdate({ target: jumpParkServiceOrders.externalId, set: { ...values, updatedAt: new Date() } })
+          .returning({ id: jumpParkServiceOrders.id });
 
-        if (existingIds.has(order.id)) ordersUpdated += 1;
+        if (existingIds.has(order.externalId)) ordersUpdated += 1;
         else ordersInserted += 1;
+
+        // Full-replace dos itens de serviço da ordem — sem chave natural por item na fonte,
+        // então o jeito seguro de nunca duplicar é apagar e reinserir a cada sincronização.
+        await db.delete(jumpParkServiceOrderItems).where(eq(jumpParkServiceOrderItems.serviceOrderId, orderRow.id));
+        if (order.items.length > 0) {
+          await db.insert(jumpParkServiceOrderItems).values(
+            order.items.map((item) => ({
+              serviceOrderId: orderRow.id,
+              description: item.description,
+              quantity: item.quantity,
+              amount: String(item.amount),
+              serviceContractId: item.serviceContractId,
+              commissioners: item.commissioners,
+              source: "jumppark" as const,
+            })),
+          );
+          serviceItemsPersisted += order.items.length;
+        }
       }
     }
 
@@ -157,7 +196,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       .set({ finishedAt, status: "success", ordersFetched: orders.length, ordersInserted, ordersUpdated, updatedAt: new Date() })
       .where(eq(jumpParkSyncLogs.id, logRow.id));
 
-    jumpParkLogger.info("Sincronização concluída.", { dateRangeStart, dateRangeEnd, ordersFetched: orders.length, ordersInserted, ordersUpdated });
+    jumpParkLogger.info("Sincronização concluída.", { dateRangeStart, dateRangeEnd, ordersFetched: orders.length, ordersInserted, ordersUpdated, serviceItemsPersisted });
 
     // Missão 26 — todo sucesso na sincronização de ordens recalcula Clientes/Veículos em seguida,
     // automaticamente. Uma falha aqui não desfaz nem marca a sincronização de ordens como erro
@@ -183,6 +222,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       errorMessage: null,
+      serviceItemsPersisted,
       customersRefresh,
     };
   } catch (error) {
@@ -206,6 +246,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       errorMessage,
+      serviceItemsPersisted: 0,
       customersRefresh: null,
     };
   }

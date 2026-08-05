@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/jumppark/sync",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}

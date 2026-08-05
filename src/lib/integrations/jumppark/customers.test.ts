@@ -75,6 +75,17 @@ describe("aggregateJumpParkCustomersAndVehicles", () => {
     expect(result.orderVehicleExternalId.get("1")).toBeNull();
   });
 
+  it("placa 'Não informado' (texto de exibição de maskPlate para ausência) nunca vira identidade de veículo fictício", () => {
+    const orders = [
+      order({ id: "1", plateMasked: "Não informado", clientName: "Maria Silva" }),
+      order({ id: "2", plateMasked: "Não informado", clientName: "João Souza" }),
+    ];
+    const result = aggregateJumpParkCustomersAndVehicles(orders);
+    expect(result.vehicles).toHaveLength(0);
+    expect(result.orderVehicleExternalId.get("1")).toBeNull();
+    expect(result.orderVehicleExternalId.get("2")).toBeNull();
+  });
+
   it("resolve o dono do veículo pela ordem mais recente daquele veículo", () => {
     const orders = [
       order({ id: "1", plateMasked: "AB***12", clientName: "Maria Silva", orderDate: "2026-08-01" }),

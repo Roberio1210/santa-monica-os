@@ -4,6 +4,7 @@ import type {
   JumpParkFinancialReport,
   JumpParkServiceOrdersResponse,
   JumpParkServiceOrder,
+  JumpParkObservations,
 } from "./types";
 import type { PaymentBreakdown } from "@/types/finance";
 import type { PaymentMethod } from "@/types/common";
@@ -199,6 +200,120 @@ export function mapOperationOrders(orders: JumpParkServiceOrder[]): OperationOrd
 export async function fetchTodayOperations(date: string): Promise<OperationOrder[]> {
   const orders = await fetchServiceOrders(date, date);
   return mapOperationOrders(orders);
+}
+
+export interface PersistableServiceOrderItem {
+  description: string;
+  quantity: number | null;
+  amount: number;
+  serviceContractId: string | null;
+  commissioners: unknown | null;
+}
+
+export interface PersistableServiceOrder {
+  externalId: string;
+  code: string | null;
+  entryTime: string | null;
+  exitTime: string | null;
+  orderDate: string;
+  /** Null quando a ordem não tem placa na fonte — nunca o texto "Não informado" (isso é só para exibição, não para persistência/identidade). */
+  plateMasked: string | null;
+  vehicleModel: string | null;
+  vehicleColor: string | null;
+  clientName: string | null;
+  clientPhoneMasked: string | null;
+  clientEmail: string | null;
+  parkingAmount: number;
+  servicesAmount: number;
+  totalAmount: number;
+  paymentMethod: string | null;
+  situation: string | null;
+  operationSituationName: string | null;
+  situationId: number | null;
+  financialSituationId: number | null;
+  discountAmount: number | null;
+  discountType: string | null;
+  typePrice: string | null;
+  cardCode: number | null;
+  staffEntryName: string | null;
+  staffExitName: string | null;
+  establishmentId: string | null;
+  establishmentName: string | null;
+  observations: JumpParkObservations | null;
+  items: PersistableServiceOrderItem[];
+}
+
+function toNullableNumber(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function toNullableInt(value: string | number | null | undefined): number | null {
+  const num = toNullableNumber(value);
+  return num === null ? null : Math.trunc(num);
+}
+
+function toNullableString(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  return str.length > 0 ? str : null;
+}
+
+/** `maskPlate` retorna o texto "Não informado" (pensado para exibição) — para persistência, ausência de placa deve virar `null`, nunca esse texto. */
+function maskPlateForPersistence(plate?: string | null): string | null {
+  if (!plate?.trim()) return null;
+  return maskPlate(plate);
+}
+
+/**
+ * Mapeia uma ordem crua da API para o formato completo de persistência (Missão 27 — backfill e
+ * enriquecimento) — inclui todos os campos reais documentados em docs/jumppark-data-map.md, além
+ * dos já usados por `mapOperationOrders`. Distinta de `mapOperationOrders` (que continua existindo
+ * só para a exibição já usada em "Movimentações de Hoje") para não arriscar quebrar esse caminho já
+ * testado. Nunca inventa campo: tudo que a API não retornou vira `null`.
+ */
+export function mapServiceOrderForPersistence(order: JumpParkServiceOrder): PersistableServiceOrder {
+  const dateSource = order.entryDateTime ?? order.exitDateTime;
+  const items: PersistableServiceOrderItem[] = (order.services ?? []).map((item) => ({
+    description: item.description ?? item.name ?? "Serviço",
+    quantity: item.quantity ?? null,
+    amount: Number(item.amount ?? 0),
+    serviceContractId: toNullableString(item.serviceContractId),
+    commissioners: item.commissioners ?? null,
+  }));
+
+  return {
+    externalId: order.serviceOrderId ?? `${order.plate ?? "sem-placa"}-${order.entryDateTime ?? ""}`,
+    code: order.serviceOrderCode ?? null,
+    entryTime: formatTime(order.entryDateTime),
+    exitTime: formatTime(order.exitDateTime),
+    orderDate: dateSource ? dateSource.split(" ")[0] : "",
+    plateMasked: maskPlateForPersistence(order.plate),
+    vehicleModel: order.vehicleModel ?? null,
+    vehicleColor: order.vehicleColor ?? null,
+    clientName: order.clientName ?? null,
+    clientPhoneMasked: maskPhone(order.clientPhone),
+    clientEmail: order.clientEmail ?? null,
+    parkingAmount: Number(order.amount ?? 0),
+    servicesAmount: Number(order.amountServices ?? 0),
+    totalAmount: Number(order.totalAmount ?? 0),
+    paymentMethod: order.paymentMethodName ?? null,
+    situation: order.financialSituationName ?? order.operationSituationName ?? null,
+    operationSituationName: order.operationSituationName ?? null,
+    situationId: toNullableInt(order.situationId),
+    financialSituationId: toNullableInt(order.financialSituationId),
+    discountAmount: toNullableNumber(order.discountAmount),
+    discountType: order.discountType ?? null,
+    typePrice: order.typePrice ?? null,
+    cardCode: toNullableInt(order.cardCode),
+    staffEntryName: order.userName ?? null,
+    staffExitName: order.userOutputName ?? null,
+    establishmentId: toNullableString(order.establishmentId),
+    establishmentName: order.establishmentName ?? null,
+    observations: order.observations ?? null,
+    items,
+  };
 }
 
 export { JumpParkNotConfiguredError, JumpParkRequestError };

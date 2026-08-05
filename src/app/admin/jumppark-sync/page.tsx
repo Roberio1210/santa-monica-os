@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { JumpParkSyncPanel } from "@/components/admin/jumppark-sync-panel";
+import { JumpParkBackfillPanel } from "@/components/admin/jumppark-backfill-panel";
 import { fetchJumpParkSyncStatus } from "@/lib/integrations/jumppark/sync";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export default async function JumpParkSyncPage() {
     <div className="space-y-6">
       <PageHeader
         title="Sincronização JumpPark — Service Orders"
-        description="Missão 26, Fase 1 (primeira entrega): sincronização manual e idempotente das Ordens de Serviço da JumpPark para o Neon. Clientes, veículos, produtos, estoque, CRM e indicadores continuam fora desta entrega."
+        description="Sincronização idempotente das Ordens de Serviço da JumpPark para o Neon, com recálculo automático de Clientes/Veículos a cada execução (Missão 26) e backfill histórico em lotes (Missão 27)."
         actions={
           <Button asChild variant="outline" size="sm">
             <Link href="/admin/diagnostico">Ver diagnóstico geral</Link>
@@ -22,8 +23,19 @@ export default async function JumpParkSyncPage() {
         }
       />
       <Card>
-        <CardContent className="pt-4">
+        <CardHeader>
+          <CardTitle>Sincronização manual (janela curta)</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
           <JumpParkSyncPanel initial={status} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Backfill histórico</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <JumpParkBackfillPanel />
         </CardContent>
       </Card>
     </div>

@@ -74,7 +74,11 @@ export function aggregateJumpParkCustomersAndVehicles(orders: OrderForAggregatio
       customerGroups.set(custKey, list);
     }
 
-    const plate = order.plateMasked?.trim() || null;
+    // "Não informado" é o texto de exibição que `maskPlate()` produz quando a ordem não tem
+    // placa — nunca deve virar identidade de veículo (criaria um veículo fictício agrupando
+    // todas as ordens sem placa). Ver Missão 27.
+    const plateRaw = order.plateMasked?.trim() || null;
+    const plate = plateRaw && plateRaw !== "Não informado" ? plateRaw : null;
     const vehKey = plate ? `plate:${plate}` : null;
     orderVehicleExternalId.set(order.id, vehKey);
     if (vehKey) {

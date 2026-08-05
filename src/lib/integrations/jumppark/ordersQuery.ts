@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, gte, ilike, lte, sql as sqlOp } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
-import { jumpParkServiceOrders, jumpParkSyncLogs } from "@/db/schema/jumppark";
+import { jumpParkServiceOrders, jumpParkServiceOrderItems, jumpParkSyncLogs } from "@/db/schema/jumppark";
 
 /**
  * Central de Ordens (Missão 26, Fase 1 — segunda entrega) — consulta somente leitura, direto do
@@ -124,4 +124,14 @@ export async function fetchOrderById(id: string): Promise<JumpParkServiceOrderRo
   if (!db) return null;
   const rows = await db.select().from(jumpParkServiceOrders).where(eq(jumpParkServiceOrders.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+export type JumpParkServiceOrderItemRow = typeof jumpParkServiceOrderItems.$inferSelect;
+
+/** Serviços individuais persistidos para a ordem (Missão 27) — lista vazia quando a sincronização não trouxe nenhum. */
+export async function fetchOrderItems(orderId: string): Promise<JumpParkServiceOrderItemRow[]> {
+  if (!isDatabaseConfigured()) return [];
+  const db = getDb();
+  if (!db) return [];
+  return db.select().from(jumpParkServiceOrderItems).where(eq(jumpParkServiceOrderItems.serviceOrderId, orderId));
 }
