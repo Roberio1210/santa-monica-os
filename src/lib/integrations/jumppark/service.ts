@@ -126,6 +126,8 @@ export interface OperationServiceItem {
 export interface OperationOrder {
   id: string;
   code: string | null;
+  /** Data (YYYY-MM-DD) derivada de entryDateTime, com fallback para exitDateTime — opcional para não quebrar fixtures existentes que não a definem. */
+  date?: string | null;
   entryTime: string | null;
   exitTime: string | null;
   plateMasked: string;
@@ -149,13 +151,13 @@ function formatTime(dateTime?: string): string | null {
 }
 
 /**
- * Ordens finalizadas (com saída registrada) de um dia, já mascaradas e
- * formatadas para exibição — usado pela tela "Movimentações de Hoje".
- * Nunca retorna placa ou telefone completos.
+ * Mapeia ordens cruas da API para o formato já mascarado/formatado usado em toda a interface —
+ * extraído de `fetchTodayOperations` (Missão 26/Fase 1) para ser reaproveitado também pela
+ * sincronização JumpPark → Neon (`sync.ts`), que nunca deve montar esse objeto a partir da
+ * resposta HTTP crua (ver docs/jumppark-sync-strategy.md, "Preservação do payload bruto").
+ * Só inclui ordens finalizadas (com saída registrada).
  */
-export async function fetchTodayOperations(date: string): Promise<OperationOrder[]> {
-  const orders = await fetchServiceOrders(date, date);
-
+export function mapOperationOrders(orders: JumpParkServiceOrder[]): OperationOrder[] {
   return orders
     .filter((order) => !!order.exitDateTime)
     .map((order) => {
@@ -164,9 +166,12 @@ export async function fetchTodayOperations(date: string): Promise<OperationOrder
         amount: Number(item.amount ?? 0),
       }));
 
+      const dateSource = order.entryDateTime ?? order.exitDateTime;
+
       return {
         id: order.serviceOrderId ?? `${order.plate ?? "sem-placa"}-${order.entryDateTime ?? ""}`,
         code: order.serviceOrderCode ?? null,
+        date: dateSource ? dateSource.split(" ")[0] : null,
         entryTime: formatTime(order.entryDateTime),
         exitTime: formatTime(order.exitDateTime),
         plateMasked: maskPlate(order.plate),
@@ -184,6 +189,16 @@ export async function fetchTodayOperations(date: string): Promise<OperationOrder
       };
     })
     .sort((a, b) => (b.exitTime ?? "").localeCompare(a.exitTime ?? ""));
+}
+
+/**
+ * Ordens finalizadas (com saída registrada) de um dia, já mascaradas e
+ * formatadas para exibição — usado pela tela "Movimentações de Hoje".
+ * Nunca retorna placa ou telefone completos.
+ */
+export async function fetchTodayOperations(date: string): Promise<OperationOrder[]> {
+  const orders = await fetchServiceOrders(date, date);
+  return mapOperationOrders(orders);
 }
 
 export { JumpParkNotConfiguredError, JumpParkRequestError };
