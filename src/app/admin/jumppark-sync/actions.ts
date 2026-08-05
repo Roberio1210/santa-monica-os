@@ -31,8 +31,11 @@ export async function syncJumpParkServiceOrdersAction(_prevState: JumpParkSyncAc
   if (result.status === "error") return { error: result.errorMessage, success: null };
 
   revalidatePath("/admin/jumppark-sync");
+  const customersSummary = result.customersRefresh
+    ? ` Clientes/Veículos recalculados: ${result.customersRefresh.customersUpserted} cliente(s), ${result.customersRefresh.vehiclesUpserted} veículo(s), ${result.customersRefresh.ordersLinked} ordem(ns) vinculada(s).`
+    : " Recálculo de Clientes/Veículos não foi concluído — ver logs.";
   return {
     error: null,
-    success: `Sincronização concluída (${fromDate} a ${toDate}): ${result.ordersFetched} ordem(ns) buscada(s) na JumpPark, ${result.ordersInserted} nova(s), ${result.ordersUpdated} atualizada(s), em ${result.durationMs}ms.`,
+    success: `Sincronização concluída (${fromDate} a ${toDate}): ${result.ordersFetched} ordem(ns) buscada(s) na JumpPark, ${result.ordersInserted} nova(s), ${result.ordersUpdated} atualizada(s), em ${result.durationMs}ms.${customersSummary}`,
   };
 }

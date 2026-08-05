@@ -1,5 +1,6 @@
-import { date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
+import { customers, vehicles } from "./crm";
 
 /**
  * Modelo de destino para a sincronização descrita em docs/jumppark-sync-strategy.md.
@@ -27,11 +28,20 @@ export const jumpParkServiceOrders = pgTable("jumppark_service_orders", {
    * ver docs/jumppark-sync-strategy.md, seção "Preservação do payload bruto". Null por padrão.
    */
   rawPayloadSanitized: jsonb("raw_payload_sanitized"),
+  /**
+   * Missão 26 (Fase 1, CRM derivado) — preenchidos pelo mesmo passo que atualiza `customers`/
+   * `vehicles` a cada sincronização (nunca escritos manualmente). Nulos quando a ordem não tem
+   * telefone nem nome (sem identidade possível) ou não tem placa. Permite abrir o histórico
+   * completo de um cliente/veículo com uma consulta indexada, sem recalcular identidade a cada
+   * visualização.
+   */
+  customerId: uuid("customer_id").references(() => customers.id),
+  vehicleId: uuid("vehicle_id").references(() => vehicles.id),
   active: active(),
   source: source(),
   notes: notes(),
   ...timestamps,
-});
+}, (table) => [index("jumppark_service_orders_customer_id_idx").on(table.customerId), index("jumppark_service_orders_vehicle_id_idx").on(table.vehicleId)]);
 
 export const syncStatusEnum = pgEnum("sync_status", ["running", "success", "partial", "error"]);
 

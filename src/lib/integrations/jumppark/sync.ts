@@ -4,6 +4,7 @@ import { getDb, isDatabaseConfigured } from "@/db/client";
 import { jumpParkServiceOrders, jumpParkSyncLogs } from "@/db/schema/jumppark";
 import { fetchServiceOrders, mapOperationOrders, JumpParkNotConfiguredError, JumpParkRequestError } from "./service";
 import { jumpParkLogger } from "./logger";
+import { refreshJumpParkCustomers } from "./customersRefresh";
 
 export type JumpParkSyncLogRow = typeof jumpParkSyncLogs.$inferSelect;
 
@@ -62,6 +63,8 @@ export interface SyncServiceOrdersResult {
   finishedAt: string;
   durationMs: number;
   errorMessage: string | null;
+  /** Resultado do recálculo automático de Clientes/Veículos (Missão 26) — null quando a sincronização de ordens falhou antes de chegar nessa etapa. */
+  customersRefresh: { customersUpserted: number; vehiclesUpserted: number; ordersLinked: number } | null;
 }
 
 export function sanitizeError(error: unknown): string {
@@ -94,6 +97,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: new Date().toISOString(),
       durationMs: 0,
       errorMessage: "Banco de dados (Neon) não configurado neste ambiente.",
+      customersRefresh: null,
     };
   }
 
@@ -155,6 +159,19 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
 
     jumpParkLogger.info("Sincronização concluída.", { dateRangeStart, dateRangeEnd, ordersFetched: orders.length, ordersInserted, ordersUpdated });
 
+    // Missão 26 — todo sucesso na sincronização de ordens recalcula Clientes/Veículos em seguida,
+    // automaticamente. Uma falha aqui não desfaz nem marca a sincronização de ordens como erro
+    // (as ordens já estão salvas corretamente) — só fica registrada no log estruturado.
+    let customersRefresh: SyncServiceOrdersResult["customersRefresh"] = null;
+    try {
+      const refreshResult = await refreshJumpParkCustomers();
+      if (refreshResult.status === "success") {
+        customersRefresh = { customersUpserted: refreshResult.customersUpserted, vehiclesUpserted: refreshResult.vehiclesUpserted, ordersLinked: refreshResult.ordersLinked };
+      }
+    } catch (refreshError) {
+      jumpParkLogger.error("Recálculo de Clientes/Veículos falhou após sincronização de ordens bem-sucedida.", { errorMessage: refreshError instanceof Error ? refreshError.message : String(refreshError) });
+    }
+
     return {
       status: "success",
       dateRangeStart,
@@ -166,6 +183,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       errorMessage: null,
+      customersRefresh,
     };
   } catch (error) {
     const finishedAt = new Date();
@@ -188,6 +206,7 @@ export async function syncJumpParkServiceOrders(dateRangeStart: string, dateRang
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       errorMessage,
+      customersRefresh: null,
     };
   }
 }
