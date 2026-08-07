@@ -1,4 +1,4 @@
-import { date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 import { customers, vehicles } from "./crm";
 
@@ -61,6 +61,15 @@ export const jumpParkServiceOrders = pgTable("jumppark_service_orders", {
    */
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
+  /**
+   * Missão 28 (revisão segura de identidade) — `true` só quando um humano vinculou esta ordem a
+   * um cliente pela fila "Identidades para revisar" (`identity-review/actions.ts`). Enquanto
+   * `true`, o recálculo automático (`refreshJumpParkCustomers`) nunca sobrescreve `customer_id`/
+   * `vehicle_id` desta ordem — é assim que uma decisão manual sobrevive ao recálculo completo a
+   * cada sincronização. `false` (padrão) significa "vínculo 100% derivado dos dados", livre para
+   * o recálculo ajustar (inclusive desfazer, se a evidência mudar).
+   */
+  customerLinkLocked: boolean("customer_link_locked").notNull().default(false),
   active: active(),
   source: source(),
   notes: notes(),

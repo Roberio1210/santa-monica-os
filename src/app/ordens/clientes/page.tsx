@@ -19,6 +19,20 @@ const statusVariant: Record<string, "outline" | "positive" | "warning" | "critic
   perdido: "critical",
 };
 
+/** Missão 28 — nível de confiança do vínculo de identidade (ver `identityConfidenceEnum`). */
+const identityConfidenceLabel: Record<string, string> = {
+  confirmado: "Confirmado",
+  provavel: "Provável",
+  provisorio: "Provisório",
+  ambiguo: "Ambíguo",
+};
+const identityConfidenceVariant: Record<string, "outline" | "positive" | "warning" | "critical"> = {
+  confirmado: "positive",
+  provavel: "outline",
+  provisorio: "outline",
+  ambiguo: "critical",
+};
+
 type SearchParams = Record<string, string | string[] | undefined>;
 
 function firstValue(v: string | string[] | undefined): string | undefined {
@@ -59,9 +73,14 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
         title="Clientes (derivado da JumpPark)"
         description="Camada permanente de Clientes e Veículos calculada automaticamente a partir das ordens já sincronizadas em Central de Ordens — nada aqui é digitado manualmente."
         actions={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/ordens">Central de Ordens</Link>
-          </Button>
+          <>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ordens/clientes/revisao">Identidades para revisar</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ordens">Central de Ordens</Link>
+            </Button>
+          </>
         }
       />
 
@@ -107,6 +126,7 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                   <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
                     <th className="pb-2 pr-3 font-medium">Cliente</th>
                     <th className="pb-2 pr-3 font-medium">Status</th>
+                    <th className="pb-2 pr-3 font-medium">Identidade</th>
                     <th className="pb-2 pr-3 font-medium">
                       <Link href={sortLink("visitCount")} className="hover:text-accent">
                         Visitas {filters.sortBy === "visitCount" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
@@ -136,6 +156,9 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                       </td>
                       <td className="py-2 pr-3">
                         <Badge variant={statusVariant[c.status] ?? "outline"}>{CUSTOMER_STATUS_LABEL[c.status]}</Badge>
+                      </td>
+                      <td className="py-2 pr-3" title={c.identityConfidenceReason ?? undefined}>
+                        <Badge variant={identityConfidenceVariant[c.identityConfidence] ?? "outline"}>{identityConfidenceLabel[c.identityConfidence] ?? c.identityConfidence}</Badge>
                       </td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.visitCount}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.lastVisit ? formatDateBR(c.lastVisit) : "—"}</td>

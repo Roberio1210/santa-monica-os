@@ -20,6 +20,20 @@ const statusVariant: Record<string, "outline" | "positive" | "warning" | "critic
   perdido: "critical",
 };
 
+/** Missão 28 — nível de confiança do vínculo de identidade (ver `identityConfidenceEnum`). */
+const identityConfidenceLabel: Record<string, string> = {
+  confirmado: "Confirmado",
+  provavel: "Provável",
+  provisorio: "Provisório",
+  ambiguo: "Ambíguo",
+};
+const identityConfidenceVariant: Record<string, "outline" | "positive" | "warning" | "critical"> = {
+  confirmado: "positive",
+  provavel: "outline",
+  provisorio: "outline",
+  ambiguo: "critical",
+};
+
 function maskedPlateFromExternalId(externalId: string | null): string | null {
   if (!externalId?.startsWith("plate:")) return null;
   return externalId.slice("plate:".length);
@@ -65,6 +79,13 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
             <p className="mt-1 text-xs text-foreground-subtle">{statusReason}</p>
           </div>
           <Field label="Identificador externo (JumpPark)" value={customer.externalId} />
+          <div>
+            <p className="text-xs text-foreground-subtle">Confiança da identidade (Missão 28)</p>
+            <Badge variant={identityConfidenceVariant[customer.identityConfidence] ?? "outline"}>
+              {identityConfidenceLabel[customer.identityConfidence] ?? customer.identityConfidence}
+            </Badge>
+            {customer.identityConfidenceReason ? <p className="mt-1 text-xs text-foreground-subtle">{customer.identityConfidenceReason}</p> : null}
+          </div>
         </CardContent>
       </Card>
 

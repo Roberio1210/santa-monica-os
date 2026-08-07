@@ -58,6 +58,9 @@ export interface CustomerListItem {
   servicesOrderCount: number;
   status: CustomerStatus;
   statusReason: string;
+  /** Missão 28 — nível de confiança do vínculo de identidade (ver `src/db/schema/crm.ts`, `identityConfidenceEnum`). */
+  identityConfidence: string;
+  identityConfidenceReason: string | null;
 }
 
 export interface CustomersQueryResult {
@@ -86,6 +89,8 @@ function toListItem(row: typeof customers.$inferSelect, now: Date): CustomerList
     servicesOrderCount: row.servicesOrderCount ?? 0,
     status,
     statusReason: reason,
+    identityConfidence: row.identityConfidence,
+    identityConfidenceReason: row.identityConfidenceReason,
   };
 }
 
