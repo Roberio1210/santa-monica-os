@@ -1,4 +1,5 @@
 import { comparePeriodValues, type PeriodComparison } from "@/lib/utils/timezone";
+import { timeBucketOf, type TimeGranularity } from "@/lib/utils/timeBuckets";
 import type { ServiceCombination } from "@/lib/integrations/jumppark/vehicleAnalytics";
 
 export type { ServiceCombination } from "@/lib/integrations/jumppark/vehicleAnalytics";
@@ -89,7 +90,7 @@ export function classifyServiceTrend(currentQuantity: number, previousQuantity: 
   return { direction: "estavel", comparison };
 }
 
-export type EvolutionGranularity = "day" | "week" | "month";
+export type EvolutionGranularity = TimeGranularity;
 
 export interface EvolutionPoint {
   bucket: string;
@@ -97,30 +98,17 @@ export interface EvolutionPoint {
   revenue: number;
 }
 
-function isoWeekBucket(dateIso: string): string {
-  const d = new Date(`${dateIso}T00:00:00Z`);
-  const dayNum = (d.getUTCDay() + 6) % 7; // segunda=0
-  d.setUTCDate(d.getUTCDate() - dayNum + 3); // quinta-feira da semana ISO
-  const isoYearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNum = Math.ceil(((d.getTime() - isoYearStart.getTime()) / 86_400_000 + 1) / 7);
-  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
-}
-
-function bucketOf(dateIso: string, granularity: EvolutionGranularity): string {
-  if (granularity === "day") return dateIso;
-  if (granularity === "week") return isoWeekBucket(dateIso);
-  return dateIso.slice(0, 7);
-}
-
 /**
  * Evolução por granularidade, sempre preenchendo TODOS os buckets do intervalo (mesmo sem
  * venda) — nunca omite um dia/semana/mês silenciosamente. `items` já deve vir filtrado pela
- * categoria de interesse (ou não-filtrado, para evolução do total geral).
+ * categoria de interesse (ou não-filtrado, para evolução do total geral). Tipo do item propositalmente
+ * mínimo (`orderDate`/`amount`) — qualquer item enriquecido do app (serviços, compras de
+ * fornecedor) satisfaz essa forma estruturalmente, sem conversão.
  */
-export function evolutionByGranularity(items: ServiceOrderItemContext[], granularity: EvolutionGranularity, allBuckets: string[]): EvolutionPoint[] {
+export function evolutionByGranularity(items: { orderDate: string; amount: number }[], granularity: EvolutionGranularity, allBuckets: string[]): EvolutionPoint[] {
   const totals = new Map<string, { quantity: number; revenue: number }>();
   for (const item of items) {
-    const bucket = bucketOf(item.orderDate, granularity);
+    const bucket = timeBucketOf(item.orderDate, granularity);
     const current = totals.get(bucket) ?? { quantity: 0, revenue: 0 };
     current.quantity += 1;
     current.revenue = round2(current.revenue + item.amount);

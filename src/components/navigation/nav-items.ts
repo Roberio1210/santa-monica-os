@@ -39,6 +39,7 @@ import {
   PackagePlus,
   PackageMinus,
   TrendingDown,
+  Building2,
   FileText,
   type LucideIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ export const navItems: NavItem[] = [
   { href: "/financeiro/contas-a-receber", label: "Contas a Receber", icon: Receipt },
   { href: "/financeiro/contas-a-pagar", label: "Contas a Pagar", icon: FileMinus },
   { href: "/financeiro/despesas", label: "Despesas (gerencial)", icon: TrendingDown },
+  { href: "/financeiro/fornecedores", label: "Fornecedores", icon: Building2 },
   { href: "/financeiro/dre", label: "DRE Gerencial", icon: FileBarChart },
   { href: "/financeiro/classificacao", label: "Classificação Financeira", icon: Tags },
   { href: "/financeiro/fechamento", label: "Fechamento", icon: Lock },
