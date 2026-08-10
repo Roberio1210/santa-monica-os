@@ -11,7 +11,7 @@ const fieldClasses = "h-9 rounded-lg border border-border bg-background-elevated
 
 const initialFormState: FormActionState = { error: null, success: null };
 
-export function EntryForm({ items }: { items: InventoryItemView[] }) {
+export function EntryForm({ items, supplierNames }: { items: InventoryItemView[]; supplierNames: string[] }) {
   const [formState, formAction, isPending] = useActionState(recordManualEntryAction, initialFormState);
   const [selectedItemId, setSelectedItemId] = useState("");
   const selectedItem = items.find((i) => i.id === selectedItemId);
@@ -40,7 +40,12 @@ export function EntryForm({ items }: { items: InventoryItemView[] }) {
           <input name="date" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} className={fieldClasses} aria-label="Data" />
           <input name="responsible" type="text" required placeholder="Responsável" className={fieldClasses} aria-label="Responsável" />
           <input name="unitPricePaid" type="text" inputMode="decimal" placeholder="Valor pago por unidade (opcional)" className={fieldClasses} aria-label="Valor pago" />
-          <input name="supplier" type="text" placeholder="Fornecedor (opcional)" className={fieldClasses} aria-label="Fornecedor" />
+          <input name="supplier" type="text" list="supplier-names" placeholder="Fornecedor (opcional)" className={fieldClasses} aria-label="Fornecedor" />
+          <datalist id="supplier-names">
+            {supplierNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <input name="invoiceNumber" type="text" placeholder="Número da nota (opcional)" className={fieldClasses} aria-label="Número da nota" />
           <input name="notes" type="text" placeholder="Observação (opcional)" className={cn(fieldClasses, "sm:col-span-2 lg:col-span-3")} aria-label="Observação" />
 
