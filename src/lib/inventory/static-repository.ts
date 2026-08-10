@@ -48,6 +48,11 @@ export class StaticInventoryRepository implements InventoryRepository {
   }
 
   async recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement> {
+    if (movement.externalId) {
+      const existing = this.movements.find((m) => m.externalId === movement.externalId);
+      if (existing) return { ...existing };
+    }
+
     const item = this.items.find((i) => i.id === movement.itemId);
     if (!item) throw new Error(`Item de estoque não encontrado: ${movement.itemId}`);
 

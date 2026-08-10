@@ -3,14 +3,22 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Unavailable } from "@/components/shared/unavailable";
+import { CalculationNote } from "@/components/shared/calculation-note";
+import { PeriodSelector } from "@/components/operations/period-selector";
+import { BalanceEvolutionChart } from "@/components/inventory/balance-evolution-chart";
 import { ItemDetailsForm } from "@/components/inventory/item-details-form";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { fetchProductDetail } from "@/lib/inventory/product-detail";
+import { fetchProductStockDetail } from "@/lib/inventory/stockGerencial";
+import { parsePeriodParams } from "@/lib/utils/timezone";
 import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
 
 export const dynamic = "force-dynamic";
+
+const STALE_BUCKET_LABEL: Record<string, string> = { "30_dias": "Parado há 30+ dias", "60_dias": "Parado há 60+ dias", "90_dias": "Parado há 90+ dias", "180_dias": "Parado há 180+ dias" };
 
 const statusMeta: Record<InventoryStatus, { label: string; variant: "positive" | "warning" | "critical" | "outline" }> = {
   ok: { label: "OK", variant: "positive" },
@@ -49,12 +57,16 @@ function IndicatorCard({ label, value, hint }: { label: string; value: string; h
   );
 }
 
-export default async function ProdutoDetalhePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProdutoDetalhePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ period?: string; from?: string; to?: string }> }) {
   const { id } = await params;
-  const detail = await fetchProductDetail(id);
-  if (!detail) notFound();
+  const rawParams = await searchParams;
+  const period = parsePeriodParams(rawParams);
+  const [detail, stockDetail] = await Promise.all([fetchProductDetail(id), fetchProductStockDetail(id, period)]);
+  if (!detail || !stockDetail.found) notFound();
 
   const { item, movements, recipes, relatedItems, lastEntryDate, lastConsumptionDate, lastPurchase, autonomy } = detail;
+  const { priceHistory, balanceEvolution, consumptionByPeriod, lossesByPeriod, turnover, staleBucket } = stockDetail;
+  const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
 
   return (
     <div className="space-y-6">
@@ -62,12 +74,18 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
         title={item.name}
         description={`${item.brand} — ${item.category}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusMeta[item.status].variant}>{statusMeta[item.status].label}</Badge>
             {item.quantityStatus === "measurement_pending" ? <Badge variant="warning">Medição pendente</Badge> : null}
+            {staleBucket ? <Badge variant="outline">{STALE_BUCKET_LABEL[staleBucket]}</Badge> : null}
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/estoque/compras/${id}`}>Ver compras deste produto</Link>
+            </Button>
           </div>
         }
       />
+
+      <PeriodSelector period={period} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <IndicatorCard label="Saldo atual" value={`${item.currentQuantity} ${item.unit}`} hint={item.fillPercent !== null ? `${item.fillPercent}% da embalagem` : undefined} />
@@ -136,6 +154,110 @@ export default async function ProdutoDetalhePage({ params }: { params: Promise<{
           </CardContent>
         </Card>
       </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Histórico de preços</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {priceHistory.length === 0 ? (
+              <p className="text-sm text-foreground-subtle">Nenhuma compra/entrada com preço informado registrada ainda.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
+                      <th className="pb-2 pr-3 font-medium">Data</th>
+                      <th className="pb-2 pr-3 font-medium">Preço unit.</th>
+                      <th className="pb-2 font-medium">Fornecedor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...priceHistory].reverse().map((p) => (
+                      <tr key={`${p.date}-${p.unitPrice}`} className="border-b border-border-subtle last:border-0">
+                        <td className="py-2 pr-3 text-foreground-muted">{formatDateBR(p.date)}</td>
+                        <td className="py-2 pr-3 font-medium text-foreground">{formatCurrency(p.unitPrice)}</td>
+                        <td className="py-2 text-foreground-muted">{p.supplier ?? "Não informado"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Evolução do saldo</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {balanceEvolution.length === 0 ? (
+              <p className="text-sm text-foreground-subtle">Nenhuma movimentação registrada ainda.</p>
+            ) : (
+              <BalanceEvolutionChart points={balanceEvolution} />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Consumo no período</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {!consumptionByPeriod ? (
+              <p className="text-sm text-foreground-subtle">Nenhum consumo operacional no período selecionado.</p>
+            ) : (
+              <div className="space-y-1 text-sm">
+                <p className="text-foreground">
+                  {consumptionByPeriod.quantity} {item.unit} em {consumptionByPeriod.count} movimentação(ões)
+                </p>
+                <p className="text-foreground-muted">Custo estimado: {consumptionByPeriod.estimatedCost !== null ? formatCurrency(consumptionByPeriod.estimatedCost) : "Sem dado"}</p>
+              </div>
+            )}
+            <p className="mt-2 text-xs text-foreground-subtle">Período: {periodCaption}</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Perdas no período</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {!lossesByPeriod ? (
+              <p className="text-sm text-foreground-subtle">Nenhuma perda no período selecionado.</p>
+            ) : (
+              <div className="space-y-1 text-sm">
+                <p className="text-foreground">
+                  {lossesByPeriod.quantity} {item.unit} em {lossesByPeriod.count} movimentação(ões)
+                </p>
+                <p className="text-foreground-muted">Custo estimado: {lossesByPeriod.estimatedCost !== null ? formatCurrency(lossesByPeriod.estimatedCost) : "Sem dado"}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Giro (vitalício)</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-sm text-foreground">
+              {turnover.reductionQuantity} {item.unit} reduzido(s) em {turnover.reductionCount} movimentação(ões)
+            </p>
+            <p className="mt-1 text-xs text-foreground-subtle">{turnover.lastReductionDate ? `Última redução: ${formatDateBR(turnover.lastReductionDate)}` : "Nenhuma redução registrada ainda"}</p>
+          </CardContent>
+        </Card>
+      </div>
+      <CalculationNote
+        source="Movimentações de Estoque deste produto"
+        formula="Consumo = saída/consumo/teste no período; Perdas = perda/avaria/vencimento/descarte no período; Giro = mesma contagem, histórico vitalício. Custo estimado = quantidade × custo médio atual."
+        period={periodCaption}
+        recordsUsed={`${movements.length} movimentação(ões) no histórico completo deste produto`}
+      />
 
       <Card>
         <CardHeader>

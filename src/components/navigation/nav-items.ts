@@ -76,6 +76,7 @@ export const navItems: NavItem[] = [
   { href: "/alertas", label: "Alertas", icon: BellRing },
   { href: "/marketing", label: "Marketing", icon: Megaphone },
   { href: "/estoque", label: "Estoque", icon: Boxes },
+  { href: "/estoque/posicao", label: "Posição do Estoque", icon: Boxes },
   { href: "/estoque/produtos", label: "Produtos", icon: Package },
   { href: "/estoque/compras", label: "Produtos/Compras (gerencial)", icon: ShoppingCart },
   { href: "/estoque/entradas", label: "Entradas", icon: PackagePlus },

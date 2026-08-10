@@ -127,11 +127,13 @@ export default async function PendenciasPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Campos ainda não implementados no cadastro de produto</CardTitle>
+          <CardTitle>Fornecedor e localização</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 pt-0 text-sm text-foreground-muted">
-          <p>Fornecedor: campo ainda não existe no schema — nenhum produto possui essa informação.</p>
-          <p>Localização: campo ainda não existe no schema — nenhum produto possui essa informação.</p>
+          <p>Campos já existem no cadastro do produto (desde a Missão 22) — quando aparecem vazios, é porque nenhuma entrada com fornecedor foi registrada ainda ou a localização não foi preenchida manualmente.</p>
+          <Button asChild variant="outline" size="sm" className="mt-2">
+            <Link href="/estoque/produtos">Ver produtos e preencher</Link>
+          </Button>
         </CardContent>
       </Card>
 
@@ -140,7 +142,10 @@ export default async function PendenciasPage() {
           <CardTitle>Integração com JumpPark</CardTitle>
         </CardHeader>
         <CardContent className="pt-0 text-sm text-foreground-muted">
-          <p>Ainda não implementada (Fase D — preview_and_confirm). Não há ordens futuras sem mapeamento a mostrar aqui nesta fase.</p>
+          <p>Implementada (Fase D — preview e confirmação de consumo por ordem real). Ordens da JumpPark aparecem em /estoque/ordens para revisão e confirmação de consumo produto a produto.</p>
+          <Button asChild variant="outline" size="sm" className="mt-2">
+            <Link href="/estoque/ordens">Ver ordens JumpPark</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>

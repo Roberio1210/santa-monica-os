@@ -192,6 +192,27 @@ export type MovementType =
   | "descarte"
   | "outros";
 
+/** Rótulos em PT-BR para todo o vocabulário de MovementType — usado em toda a UI gerencial de Estoque (Missão 34), nunca duplicado por página. */
+export const movementTypeLabels: Record<MovementType, string> = {
+  entrada: "Entrada",
+  saida: "Saída",
+  ajuste_inventario: "Ajuste de inventário",
+  perda: "Perda",
+  consumo_interno: "Consumo",
+  compra: "Compra",
+  contagem_fisica_inicial: "Contagem inicial",
+  ajuste_positivo: "Ajuste positivo",
+  ajuste_negativo: "Ajuste negativo",
+  avaria: "Avaria",
+  vencimento: "Vencimento",
+  devolucao: "Devolução",
+  transferencia: "Transferência",
+  consumo_teste_calibracao: "Teste/calibração",
+  correcao_inventario: "Correção de inventário",
+  descarte: "Descarte",
+  outros: "Outros",
+};
+
 export interface StockMovement {
   id: string;
   itemId: string;
@@ -214,6 +235,14 @@ export interface StockMovement {
   supplier?: string | null;
   /** Preço unitário pago nesta movimentação (Missão 22) — só em entradas/compras; base do custo médio ponderado. Opcional pelo mesmo motivo de `supplier`. */
   unitPricePaid?: number | null;
+  /**
+   * Chave de idempotência opcional (Missão 34) — quando informada, `recordMovement` nunca cria uma
+   * segunda movimentação para o mesmo `externalId`: retorna a já existente, sem alterar saldo de
+   * novo. Existe para permitir uma futura sincronização automática de compras (ou qualquer
+   * reprocessamento) sem duplicar entrada de estoque. Null/undefined = sem chave, comportamento
+   * de sempre (movimentação sempre criada, como em todo formulário manual hoje).
+   */
+  externalId?: string | null;
   /** Saldo do item imediatamente antes desta movimentação. Null só na 1ª movimentação já existente antes deste campo existir. */
   previousBalance: number | null;
   /** Saldo do item imediatamente após esta movimentação. */

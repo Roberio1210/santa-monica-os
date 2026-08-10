@@ -90,6 +90,36 @@ describe("recordManualEntry", () => {
     expect(after?.supplier).toBe("Distribuidora Alpha");
   });
 
+  it("mesma externalId reprocessada não duplica a entrada — saldo só sobe uma vez (Missão 34)", async () => {
+    const repo = getInventoryRepository();
+    const before = await repo.getItem(ITEM_ID);
+    if (!before) throw new Error("fixture ausente");
+
+    const input = {
+      itemId: ITEM_ID,
+      quantity: 5,
+      unit: "ml" as const,
+      date: "2026-08-05",
+      responsible: "Robério",
+      supplier: null,
+      unitPricePaid: 2,
+      invoiceNumber: null,
+      notes: null,
+      externalId: "compra-sync-teste-idempotencia-001",
+    };
+
+    const first = await recordManualEntry(input);
+    const afterFirst = await repo.getItem(ITEM_ID);
+    expect(afterFirst?.currentQuantity).toBe(before.currentQuantity + 5);
+
+    const second = await recordManualEntry(input);
+    const afterSecond = await repo.getItem(ITEM_ID);
+
+    expect(second.id).toBe(first.id);
+    expect(afterSecond?.currentQuantity).toBe(afterFirst?.currentQuantity);
+    expect((await repo.listMovements(ITEM_ID)).filter((m) => m.externalId === input.externalId)).toHaveLength(1);
+  });
+
   it("rejeita produto inexistente", async () => {
     await expect(
       recordManualEntry({ itemId: "produto-que-nao-existe", quantity: 10, unit: "ml", date: "2026-08-01", responsible: "Robério", supplier: null, unitPricePaid: null, invoiceNumber: null, notes: null }),

@@ -13,6 +13,8 @@ export interface ManualEntryInput {
   unitPricePaid: number | null;
   invoiceNumber: string | null;
   notes: string | null;
+  /** Chave de idempotência opcional (Missão 34) — reprocessar a mesma compra com o mesmo `externalId` nunca duplica a entrada. */
+  externalId?: string | null;
 }
 
 /**
@@ -39,6 +41,12 @@ export async function recordManualEntry(input: ManualEntryInput): Promise<StockM
   const item = await repo.getItem(input.itemId);
   if (!item) throw new Error("Produto não encontrado.");
 
+  const externalId = input.externalId?.trim() || null;
+  if (externalId) {
+    const existing = (await repo.listMovements(input.itemId)).find((m) => m.externalId === externalId);
+    if (existing) return existing;
+  }
+
   const supplier = input.supplier?.trim() || null;
 
   const movement = await repo.recordMovement({
@@ -52,6 +60,7 @@ export async function recordManualEntry(input: ManualEntryInput): Promise<StockM
     supplier,
     unitPricePaid: input.unitPricePaid,
     notes: input.notes?.trim() || null,
+    externalId,
   });
 
   const patch: Partial<Pick<InventoryItem, "unitCost" | "supplier">> = {};

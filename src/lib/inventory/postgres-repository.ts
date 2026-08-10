@@ -54,6 +54,7 @@ function toMovement(row: typeof inventoryMovements.$inferSelect): StockMovement 
     reference: row.reference,
     supplier: row.supplier,
     unitPricePaid: row.unitPricePaid !== null ? Number(row.unitPricePaid) : null,
+    externalId: row.externalId,
     previousBalance: row.previousBalance !== null ? Number(row.previousBalance) : null,
     newBalance: row.newBalance !== null ? Number(row.newBalance) : null,
   };
@@ -94,6 +95,11 @@ export class PostgresInventoryRepository implements InventoryRepository {
   async recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement> {
     const db = this.db();
     return db.transaction(async (tx) => {
+      if (movement.externalId) {
+        const [existing] = await tx.select().from(inventoryMovements).where(eq(inventoryMovements.externalId, movement.externalId)).limit(1);
+        if (existing) return toMovement(existing);
+      }
+
       const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, movement.itemId)).limit(1);
       if (!item) throw new Error(`Item de estoque não encontrado: ${movement.itemId}`);
 
@@ -118,6 +124,7 @@ export class PostgresInventoryRepository implements InventoryRepository {
           reference: movement.reference,
           supplier: movement.supplier ?? null,
           unitPricePaid: movement.unitPricePaid !== undefined && movement.unitPricePaid !== null ? String(movement.unitPricePaid) : null,
+          externalId: movement.externalId ?? null,
           previousBalance: String(previousBalance),
           newBalance: String(newBalance),
         })
