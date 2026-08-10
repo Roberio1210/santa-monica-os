@@ -3,9 +3,13 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { fetchCustomers, parseCustomersQueryFilters, type CustomerSortBy } from "@/lib/integrations/jumppark/customersQuery";
+import { PeriodSelector } from "@/components/operations/period-selector";
+import { CalculationNote } from "@/components/shared/calculation-note";
+import { fetchCustomers, fetchCustomerSegmentCounts, parseCustomersQueryFilters, type CustomerSortBy } from "@/lib/integrations/jumppark/customersQuery";
+import { CUSTOMER_SEGMENT_KEYS, CUSTOMER_SEGMENT_LABELS, type CustomerSegmentKey } from "@/lib/integrations/jumppark/customerSegments";
 import { CUSTOMER_STATUS_LABEL } from "@/lib/crm-intelligente/types";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
+import { parsePeriodParams } from "@/lib/utils/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -55,16 +59,23 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
     sort: firstValue(rawParams.sort),
     dir: firstValue(rawParams.dir),
     page: firstValue(rawParams.page),
+    segmento: firstValue(rawParams.segmento),
   };
 
-  const filters = parseCustomersQueryFilters(normalized);
-  const result = await fetchCustomers(filters);
+  const period = parsePeriodParams({ period: firstValue(rawParams.period), from: firstValue(rawParams.from), to: firstValue(rawParams.to) });
+  const filters = parseCustomersQueryFilters(normalized, { from: period.from, to: period.to });
+  const [result, segmentCounts] = await Promise.all([fetchCustomers(filters), fetchCustomerSegmentCounts({ from: period.from, to: period.to })]);
 
-  const baseParams = { cliente: filters.nameQuery };
+  const baseParams = { cliente: filters.nameQuery, segmento: filters.segment, period: period.key, from: period.key === "custom" ? period.from : undefined, to: period.key === "custom" ? period.to : undefined };
 
   function sortLink(sortBy: CustomerSortBy): string {
     const nextDir = filters.sortBy === sortBy && filters.sortDir === "desc" ? "asc" : "desc";
     return `/ordens/clientes${buildQuery({ ...baseParams, sort: sortBy, dir: nextDir, page: 1 })}`;
+  }
+
+  function segmentLink(segment: CustomerSegmentKey): string {
+    const next = filters.segment === segment ? null : segment;
+    return `/ordens/clientes${buildQuery({ ...baseParams, segmento: next, page: 1 })}`;
   }
 
   return (
@@ -84,6 +95,40 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
         }
       />
 
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <PeriodSelector period={period} />
+        <p className="text-xs text-foreground-subtle">Período usado pelos segmentos &quot;Novos&quot; e &quot;Reativados&quot; — os demais segmentos independem de período.</p>
+      </div>
+
+      <Card>
+        <CardContent className="space-y-3 pt-4">
+          <p className="text-sm font-medium text-foreground-muted">Segmentos ({period.label})</p>
+          <div className="flex flex-wrap gap-2">
+            {CUSTOMER_SEGMENT_KEYS.map((key) => (
+              <Link key={key} href={segmentLink(key)}>
+                <Badge variant={filters.segment === key ? "positive" : "outline"} className="cursor-pointer px-3 py-1.5 text-sm">
+                  {CUSTOMER_SEGMENT_LABELS[key]} — {segmentCounts[key]}
+                </Badge>
+              </Link>
+            ))}
+          </div>
+          <CalculationNote
+            source="Tabela customers (source='jumppark') + histórico de ordens (jumppark_service_orders)"
+            formula={[
+              "Novos: primeira visita (firstVisitAt) dentro do período selecionado.",
+              "Recorrentes: 3+ visitas no histórico total (mesmo limiar de crm-intelligente).",
+              "Reativados: teve visita dentro do período com mais de 45 dias de intervalo desde a visita anterior.",
+              "VIP: 5+ visitas e última visita há no máximo 90 dias.",
+              "Sem retorno X: última visita há X+ dias, a partir de hoje.",
+              "Com mais de 1 veículo: contagem de veículos vinculados na tabela vehicles.",
+            ].join(" ")}
+            period={`${period.label} (${formatDateBR(period.from)} a ${formatDateBR(period.to)})`}
+            recordsUsed={`${result.total !== undefined ? "clientes com source='jumppark'" : ""}`.trim() || "Clientes com source='jumppark'"}
+            limitations="Sem telefone completo nem CPF, a identidade de cada cliente é a mesma usada em toda a JumpPark (ver Identidades para revisar) — os segmentos herdam essa mesma limitação."
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent className="pt-4">
           <form method="get" className="flex flex-wrap items-end gap-3">
@@ -93,9 +138,11 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
               </label>
               <input id="cliente" name="cliente" type="text" placeholder="Nome do cliente" defaultValue={filters.nameQuery ?? ""} className={fieldClasses} />
             </div>
+            <input type="hidden" name="segmento" value={filters.segment ?? ""} />
+            <input type="hidden" name="period" value={period.key} />
             <Button type="submit">Filtrar</Button>
             <Button asChild variant="outline">
-              <Link href="/ordens/clientes">Limpar</Link>
+              <Link href="/ordens/clientes">Limpar tudo</Link>
             </Button>
           </form>
           <p className="mt-3 text-xs text-foreground-subtle">
@@ -111,7 +158,7 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
       ) : result.total === 0 ? (
         <Card>
           <CardContent className="pt-6 text-sm text-foreground-muted">
-            Nenhum cliente encontrado{filters.nameQuery ? " com esse filtro." : " — rode uma sincronização em Central de Ordens para calcular esta camada."}
+            Nenhum cliente encontrado{filters.nameQuery || filters.segment ? " com esse filtro." : " — rode uma sincronização em Central de Ordens para calcular esta camada."}
           </CardContent>
         </Card>
       ) : (
@@ -119,6 +166,7 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
           <CardContent className="pt-4">
             <p className="mb-3 text-sm text-foreground-muted">
               {result.total} cliente(s) encontrado(s) — página {result.page} de {result.pageCount}
+              {filters.segment ? <> — segmento: <span className="font-medium text-foreground">{CUSTOMER_SEGMENT_LABELS[filters.segment]}</span></> : null}
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -133,6 +181,11 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                       </Link>
                     </th>
                     <th className="pb-2 pr-3 font-medium">
+                      <Link href={sortLink("vehicleCount")} className="hover:text-accent">
+                        Veículos {filters.sortBy === "vehicleCount" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
+                      </Link>
+                    </th>
+                    <th className="pb-2 pr-3 font-medium">
                       <Link href={sortLink("lastVisit")} className="hover:text-accent">
                         Última visita {filters.sortBy === "lastVisit" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
                       </Link>
@@ -143,7 +196,11 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                         Total gasto {filters.sortBy === "totalSpent" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
                       </Link>
                     </th>
-                    <th className="pb-2 font-medium">Ticket médio</th>
+                    <th className="pb-2 font-medium">
+                      <Link href={sortLink("averageTicket")} className="hover:text-accent">
+                        Ticket médio {filters.sortBy === "averageTicket" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
+                      </Link>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -161,6 +218,7 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                         <Badge variant={identityConfidenceVariant[c.identityConfidence] ?? "outline"}>{identityConfidenceLabel[c.identityConfidence] ?? c.identityConfidence}</Badge>
                       </td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.visitCount}</td>
+                      <td className="py-2 pr-3 text-foreground-muted">{c.vehicleCount}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.lastVisit ? formatDateBR(c.lastVisit) : "—"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.daysSinceLastVisit ?? "—"}</td>
                       <td className="py-2 pr-3 font-medium text-foreground">{formatCurrency(c.totalSpent)}</td>

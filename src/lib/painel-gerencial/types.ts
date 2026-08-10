@@ -1,6 +1,6 @@
 import type { OperationalServiceCategory } from "@/lib/domain/operational";
 import type { PaymentMethod } from "@/types/common";
-import type { PeriodRange } from "@/lib/utils/timezone";
+import type { PeriodComparison, PeriodRange } from "@/lib/utils/timezone";
 
 /**
  * Read model temporário do Painel Gerencial (Sprint MVP Gerencial).
@@ -124,8 +124,21 @@ export interface ManagementFinding {
   severity: FindingSeverity;
 }
 
+/** Missão 29 — comparação vs período anterior (mesma duração) dos indicadores mais consultados. Percentual null quando a base anterior é zero (nunca inventa "∞"/"0%"). */
+export interface PainelGerencialComparison {
+  netRevenue: PeriodComparison;
+  grossRevenue: PeriodComparison;
+  ordersCount: PeriodComparison;
+  customersCount: PeriodComparison;
+  averageTicket: PeriodComparison;
+  expensesTotal: PeriodComparison;
+  operationalResult: PeriodComparison;
+}
+
 export interface PainelGerencialResult {
   period: PeriodRange;
+  /** Missão 29 — limites do período de comparação usado em `comparison` (mesma duração, imediatamente anterior). */
+  previousPeriod: { from: string; to: string };
   jumpparkConfigured: boolean;
   jumpparkError: string | null;
   generatedAt: string;
@@ -138,5 +151,6 @@ export interface PainelGerencialResult {
     summary: ExpensesSummary;
   };
   operationalResult: number;
+  comparison: PainelGerencialComparison;
   findings: ManagementFinding[];
 }

@@ -54,17 +54,29 @@ function startOfPreviousMonthIso(dateIso: string): string {
   return prevMonthDate.toISOString().slice(0, 10);
 }
 
-export type PeriodKey = "today" | "yesterday" | "last7days" | "week" | "month" | "previous_month" | "custom";
+function startOfYearIso(dateIso: string): string {
+  return `${dateIso.slice(0, 4)}-01-01`;
+}
 
-export const PERIOD_KEYS: PeriodKey[] = ["today", "yesterday", "last7days", "week", "month", "previous_month", "custom"];
+/**
+ * Missão 29 (sistema gerencial completo, 08/08/2026) — período nomeado adicionado ao seletor
+ * global. Mantido em ordem cronológica decrescente de granularidade para a UI (`PeriodSelector`).
+ */
+export type PeriodKey = "today" | "yesterday" | "last7days" | "week" | "previous_week" | "month" | "previous_month" | "last30days" | "last90days" | "year" | "custom";
+
+export const PERIOD_KEYS: PeriodKey[] = ["today", "yesterday", "last7days", "week", "previous_week", "month", "previous_month", "last30days", "last90days", "year", "custom"];
 
 export const PERIOD_LABELS: Record<PeriodKey, string> = {
   today: "Hoje",
   yesterday: "Ontem",
   last7days: "Últimos 7 dias",
-  week: "Semana atual",
-  month: "Mês atual",
-  previous_month: "Mês anterior",
+  week: "Esta semana",
+  previous_week: "Semana passada",
+  month: "Este mês",
+  previous_month: "Mês passado",
+  last30days: "Últimos 30 dias",
+  last90days: "Últimos 90 dias",
+  year: "Ano",
   custom: "Personalizado",
 };
 
@@ -93,12 +105,24 @@ export function resolvePeriod(key: PeriodKey, custom?: { from: string; to: strin
       return { key, from: addDaysIso(today, -6), to: today, label: PERIOD_LABELS.last7days };
     case "week":
       return { key, from: startOfWeekIso(today), to: today, label: PERIOD_LABELS.week };
+    case "previous_week": {
+      const thisWeekStart = startOfWeekIso(today);
+      const previousWeekEnd = addDaysIso(thisWeekStart, -1);
+      const previousWeekStart = addDaysIso(previousWeekEnd, -6);
+      return { key, from: previousWeekStart, to: previousWeekEnd, label: PERIOD_LABELS.previous_week };
+    }
     case "month":
       return { key, from: startOfMonthIso(today), to: today, label: PERIOD_LABELS.month };
     case "previous_month": {
       const from = startOfPreviousMonthIso(today);
       return { key, from, to: endOfMonthIso(from), label: PERIOD_LABELS.previous_month };
     }
+    case "last30days":
+      return { key, from: addDaysIso(today, -29), to: today, label: PERIOD_LABELS.last30days };
+    case "last90days":
+      return { key, from: addDaysIso(today, -89), to: today, label: PERIOD_LABELS.last90days };
+    case "year":
+      return { key, from: startOfYearIso(today), to: today, label: PERIOD_LABELS.year };
     case "custom": {
       if (!custom || !isValidIsoDate(custom.from) || !isValidIsoDate(custom.to)) {
         return { key: "today", from: today, to: today, label: PERIOD_LABELS.today };
@@ -111,6 +135,36 @@ export function resolvePeriod(key: PeriodKey, custom?: { from: string; to: strin
 
 export function isValidIsoDate(value: string | undefined | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/**
+ * Missão 29 — período imediatamente anterior, com a MESMA duração em dias do período informado
+ * (ex.: "últimos 30 dias" → os 30 dias anteriores a esses; período personalizado de 5 dias → os 5
+ * dias anteriores). Base de toda comparação "vs período anterior" pedida na missão — já existia
+ * uma cópia privada equivalente em `painel-gerencial/service.ts`; centralizada aqui para reuso em
+ * qualquer módulo (Despesas, Compras, Clientes, Veículos, Serviços, Estoque).
+ */
+export function previousPeriodOf(period: { from: string; to: string }): { from: string; to: string } {
+  const lengthDays = Math.round((Date.parse(`${period.to}T00:00:00Z`) - Date.parse(`${period.from}T00:00:00Z`)) / 86_400_000) + 1;
+  const previousTo = addDaysIso(period.from, -1);
+  const previousFrom = addDaysIso(previousTo, -(lengthDays - 1));
+  return { from: previousFrom, to: previousTo };
+}
+
+export interface PeriodComparison {
+  current: number;
+  previous: number;
+  /** current - previous. Positivo = cresceu. */
+  delta: number;
+  /** (delta / previous) * 100. Null quando previous = 0 (percentual não é definido — nunca exibir "∞" ou "0%" nesse caso). */
+  percent: number | null;
+}
+
+/** Compara um valor do período atual com o mesmo indicador no período anterior — nunca inventa percentual quando a base é zero. */
+export function comparePeriodValues(current: number, previous: number): PeriodComparison {
+  const delta = current - previous;
+  const percent = previous !== 0 ? (delta / previous) * 100 : null;
+  return { current, previous, delta, percent };
 }
 
 /** Lê `period`/`from`/`to` de query params de forma segura, sempre com fallback honesto para "today". */

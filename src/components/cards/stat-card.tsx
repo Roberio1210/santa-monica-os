@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { DrillDownDialog } from "@/components/shared/drill-down-dialog";
 import { cn } from "@/lib/utils/cn";
 import type { Trend } from "@/types/common";
 
@@ -14,6 +16,13 @@ interface StatCardProps {
   onClick?: () => void;
   /** Realça o card quando o filtro que ele representa está ativo. */
   active?: boolean;
+  /**
+   * Missão 29 — quando informado, o valor abre em modal ("Ver detalhes") mostrando os registros
+   * reais por trás do número (e, tipicamente, um `CalculationNote` explicando "como foi
+   * calculado"). Incompatível com `onClick` (o valor já fica clicável para o drill-down) — se
+   * ambos forem passados, o drill-down tem prioridade sobre o valor, e o card mantém o onClick.
+   */
+  detail?: ReactNode;
 }
 
 const trendStyles = {
@@ -22,7 +31,7 @@ const trendStyles = {
   flat: { icon: Minus, className: "text-foreground-subtle" },
 };
 
-export function StatCard({ label, value, icon: Icon, trend, hint, onClick, active }: StatCardProps) {
+export function StatCard({ label, value, icon: Icon, trend, hint, onClick, active, detail }: StatCardProps) {
   const TrendIcon = trend ? trendStyles[trend.direction].icon : null;
 
   return (
@@ -38,7 +47,17 @@ export function StatCard({ label, value, icon: Icon, trend, hint, onClick, activ
           <p className="text-xs font-medium text-foreground-muted">{label}</p>
           {Icon ? <Icon className="h-4 w-4 text-foreground-subtle" /> : null}
         </div>
-        <p className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{value}</p>
+        {detail ? (
+          <DrillDownDialog
+            trigger={value}
+            title={label}
+            triggerClassName="mt-2 block w-full text-2xl font-semibold tracking-tight text-foreground no-underline hover:text-accent hover:underline"
+          >
+            {detail}
+          </DrillDownDialog>
+        ) : (
+          <p className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{value}</p>
+        )}
         <div className="mt-1 flex items-center gap-1 text-xs">
           {trend && TrendIcon ? (
             <span className={cn("flex items-center gap-0.5 font-medium", trendStyles[trend.direction].className)}>

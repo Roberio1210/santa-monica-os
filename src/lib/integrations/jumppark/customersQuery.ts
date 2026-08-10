@@ -1,10 +1,13 @@
 import "server-only";
-import { and, asc, desc, eq, ilike, sql as sqlOp } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, sql as sqlOp } from "drizzle-orm";
+import { getTableColumns } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { customers, vehicles } from "@/db/schema/crm";
 import { jumpParkServiceOrders } from "@/db/schema/jumppark";
-import { computeCustomerStatus, VIP_VISIT_THRESHOLD, RECORRENTE_VISIT_THRESHOLD, AT_RISK_CUSTOMER_DAYS, LOST_CUSTOMER_DAYS } from "@/lib/crm-intelligente/profile";
+import { computeCustomerStatus, VIP_VISIT_THRESHOLD, RECORRENTE_VISIT_THRESHOLD, VIP_MAX_INACTIVITY_DAYS, AT_RISK_CUSTOMER_DAYS, LOST_CUSTOMER_DAYS } from "@/lib/crm-intelligente/profile";
 import type { CustomerStatus } from "@/lib/crm-intelligente/types";
+import { CUSTOMER_SEGMENT_KEYS, isReactivatedInPeriod, type CustomerSegmentKey } from "@/lib/integrations/jumppark/customerSegments";
+import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
  * Consulta somente leitura do núcleo de Clientes/Veículos derivado da JumpPark (Missão 26, terceira
@@ -15,11 +18,20 @@ import type { CustomerStatus } from "@/lib/crm-intelligente/types";
  * — nenhuma regra nova de negócio nasce aqui.
  */
 
-export type CustomerSortBy = "lastVisit" | "totalSpent" | "visitCount";
+export type CustomerSortBy = "lastVisit" | "totalSpent" | "visitCount" | "averageTicket" | "vehicleCount";
 export type CustomerSortDir = "asc" | "desc";
+
+const SORT_KEYS: CustomerSortBy[] = ["lastVisit", "totalSpent", "visitCount", "averageTicket", "vehicleCount"];
 
 export interface CustomersQueryFilters {
   nameQuery: string | null;
+  /** Missão 29 — segmento gerencial (novos/recorrentes/reativados/vip/sem-retorno/mais-veículos). Null = todos os clientes. */
+  segment: CustomerSegmentKey | null;
+  /**
+   * Janela usada pelos segmentos que dependem de período ("novos", "reativados") — ignorada pelos
+   * demais segmentos. Sempre um `PeriodRange` já resolvido pela página (nunca inventado aqui).
+   */
+  segmentPeriod: { from: string; to: string };
   sortBy: CustomerSortBy;
   sortDir: CustomerSortDir;
   page: number;
@@ -28,13 +40,16 @@ export interface CustomersQueryFilters {
 
 const DEFAULT_PAGE_SIZE = 25;
 
-export function parseCustomersQueryFilters(params: Record<string, string | undefined>): CustomersQueryFilters {
+export function parseCustomersQueryFilters(params: Record<string, string | undefined>, segmentPeriod: { from: string; to: string }): CustomersQueryFilters {
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
-  const sortBy: CustomerSortBy = params.sort === "totalSpent" ? "totalSpent" : params.sort === "visitCount" ? "visitCount" : "lastVisit";
+  const sortBy: CustomerSortBy = SORT_KEYS.includes(params.sort as CustomerSortBy) ? (params.sort as CustomerSortBy) : "lastVisit";
   const sortDir: CustomerSortDir = params.dir === "asc" ? "asc" : "desc";
+  const segment = CUSTOMER_SEGMENT_KEYS.includes(params.segmento as CustomerSegmentKey) ? (params.segmento as CustomerSegmentKey) : null;
 
   return {
     nameQuery: params.cliente?.trim() || null,
+    segment,
+    segmentPeriod,
     sortBy,
     sortDir,
     page,
@@ -56,6 +71,7 @@ export interface CustomerListItem {
   totalSpent: number;
   averageTicket: number;
   servicesOrderCount: number;
+  vehicleCount: number;
   status: CustomerStatus;
   statusReason: string;
   /** Missão 28 — nível de confiança do vínculo de identidade (ver `src/db/schema/crm.ts`, `identityConfidenceEnum`). */
@@ -72,7 +88,7 @@ export interface CustomersQueryResult {
   databaseConfigured: boolean;
 }
 
-function toListItem(row: typeof customers.$inferSelect, now: Date): CustomerListItem {
+function toListItem(row: typeof customers.$inferSelect & { vehicleCount: number }, now: Date): CustomerListItem {
   const visitCount = row.visitCount ?? 0;
   const daysSinceLastVisit = row.lastVisit ? daysBetween(row.lastVisit, now) : null;
   const { status, reason } = computeCustomerStatus({ visitCount, daysSinceLastVisit });
@@ -87,11 +103,55 @@ function toListItem(row: typeof customers.$inferSelect, now: Date): CustomerList
     totalSpent: row.totalSpent ? Number(row.totalSpent) : 0,
     averageTicket: row.averageTicket ? Number(row.averageTicket) : 0,
     servicesOrderCount: row.servicesOrderCount ?? 0,
+    vehicleCount: row.vehicleCount,
     status,
     statusReason: reason,
     identityConfidence: row.identityConfidence,
     identityConfidenceReason: row.identityConfidenceReason,
   };
+}
+
+/**
+ * "Reativados" não é expressável como WHERE simples na tabela `customers` (depende do histórico
+ * completo de datas de visita) — calcula à parte, em JS, sobre `jumppark_service_orders`, e
+ * devolve o conjunto de ids elegível para entrar no `inArray` da consulta principal. Ver
+ * `isReactivatedInPeriod` (pura, testada) em `customerSegments.ts`.
+ */
+async function computeReactivatedCustomerIds(db: NonNullable<ReturnType<typeof getDb>>, period: { from: string; to: string }): Promise<string[]> {
+  const rows = await db
+    .select({ customerId: jumpParkServiceOrders.customerId, orderDate: jumpParkServiceOrders.orderDate })
+    .from(jumpParkServiceOrders)
+    .where(sqlOp`${jumpParkServiceOrders.customerId} is not null`)
+    .orderBy(asc(jumpParkServiceOrders.customerId), asc(jumpParkServiceOrders.orderDate));
+
+  const datesByCustomer = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!row.customerId) continue;
+    const list = datesByCustomer.get(row.customerId) ?? [];
+    list.push(row.orderDate);
+    datesByCustomer.set(row.customerId, list);
+  }
+
+  const reactivated: string[] = [];
+  for (const [customerId, dates] of datesByCustomer) {
+    if (isReactivatedInPeriod(dates, period)) reactivated.push(customerId);
+  }
+  return reactivated;
+}
+
+/**
+ * Gera um NOVO fragmento SQL a cada chamada — nunca reaproveitar uma única instância de `sql`
+ * em mais de uma posição da mesma query (WHERE + SELECT + ORDER BY). Os identificadores são
+ * texto puro (`"vehicles" "v"`/`"customers"."id"`), não referências de coluna do Drizzle
+ * (`vehicles.customerId`/`customers.id`): usar a referência de coluna aqui faz o Drizzle, ao
+ * combinar esta subquery correlacionada com `getTableColumns(customers)` no mesmo `select()`,
+ * remover silenciosamente o qualificador de tabela de `customers.id` — a subquery então
+ * autocorrelaciona contra `vehicles.id` (sua própria PK) em vez de `customers.id`, e a contagem
+ * sempre dá 0. Comprovado com `.toSQL()` antes de corrigir — texto puro nos identificadores evita
+ * a classe inteira do bug, sem risco de injeção (nenhuma entrada de usuário aqui).
+ */
+function vehicleCountSql() {
+  return sqlOp<number>`(select count(*)::int from "vehicles" "v" where "v"."customer_id" = "customers"."id")`;
 }
 
 export async function fetchCustomers(filters: CustomersQueryFilters): Promise<CustomersQueryResult> {
@@ -103,14 +163,57 @@ export async function fetchCustomers(filters: CustomersQueryFilters): Promise<Cu
 
   const conditions = [eq(customers.source, "jumppark")];
   if (filters.nameQuery) conditions.push(ilike(customers.name, `%${filters.nameQuery}%`));
+
+  const today = saoPauloDateISO();
+  switch (filters.segment) {
+    case "novos":
+      conditions.push(gte(customers.firstVisitAt, filters.segmentPeriod.from), lte(customers.firstVisitAt, filters.segmentPeriod.to));
+      break;
+    case "recorrentes":
+      conditions.push(gte(customers.visitCount, RECORRENTE_VISIT_THRESHOLD));
+      break;
+    case "vip":
+      conditions.push(gte(customers.visitCount, VIP_VISIT_THRESHOLD), gte(customers.lastVisit, addDaysIso(today, -VIP_MAX_INACTIVITY_DAYS)));
+      break;
+    case "sem_retorno_30":
+      conditions.push(lte(customers.lastVisit, addDaysIso(today, -30)));
+      break;
+    case "sem_retorno_45":
+      conditions.push(lte(customers.lastVisit, addDaysIso(today, -45)));
+      break;
+    case "sem_retorno_60":
+      conditions.push(lte(customers.lastVisit, addDaysIso(today, -60)));
+      break;
+    case "sem_retorno_90":
+      conditions.push(lte(customers.lastVisit, addDaysIso(today, -90)));
+      break;
+    case "mais_veiculos":
+      conditions.push(sqlOp`${vehicleCountSql()} > 1`);
+      break;
+    case "reativados": {
+      const ids = await computeReactivatedCustomerIds(db, filters.segmentPeriod);
+      conditions.push(ids.length > 0 ? inArray(customers.id, ids) : sqlOp`false`);
+      break;
+    }
+  }
+
   const where = and(...conditions);
 
-  const sortColumn = filters.sortBy === "totalSpent" ? customers.totalSpent : filters.sortBy === "visitCount" ? customers.visitCount : customers.lastVisit;
+  const sortColumn =
+    filters.sortBy === "totalSpent"
+      ? customers.totalSpent
+      : filters.sortBy === "visitCount"
+        ? customers.visitCount
+        : filters.sortBy === "averageTicket"
+          ? customers.averageTicket
+          : filters.sortBy === "vehicleCount"
+            ? vehicleCountSql()
+            : customers.lastVisit;
   const orderFn = filters.sortDir === "asc" ? asc : desc;
 
   const [rows, totalRows] = await Promise.all([
     db
-      .select()
+      .select({ ...getTableColumns(customers), vehicleCount: vehicleCountSql() })
       .from(customers)
       .where(where)
       .orderBy(orderFn(sortColumn))
@@ -131,6 +234,39 @@ export async function fetchCustomers(filters: CustomersQueryFilters): Promise<Cu
     pageCount,
     databaseConfigured: true,
   };
+}
+
+/**
+ * Contagem de clientes em cada segmento — alimenta os tiles clicáveis no topo de `/ordens/clientes`.
+ * Uma consulta só, com `count(*) filter (where ...)` por segmento, exceto "reativados" (calculado
+ * à parte, mesma lógica de `fetchCustomers`). Sempre em relação ao mesmo `segmentPeriod`.
+ */
+export async function fetchCustomerSegmentCounts(segmentPeriod: { from: string; to: string }): Promise<Record<CustomerSegmentKey, number>> {
+  const zero = Object.fromEntries(CUSTOMER_SEGMENT_KEYS.map((k) => [k, 0])) as Record<CustomerSegmentKey, number>;
+  if (!isDatabaseConfigured()) return zero;
+  const db = getDb();
+  if (!db) return zero;
+
+  const today = saoPauloDateISO();
+  const base = eq(customers.source, "jumppark");
+
+  const [row] = await db
+    .select({
+      novos: sqlOp<number>`count(*) filter (where ${customers.firstVisitAt} >= ${segmentPeriod.from} and ${customers.firstVisitAt} <= ${segmentPeriod.to})::int`,
+      recorrentes: sqlOp<number>`count(*) filter (where ${customers.visitCount} >= ${RECORRENTE_VISIT_THRESHOLD})::int`,
+      vip: sqlOp<number>`count(*) filter (where ${customers.visitCount} >= ${VIP_VISIT_THRESHOLD} and ${customers.lastVisit} >= ${addDaysIso(today, -VIP_MAX_INACTIVITY_DAYS)})::int`,
+      sem_retorno_30: sqlOp<number>`count(*) filter (where ${customers.lastVisit} <= ${addDaysIso(today, -30)})::int`,
+      sem_retorno_45: sqlOp<number>`count(*) filter (where ${customers.lastVisit} <= ${addDaysIso(today, -45)})::int`,
+      sem_retorno_60: sqlOp<number>`count(*) filter (where ${customers.lastVisit} <= ${addDaysIso(today, -60)})::int`,
+      sem_retorno_90: sqlOp<number>`count(*) filter (where ${customers.lastVisit} <= ${addDaysIso(today, -90)})::int`,
+      mais_veiculos: sqlOp<number>`count(*) filter (where ${vehicleCountSql()} > 1)::int`,
+    })
+    .from(customers)
+    .where(base);
+
+  const reactivatedIds = await computeReactivatedCustomerIds(db, segmentPeriod);
+
+  return { ...zero, ...row, reativados: reactivatedIds.length };
 }
 
 export type CustomerVehicleRow = typeof vehicles.$inferSelect;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, isValidIsoDate, parsePeriodParams, resolvePeriod, saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
+import { addDaysIso, comparePeriodValues, isValidIsoDate, parsePeriodParams, previousPeriodOf, resolvePeriod, saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
 
 describe("saoPauloDateISO", () => {
   it("converte um instante UTC tarde da noite (já virado para o dia seguinte em UTC) para a data correta em SP", () => {
@@ -80,6 +80,69 @@ describe("resolvePeriod", () => {
   it("custom sem datas válidas cai honestamente em 'hoje', nunca inventa um intervalo", () => {
     const r = resolvePeriod("custom", { from: "", to: "" }, reference);
     expect(r).toEqual({ key: "today", from: "2026-07-18", to: "2026-07-18", label: "Hoje" });
+  });
+
+  it("previous_week cobre a semana (segunda a domingo) imediatamente anterior à atual", () => {
+    const r = resolvePeriod("previous_week", undefined, reference);
+    expect(r.from).toBe("2026-07-06"); // segunda-feira da semana passada
+    expect(r.to).toBe("2026-07-12"); // domingo da semana passada
+  });
+
+  it("last30days inclui hoje e os 29 dias anteriores", () => {
+    const r = resolvePeriod("last30days", undefined, reference);
+    expect(r.from).toBe("2026-06-19");
+    expect(r.to).toBe("2026-07-18");
+  });
+
+  it("last90days inclui hoje e os 89 dias anteriores", () => {
+    const r = resolvePeriod("last90days", undefined, reference);
+    expect(r.from).toBe("2026-04-20");
+    expect(r.to).toBe("2026-07-18");
+  });
+
+  it("year começa em 1º de janeiro do ano corrente", () => {
+    const r = resolvePeriod("year", undefined, reference);
+    expect(r.from).toBe("2026-01-01");
+    expect(r.to).toBe("2026-07-18");
+  });
+});
+
+describe("previousPeriodOf", () => {
+  it("período de 1 dia (hoje) -> ontem", () => {
+    expect(previousPeriodOf({ from: "2026-07-18", to: "2026-07-18" })).toEqual({ from: "2026-07-17", to: "2026-07-17" });
+  });
+
+  it("período de 7 dias -> os 7 dias imediatamente anteriores, mesma duração", () => {
+    expect(previousPeriodOf({ from: "2026-07-12", to: "2026-07-18" })).toEqual({ from: "2026-07-05", to: "2026-07-11" });
+  });
+
+  it("mês inteiro (31 dias) -> os 31 dias anteriores, sem sobreposição", () => {
+    expect(previousPeriodOf({ from: "2026-07-01", to: "2026-07-31" })).toEqual({ from: "2026-05-31", to: "2026-06-30" });
+  });
+});
+
+describe("comparePeriodValues", () => {
+  it("calcula delta e percentual normalmente", () => {
+    const c = comparePeriodValues(150, 100);
+    expect(c).toEqual({ current: 150, previous: 100, delta: 50, percent: 50 });
+  });
+
+  it("queda vira delta e percentual negativos", () => {
+    const c = comparePeriodValues(80, 100);
+    expect(c.delta).toBe(-20);
+    expect(c.percent).toBe(-20);
+  });
+
+  it("base anterior zero -> percentual null, nunca Infinity nem inventado", () => {
+    const c = comparePeriodValues(50, 0);
+    expect(c.delta).toBe(50);
+    expect(c.percent).toBeNull();
+  });
+
+  it("ambos zero -> delta zero, percentual null", () => {
+    const c = comparePeriodValues(0, 0);
+    expect(c.delta).toBe(0);
+    expect(c.percent).toBeNull();
   });
 });
 

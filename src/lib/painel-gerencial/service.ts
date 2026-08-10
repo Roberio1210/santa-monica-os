@@ -4,7 +4,7 @@ import { isJumpParkConfigured } from "@/lib/config/env";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView } from "@/lib/finance/status";
 import type { JumpParkOrderInput } from "@/lib/domain/operational";
-import { addDaysIso, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
+import { comparePeriodValues, previousPeriodOf, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
 import { buildCustomerAggregates, buildManagementOrderRows, buildServiceAggregates, computeManagementIndicators, rankCustomersBySpend } from "@/lib/painel-gerencial/orders";
 import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod } from "@/lib/painel-gerencial/expenses";
 import { buildFindings } from "@/lib/painel-gerencial/insights";
@@ -15,14 +15,10 @@ import type { PainelGerencialResult } from "@/lib/painel-gerencial/types";
  * alteração) e `getFinanceRepository()` (Contas a Pagar, sem alteração) — não cria nenhuma nova
  * fonte de dado, não persiste nada. Roda em paralelo: ordens do período atual, ordens do período
  * anterior (comparação) e despesas.
+ *
+ * Missão 29 — `previousPeriodOf`/`comparePeriodValues` centralizados em `lib/utils/timezone.ts`
+ * (reusados por outros módulos); este arquivo só monta as comparações específicas do Painel.
  */
-
-function previousPeriodOf(period: PeriodRange): { from: string; to: string } {
-  const lengthDays = Math.round((Date.parse(`${period.to}T00:00:00Z`) - Date.parse(`${period.from}T00:00:00Z`)) / 86_400_000) + 1;
-  const previousTo = addDaysIso(period.from, -1);
-  const previousFrom = addDaysIso(previousTo, -(lengthDays - 1));
-  return { from: previousFrom, to: previousTo };
-}
 
 function errorMessageFor(error: unknown): string {
   if (error instanceof JumpParkNotConfiguredError) return "JumpPark não configurado neste ambiente.";
@@ -86,8 +82,12 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
     previousExpenses: previousExpensesSummary,
   });
 
+  const previousOperationalResult = Math.round((previousIndicators.netRevenue - previousExpensesSummary.total) * 100) / 100;
+  const operationalResult = Math.round((indicators.netRevenue - expensesSummary.total) * 100) / 100;
+
   return {
     period,
+    previousPeriod: previous,
     jumpparkConfigured,
     jumpparkError: currentFetch.error,
     generatedAt: new Date().toISOString(),
@@ -99,7 +99,16 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
       rows: buildExpenseRows(currentPayables),
       summary: expensesSummary,
     },
-    operationalResult: Math.round((indicators.netRevenue - expensesSummary.total) * 100) / 100,
+    operationalResult,
+    comparison: {
+      netRevenue: comparePeriodValues(indicators.netRevenue, previousIndicators.netRevenue),
+      grossRevenue: comparePeriodValues(indicators.grossRevenue, previousIndicators.grossRevenue),
+      ordersCount: comparePeriodValues(indicators.ordersCount, previousIndicators.ordersCount),
+      customersCount: comparePeriodValues(indicators.customersCount, previousIndicators.customersCount),
+      averageTicket: comparePeriodValues(indicators.averageTicket ?? 0, previousIndicators.averageTicket ?? 0),
+      expensesTotal: comparePeriodValues(expensesSummary.total, previousExpensesSummary.total),
+      operationalResult: comparePeriodValues(operationalResult, previousOperationalResult),
+    },
     findings,
   };
 }

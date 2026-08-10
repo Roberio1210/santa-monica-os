@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fetchCustomerById } from "@/lib/integrations/jumppark/customersQuery";
+import { fetchCustomerServiceProfileById } from "@/lib/integrations/jumppark/customerServiceProfile";
 import { CUSTOMER_STATUS_LABEL } from "@/lib/crm-intelligente/types";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 
@@ -54,6 +55,8 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
   if (!detail) notFound();
 
   const { customer, status, statusReason, daysSinceLastVisit, vehicles, orders } = detail;
+  const serviceProfile = await fetchCustomerServiceProfileById(id);
+  const opportunities = serviceProfile.neverDone.slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -153,7 +156,69 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
 
       <Card>
         <CardHeader>
-          <CardTitle>5. Histórico operacional ({orders.length} ordem(ns))</CardTitle>
+          <CardTitle>5. Serviços</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4 pt-0 sm:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-medium text-foreground-subtle">Mais realizados</p>
+            {serviceProfile.topServices.length === 0 ? (
+              <p className="text-sm text-foreground-subtle">Nenhum item de serviço identificado nas ordens deste cliente.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {serviceProfile.topServices.slice(0, 8).map((s) => (
+                  <li key={s.category} className="flex items-center justify-between text-sm">
+                    <span className="text-foreground-muted">{s.category}</span>
+                    <span className="font-medium text-foreground">
+                      {s.count}x — {formatCurrency(s.totalAmount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium text-foreground-subtle">Nunca realizados (existem no catálogo real da base, mas nunca vieram numa ordem deste cliente)</p>
+            {serviceProfile.neverDone.length === 0 ? (
+              <p className="text-sm text-foreground-subtle">Este cliente já realizou todas as categorias de serviço conhecidas.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {serviceProfile.neverDone.map((c) => (
+                  <li key={c}>
+                    <Badge variant="outline">{c}</Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-xs text-foreground-subtle">
+              Categoria derivada da descrição real do serviço (texto antes de &quot; - &quot;) — nomes inconsistentes na fonte podem gerar categorias parecidas mas distintas.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {opportunities.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>6. Oportunidades comerciais</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="mb-2 text-sm text-foreground-muted">
+              Cliente com {customer.visitCount ?? 0} visita(s) registrada(s) que nunca recebeu estas categorias — possível oferta de serviço adicional:
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {opportunities.map((c) => (
+                <li key={c}>
+                  <Badge variant="warning">{c}</Badge>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>7. Histórico operacional ({orders.length} ordem(ns))</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
           {orders.length === 0 ? (
@@ -193,7 +258,7 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
 
       <Card>
         <CardHeader>
-          <CardTitle>6. Origem e sincronização</CardTitle>
+          <CardTitle>8. Origem e sincronização</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 pt-0 sm:grid-cols-2">
           <Field label="Origem" value="JumpPark → Neon (recálculo automático a cada sincronização)" />
