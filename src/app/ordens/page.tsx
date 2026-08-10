@@ -62,6 +62,9 @@ export default async function OrdensPage({ searchParams }: { searchParams: Promi
             <Button asChild variant="outline" size="sm">
               <Link href="/ordens/veiculos">Veículos</Link>
             </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ordens/servicos">Serviços</Link>
+            </Button>
           </>
         }
       />
