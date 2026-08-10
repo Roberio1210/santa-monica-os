@@ -55,9 +55,14 @@ export default async function OrdensPage({ searchParams }: { searchParams: Promi
         title="Central de Ordens"
         description={`Ordens de serviço da JumpPark já sincronizadas no Neon — esta tela nunca consulta a JumpPark ao vivo.${result.lastSyncAt ? ` Última sincronização bem-sucedida: ${new Date(result.lastSyncAt).toLocaleString("pt-BR")}.` : " Nenhuma sincronização bem-sucedida registrada ainda."}`}
         actions={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/ordens/clientes">Clientes</Link>
-          </Button>
+          <>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ordens/clientes">Clientes</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/ordens/veiculos">Veículos</Link>
+            </Button>
+          </>
         }
       />
 

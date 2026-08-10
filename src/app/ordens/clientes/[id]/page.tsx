@@ -137,7 +137,11 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
                 <tbody>
                   {vehicles.map((v) => (
                     <tr key={v.id} className="border-b border-border-subtle last:border-0">
-                      <td className="py-2 pr-3 text-foreground-muted">{v.model ?? NOT_INFORMED}</td>
+                      <td className="py-2 pr-3 text-foreground-muted">
+                        <Link href={`/ordens/veiculos/${v.id}`} className="hover:text-accent">
+                          {v.model ?? NOT_INFORMED}
+                        </Link>
+                      </td>
                       <td className="py-2 pr-3 font-mono text-xs text-foreground-subtle">{maskedPlateFromExternalId(v.externalId) ?? "—"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{v.visitCount ?? 0}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{v.firstSeenAt ? formatDateBR(v.firstSeenAt) : "—"}</td>
