@@ -114,6 +114,9 @@ export const processStepEnum = pgEnum("process_step", [
 
 export const recipeStatusEnum = pgEnum("recipe_status", ["rascunho", "em_calibracao", "aprovada", "suspensa"]);
 
+/** Missão de Histórico Retroativo — nível de confiança do valor usado num cálculo teórico (espelha src/lib/inventory/yield.ts, YieldConfidence). */
+export const recipeConfidenceTierEnum = pgEnum("recipe_confidence_tier", ["tecnico", "em_calibracao", "calibrado"]);
+
 export const calibrationSampleStatusEnum = pgEnum("calibration_sample_status", ["valida", "excluida"]);
 
 export const inventoryItems = pgTable("inventory_items", {
@@ -424,6 +427,48 @@ export const inventoryConsumptionLines = pgTable("inventory_consumption_lines", 
   active: active(),
   source: source(),
   externalId: externalId(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Consumo teórico HISTÓRICO (Missão de Histórico Retroativo) — deliberadamente uma tabela
+ * separada de `inventory_consumption_lines`/`inventory_movements`: nunca representa uma baixa
+ * real de estoque, só a estimativa de quanto uma ordem histórica real teria consumido segundo a
+ * receita técnica vigente no momento do processamento. Nunca altera `inventory_items.
+ * current_quantity`, nunca gera `inventory_movements`. Ao contrário do consumo automático real
+ * (que só usa receita "aprovada"), este cálculo usa a melhor referência disponível — aprovada >
+ * em calibração > técnica — porque é só análise, nunca escreve saldo.
+ *
+ * `externalId` (aqui com UNIQUE de verdade, ao contrário do bug corrigido em
+ * `service_consumption_rules` na missão anterior) é `hist:{jumpparkOrderExternalId}:{itemId}:
+ * {processStep}` — reprocessar o mesmo período nunca duplica uma linha.
+ */
+export const historicalTheoreticalConsumption = pgTable("historical_theoretical_consumption", {
+  id: id(),
+  jumpparkOrderExternalId: text("jumppark_order_external_id").notNull(),
+  orderDate: date("order_date").notNull(),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id),
+  serviceId: uuid("service_id")
+    .notNull()
+    .references(() => services.id),
+  vehicleCategory: orderVehicleCategoryEnum("vehicle_category").notNull(),
+  processStep: processStepEnum("process_step").notNull(),
+  recipeId: uuid("recipe_id")
+    .notNull()
+    .references(() => serviceConsumptionRules.id),
+  /** Qual nível de referência foi usado para este cálculo — nunca confundido com "consumo real medido". */
+  confidenceTier: recipeConfidenceTierEnum("confidence_tier").notNull(),
+  theoreticalQuantity: numeric("theoretical_quantity", { precision: 12, scale: 3 }).notNull(),
+  unit: inventoryUnitEnum("unit").notNull(),
+  /** Custo médio do produto NO MOMENTO DO PROCESSAMENTO (não há rastro de custo histórico por data) — limitação documentada. Null quando o produto não tinha custo cadastrado. */
+  theoreticalUnitCost: numeric("theoretical_unit_cost", { precision: 12, scale: 2 }),
+  theoreticalCost: numeric("theoretical_cost", { precision: 12, scale: 2 }),
+  active: active(),
+  source: source(),
+  externalId: text("external_id").notNull().unique(),
   notes: notes(),
   ...timestamps,
 });

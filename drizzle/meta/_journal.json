@@ -204,6 +204,13 @@
       "when": 1786468805836,
       "tag": "0028_violet_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786479355933,
+      "tag": "0029_old_invaders",
+      "breakpoints": true
     }
   ]
 }

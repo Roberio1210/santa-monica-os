@@ -26,24 +26,41 @@ function round(value: number, decimals: number): number {
   return Math.round(value * factor) / factor;
 }
 
+export interface RecipeReference {
+  value: number;
+  confidence: YieldConfidence;
+}
+
 /**
- * Escolhe a receita deste item com a maior confiança disponível: aprovada com mediana real
- * ("calibrado") > qualquer receita ativa com mediana real de pelo menos 1 amostra
- * ("em_calibracao") > referência técnica inicial sem nenhuma amostra ("tecnico"). Nunca inventa
- * um valor — cada nível só aparece quando o dado correspondente realmente existe.
+ * Nível de confiança do valor de UMA receita: aprovada com mediana real ("calibrado") >
+ * qualquer receita ativa com mediana real de pelo menos 1 amostra ("em_calibracao") >
+ * referência técnica inicial sem nenhuma amostra ("tecnico"). Nunca inventa um valor — null
+ * quando a receita não tem nenhum dos três. Reaproveitada tanto pelo rendimento de estoque
+ * quanto pelo cálculo de consumo teórico histórico (Missão de Histórico Retroativo) — a mesma
+ * regra de confiança nos dois lugares, nunca duas heurísticas divergentes.
  */
-function pickReference(itemRecipes: Recipe[], unit: InventoryUnit): { value: number; confidence: YieldConfidence } | null {
-  const sameUnit = itemRecipes.filter((r) => r.unit === unit);
+export function pickRecipeReference(recipe: Recipe): RecipeReference | null {
+  if (recipe.status === "suspensa") return null;
+  if (recipe.status === "aprovada" && recipe.quantityPerService !== null && recipe.quantityPerService > 0) {
+    return { value: recipe.quantityPerService, confidence: "calibrado" };
+  }
+  if (recipe.sampleCount > 0 && recipe.quantityPerService !== null && recipe.quantityPerService > 0) {
+    return { value: recipe.quantityPerService, confidence: "em_calibracao" };
+  }
+  if (recipe.sampleCount === 0 && recipe.technicalReferenceQuantity !== null && recipe.technicalReferenceQuantity > 0) {
+    return { value: recipe.technicalReferenceQuantity, confidence: "tecnico" };
+  }
+  return null;
+}
 
-  const approved = sameUnit.find((r) => r.status === "aprovada" && r.quantityPerService !== null && r.quantityPerService > 0);
-  if (approved) return { value: approved.quantityPerService as number, confidence: "calibrado" };
-
-  const calibrating = sameUnit.find((r) => r.status !== "suspensa" && r.sampleCount > 0 && r.quantityPerService !== null && r.quantityPerService > 0);
-  if (calibrating) return { value: calibrating.quantityPerService as number, confidence: "em_calibracao" };
-
-  const technical = sameUnit.find((r) => r.status !== "suspensa" && r.sampleCount === 0 && r.technicalReferenceQuantity !== null && r.technicalReferenceQuantity > 0);
-  if (technical) return { value: technical.technicalReferenceQuantity as number, confidence: "tecnico" };
-
+/** Prioriza por NÍVEL de confiança em todas as receitas do item (não pela ordem do array) — um "aprovada" sempre vence um "em_calibracao", mesmo que apareça depois. */
+function pickReference(itemRecipes: Recipe[], unit: InventoryUnit): RecipeReference | null {
+  const candidates = itemRecipes.filter((r) => r.unit === unit).map(pickRecipeReference).filter((r): r is RecipeReference => r !== null);
+  const order: YieldConfidence[] = ["calibrado", "em_calibracao", "tecnico"];
+  for (const tier of order) {
+    const match = candidates.find((c) => c.confidence === tier);
+    if (match) return match;
+  }
   return null;
 }
 

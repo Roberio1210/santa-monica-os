@@ -89,6 +89,7 @@ export const navItems: NavItem[] = [
   { href: "/estoque/calibracao", label: "Calibração", icon: Beaker },
   { href: "/estoque/mapeamentos", label: "Mapeamentos", icon: Map },
   { href: "/estoque/mapeamentos-servicos", label: "Mapeamentos de Serviços JumpPark", icon: GitMerge },
+  { href: "/estoque/consumo-teorico-historico", label: "Consumo Teórico Histórico", icon: History },
   { href: "/estoque/ordens", label: "Ordens JumpPark", icon: ListChecks },
   { href: "/estoque/consumo-automatico", label: "Consumo Automático", icon: Zap },
   { href: "/estoque/consumos", label: "Consumos de Estoque", icon: ArrowLeftRight },
