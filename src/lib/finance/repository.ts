@@ -16,6 +16,7 @@ import type {
   CreateAllocationRuleInput,
   CreateCashMovementInput,
   CreateClassificationRuleInput,
+  CreateRecurringBillTemplateInput,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
@@ -75,6 +76,7 @@ export interface FinanceRepository {
   listFinancialAccounts(): Promise<FinancialAccountBalance[]>;
   recordAccountTransfer(input: RecordAccountTransferInput): Promise<AccountTransfer>;
   listRecurringBillTemplates(): Promise<RecurringBillTemplate[]>;
+  createRecurringBillTemplate(input: CreateRecurringBillTemplateInput): Promise<RecurringBillTemplate>;
 
   // --- Fluxo de Caixa ---
   /** Lançamento manual (entrada/saída/ajuste/estorno/taxa/tarifa/juros) — gera balanceBefore/After. */

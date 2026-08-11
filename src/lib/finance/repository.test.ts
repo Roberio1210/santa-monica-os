@@ -90,3 +90,65 @@ describe("Recebimento IESA de R$ 900,00 — sem duplicidade e sem confundir fatu
     expect(iesa!.competenceDate).not.toBe(iesa!.receivedAt);
   });
 });
+
+describe("createRecurringBillTemplate — Instrumentação Gerencial", () => {
+  it("cria um novo modelo de recorrência real, sem lançar nenhuma conta a pagar sozinho", async () => {
+    const repo = new StaticFinanceRepository();
+    const before = await repo.listRecurringBillTemplates();
+
+    const created = await repo.createRecurringBillTemplate({
+      description: "Assinatura sistema X",
+      categoryId: "sistemas-e-assinaturas",
+      amount: 199.9,
+      variableAmount: false,
+      dueDay: 10,
+    });
+
+    expect(created.id).toBeTruthy();
+    expect(created.description).toBe("Assinatura sistema X");
+    expect(created.amount).toBe(199.9);
+    expect(created.variableAmount).toBe(false);
+
+    const after = await repo.listRecurringBillTemplates();
+    expect(after.length).toBe(before.length + 1);
+
+    const payables = await repo.listAccountsPayable();
+    expect(payables.find((p) => p.recurringBillTemplateId === created.id)).toBeUndefined();
+  });
+
+  it("valor variável nunca recebe um número inventado — amount fica null", async () => {
+    const repo = new StaticFinanceRepository();
+    const created = await repo.createRecurringBillTemplate({
+      description: "Gás",
+      categoryId: "energia",
+      amount: null,
+      variableAmount: true,
+    });
+    expect(created.amount).toBeNull();
+    expect(created.variableAmount).toBe(true);
+  });
+});
+
+describe("createAccountsPayable com externalId — idempotência (Compra → Estoque → Financeiro)", () => {
+  it("reprocessar o mesmo externalId nunca cria uma segunda despesa", async () => {
+    const repo = new StaticFinanceRepository();
+    const input = {
+      description: "Compra: Shampoo Automotivo (5 L)",
+      categoryId: "produtos-e-insumos",
+      competenceDate: "2026-08-01",
+      dueDate: "2026-08-15",
+      originalAmount: 250,
+      externalId: "compra-estoque:movement-teste-123",
+    };
+
+    const first = await repo.createAccountsPayable(input);
+    const second = await repo.createAccountsPayable(input);
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(second[0].id).toBe(first[0].id);
+
+    const all = await repo.listAccountsPayable();
+    expect(all.filter((p) => p.externalId === "compra-estoque:movement-teste-123")).toHaveLength(1);
+  });
+});

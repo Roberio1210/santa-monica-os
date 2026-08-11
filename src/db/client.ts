@@ -1,10 +1,19 @@
 import "server-only";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
+import { sql, type ExtractTablesWithRelations } from "drizzle-orm";
+import { drizzle, type PostgresJsTransaction } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * Aceita tanto a conexão base quanto uma transação em andamento (`tx` recebido dentro de
+ * `db.transaction(async (tx) => {...})`). Use este tipo em qualquer função auxiliar que PODE ser
+ * chamada de dentro de uma transação (ex.: os conversores `toXxx()` dos repositórios). Nunca use
+ * só `Database` nesses casos: com o pool em `max: 1` (ver abaixo), uma consulta extra fora do
+ * `tx` trava a transação para sempre esperando uma segunda conexão que nunca é liberada.
+ */
+export type DbOrTx = Database | PostgresJsTransaction<typeof schema, ExtractTablesWithRelations<typeof schema>>;
 
 /**
  * Nunca conecta no momento do import — só na primeira chamada de getDb(). Isso é o que permite

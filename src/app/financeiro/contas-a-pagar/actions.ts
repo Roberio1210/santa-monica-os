@@ -5,10 +5,12 @@ import { redirect } from "next/navigation";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { PayableOverpaymentError } from "@/lib/finance/status";
 import { fetchRecurringGenerationStatus, generateAccountsPayableFromTemplate } from "@/lib/finance/service";
-import type { CreateAccountsPayableInput, FinancePaymentMethod, UpdateAccountsPayableInput } from "@/lib/finance/types";
+import type { CreateAccountsPayableInput, CreateRecurringBillTemplateInput, FinancePaymentMethod, UpdateAccountsPayableInput } from "@/lib/finance/types";
 
 export interface FormActionState {
   error: string | null;
+  /** Preenchido só pelas ações que não redirecionam ao concluir (ex.: criar recorrência) — as demais continuam usando redirect(). */
+  success?: string | null;
 }
 
 export interface GenerateRecurringResultItem {
@@ -265,4 +267,53 @@ export async function generateRecurringAccountsPayableAction(_prevState: Generat
     success: `${createdCount} conta(s) gerada(s).${errorCount > 0 ? ` ${errorCount} com erro.` : ""}`,
     results,
   };
+}
+
+/**
+ * Missão de Instrumentação Gerencial — cadastro de um novo modelo de recorrência real (ex.: uma
+ * nova assinatura, um novo aluguel). Nunca gera nenhuma conta a pagar sozinho: só cria o modelo,
+ * que passa a aparecer em "Gerar contas recorrentes" para materialização explícita competência a
+ * competência (fluxo já existente, idempotente).
+ */
+export async function createRecurringBillTemplateAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const description = String(formData.get("description") ?? "").trim();
+  if (!description) return { error: "Descrição é obrigatória." };
+
+  const categoryId = String(formData.get("categoryId") ?? "").trim();
+  if (!categoryId) return { error: "Categoria é obrigatória." };
+
+  const variableAmount = formData.get("variableAmount") === "on";
+  const amountRaw = String(formData.get("amount") ?? "").replace(",", ".");
+  const amount = variableAmount ? null : Number(amountRaw);
+  if (!variableAmount && (!Number.isFinite(amount) || (amount as number) <= 0)) {
+    return { error: "Valor deve ser um número maior que zero (ou marque 'valor variável')." };
+  }
+
+  const dueDayRaw = parseOptionalString(formData.get("dueDay"));
+  const dueDay = dueDayRaw ? Number(dueDayRaw) : null;
+  if (dueDay !== null && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 28)) {
+    return { error: "Dia de vencimento deve ser um número inteiro entre 1 e 28 (ou deixe em branco quando não houver dia fixo)." };
+  }
+
+  const data: CreateRecurringBillTemplateInput = {
+    description,
+    supplierId: parseOptionalString(formData.get("supplierId")),
+    categoryId,
+    costCenterId: parseOptionalString(formData.get("costCenterId")),
+    financialAccountId: parseOptionalString(formData.get("financialAccountId")),
+    amount,
+    variableAmount,
+    dueDay,
+    periodicity: "mensal",
+    notes: parseOptionalString(formData.get("notes")),
+  };
+
+  try {
+    await getFinanceRepository().createRecurringBillTemplate(data);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao criar recorrência." };
+  }
+
+  revalidatePath("/financeiro/contas-a-pagar/gerar-recorrentes");
+  return { error: null, success: `Recorrência "${description}" cadastrada.` };
 }

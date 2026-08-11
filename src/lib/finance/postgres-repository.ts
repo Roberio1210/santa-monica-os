@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db/client";
+import { getDb, type DbOrTx } from "@/db/client";
 import {
   accountingPeriods as accountingPeriodsTable,
   accountsPayable as accountsPayableTable,
@@ -53,6 +53,7 @@ import type {
   CreateAllocationRuleInput,
   CreateCashMovementInput,
   CreateClassificationRuleInput,
+  CreateRecurringBillTemplateInput,
   DreLine,
   FinancePaymentMethod,
   FinancialAccountBalance,
@@ -158,9 +159,10 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return db;
   }
 
-  private async toAccountsReceivable(row: typeof accountsReceivableTable.$inferSelect): Promise<AccountsReceivable> {
-    const db = this.db();
-    const partyName = await this.resolvePartyName(row.customerId, row.partnerId);
+  /** Mesmo bug real corrigido em `toAccountsPayable` (ver comentário lá) — aceita `tx` opcional para nunca travar quando chamado de dentro de uma transação com pool `max: 1`. */
+  private async toAccountsReceivable(row: typeof accountsReceivableTable.$inferSelect, runner: DbOrTx = this.db()): Promise<AccountsReceivable> {
+    const db = runner;
+    const partyName = await this.resolvePartyName(row.customerId, row.partnerId, runner);
 
     let costCenterName: string | null = null;
     if (row.costCenterId) {
@@ -260,7 +262,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         .where(eq(accountsReceivableTable.id, input.accountsReceivableId))
         .returning();
 
-      return this.toAccountsReceivable(updated);
+      return this.toAccountsReceivable(updated, tx);
     });
   }
 
@@ -312,7 +314,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
           source: "manual",
         });
 
-        created.push(await this.toAccountsReceivable(row));
+        created.push(await this.toAccountsReceivable(row, tx));
       }
       return created;
     });
@@ -361,7 +363,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsReceivable(updated);
+      return this.toAccountsReceivable(updated, tx);
     });
   }
 
@@ -445,7 +447,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsReceivable(updated);
+      return this.toAccountsReceivable(updated, tx);
     });
   }
 
@@ -495,7 +497,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsReceivable(updated);
+      return this.toAccountsReceivable(updated, tx);
     });
   }
 
@@ -520,7 +522,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsReceivable(updated);
+      return this.toAccountsReceivable(updated, tx);
     });
   }
 
@@ -548,8 +550,9 @@ export class PostgresFinanceRepository implements FinanceRepository {
     });
   }
 
-  private async toCashMovement(row: typeof cashMovementsTable.$inferSelect): Promise<CashMovement> {
-    const db = this.db();
+  /** Mesmo bug real corrigido em `toAccountsPayable` (ver comentário lá) — aceita `tx` opcional para nunca travar quando chamado de dentro de uma transação com pool `max: 1`. */
+  private async toCashMovement(row: typeof cashMovementsTable.$inferSelect, runner: DbOrTx = this.db()): Promise<CashMovement> {
+    const db = runner;
     let categoryName: string | null = null;
     if (row.categoryId) {
       const [cat] = await db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.id, row.categoryId)).limit(1);
@@ -565,7 +568,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
       const [fa] = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, row.financialAccountId)).limit(1);
       financialAccountName = fa?.name ?? null;
     }
-    const partyName = await this.resolveCashMovementPartyName(row.customerId, row.partnerId, row.supplierId);
+    const partyName = await this.resolveCashMovementPartyName(row.customerId, row.partnerId, row.supplierId, runner);
 
     return {
       id: row.id,
@@ -602,8 +605,9 @@ export class PostgresFinanceRepository implements FinanceRepository {
     customerId: string | null,
     partnerId: string | null,
     supplierId: string | null,
+    runner: DbOrTx = this.db(),
   ): Promise<string | null> {
-    const db = this.db();
+    const db = runner;
     if (partnerId) {
       const [row] = await db.select().from(partnersTable).where(eq(partnersTable.id, partnerId)).limit(1);
       if (row) return row.name;
@@ -678,8 +682,8 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return rows.map((r) => ({ id: r.id, name: r.name, type: r.type as Partner["type"] }));
   }
 
-  private async resolvePartyName(customerId: string | null, partnerId: string | null): Promise<string> {
-    const db = this.db();
+  private async resolvePartyName(customerId: string | null, partnerId: string | null, runner: DbOrTx = this.db()): Promise<string> {
+    const db = runner;
     if (partnerId) {
       const [row] = await db.select().from(partnersTable).where(eq(partnersTable.id, partnerId)).limit(1);
       if (row) return row.name;
@@ -855,7 +859,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toCashMovement(row);
+      return this.toCashMovement(row, tx);
     });
   }
 
@@ -927,10 +931,71 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return results;
   }
 
+  /**
+   * Missão de Instrumentação Gerencial — cadastro de um novo modelo de recorrência real pelo
+   * usuário (antes só era possível semear no banco). Não gera nenhuma conta a pagar sozinho — só
+   * cria o modelo; a materialização de cada competência continua exigindo confirmação explícita
+   * via `generateAccountsPayableFromTemplate` (já existente, idempotente), em
+   * `/financeiro/contas-a-pagar/gerar-recorrentes`.
+   */
+  async createRecurringBillTemplate(input: CreateRecurringBillTemplateInput): Promise<RecurringBillTemplate> {
+    const db = this.db();
+    const [row] = await db
+      .insert(recurringBillTemplatesTable)
+      .values({
+        description: input.description,
+        supplierId: input.supplierId ?? null,
+        categoryId: input.categoryId,
+        costCenterId: input.costCenterId ?? null,
+        financialAccountId: input.financialAccountId ?? null,
+        amount: input.amount !== null ? String(input.amount) : null,
+        variableAmount: input.variableAmount,
+        dueDay: input.dueDay ?? null,
+        periodicity: input.periodicity ?? "mensal",
+        pendingData: input.pendingData ?? false,
+        source: "manual",
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    let supplierName: string | null = null;
+    if (row.supplierId) {
+      const [supplier] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, row.supplierId)).limit(1);
+      supplierName = supplier?.name ?? null;
+    }
+
+    return {
+      id: row.id,
+      description: row.description,
+      supplierId: row.supplierId,
+      supplierName,
+      categoryId: row.categoryId,
+      costCenterId: row.costCenterId,
+      financialAccountId: row.financialAccountId,
+      amount: row.amount !== null ? Number(row.amount) : null,
+      variableAmount: row.variableAmount,
+      dueDay: row.dueDay,
+      periodicity: row.periodicity,
+      pendingData: row.pendingData,
+      notes: row.notes,
+    };
+  }
+
   // --- Contas a Pagar ---
 
-  private async toAccountsPayable(row: typeof accountsPayableTable.$inferSelect): Promise<AccountsPayable> {
-    const db = this.db();
+  /**
+   * Bug real comprovado e corrigido (Missão de Instrumentação Gerencial) — este método sempre
+   * consultava `this.db()` (a conexão base), mesmo quando chamado de dentro de `db.transaction()`
+   * nos outros métodos desta classe. Com o pool configurado para `max: 1` (uma única conexão,
+   * ver `db/client.ts`), isso travava indefinidamente: a transação prende a única conexão
+   * disponível e esta consulta extra fica esperando por uma segunda conexão que nunca é liberada
+   * (deadlock). Explica por que `accounts_payable` nunca teve nenhuma escrita bem-sucedida contra
+   * o Postgres real nesta base — só funcionava em memória (repositório estático dos testes, sem
+   * pool). Agora aceita opcionalmente o `tx` da transação em andamento; sem parâmetro, continua
+   * usando a conexão base normalmente (chamadas fora de transação, como `listAccountsPayable`).
+   */
+  private async toAccountsPayable(row: typeof accountsPayableTable.$inferSelect, runner: DbOrTx = this.db()): Promise<AccountsPayable> {
+    const db = runner;
     let supplierName: string | null = null;
     if (row.supplierId) {
       const [s] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, row.supplierId)).limit(1);
@@ -1002,6 +1067,13 @@ export class PostgresFinanceRepository implements FinanceRepository {
     const installmentGroupId = installmentTotal > 1 ? crypto.randomUUID() : null;
 
     return db.transaction(async (tx) => {
+      // Idempotência (Missão de Instrumentação Gerencial) — mesmo padrão de recordMovement (Estoque):
+      // reprocessar a mesma origem com o mesmo externalId nunca cria uma segunda despesa.
+      if (input.externalId) {
+        const [existing] = await tx.select().from(accountsPayableTable).where(eq(accountsPayableTable.externalId, input.externalId)).limit(1);
+        if (existing) return [await this.toAccountsPayable(existing, tx)];
+      }
+
       const created: AccountsPayable[] = [];
       for (const installment of installments) {
         const [row] = await tx
@@ -1027,6 +1099,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
             installmentTotal: installmentTotal > 1 ? installmentTotal : null,
             recurringBillTemplateId: input.recurringBillTemplateId ?? null,
             source: input.recurringBillTemplateId ? "recorrencia" : "manual",
+            externalId: installmentTotal === 1 ? (input.externalId ?? null) : null,
             notes: input.notes ?? null,
           })
           .returning();
@@ -1040,7 +1113,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
           source: "manual",
         });
 
-        created.push(await this.toAccountsPayable(row));
+        created.push(await this.toAccountsPayable(row, tx));
       }
       return created;
     });
@@ -1085,7 +1158,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsPayable(updated);
+      return this.toAccountsPayable(updated, tx);
     });
   }
 
@@ -1158,7 +1231,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsPayable(updated);
+      return this.toAccountsPayable(updated, tx);
     });
   }
 
@@ -1205,7 +1278,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsPayable(updated);
+      return this.toAccountsPayable(updated, tx);
     });
   }
 
@@ -1230,7 +1303,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
-      return this.toAccountsPayable(updated);
+      return this.toAccountsPayable(updated, tx);
     });
   }
 

@@ -336,6 +336,27 @@ export interface RecurringBillTemplate {
   notes: string | null;
 }
 
+/**
+ * Missão de Instrumentação Gerencial — cadastro de um novo modelo de recorrência real, pelo
+ * usuário. Antes desta missão só existiam modelos semeados manualmente no banco (10 reais:
+ * Aluguel, JumpPark, Verisure, Vivo, Stylus Contabilidade, Água, Energia etc.) — não havia como
+ * cadastrar um novo pelo próprio sistema quando surge uma despesa fixa nova.
+ */
+export interface CreateRecurringBillTemplateInput {
+  description: string;
+  supplierId?: string | null;
+  categoryId: string;
+  costCenterId?: string | null;
+  financialAccountId?: string | null;
+  /** Null = valor variável por competência (ex.: água/energia) — nunca inventar um valor fixo quando o real varia. */
+  amount: number | null;
+  variableAmount: boolean;
+  dueDay?: number | null;
+  periodicity?: string;
+  pendingData?: boolean;
+  notes?: string | null;
+}
+
 export type AccountsPayableStatus = "rascunho" | "pendente" | "parcialmente_paga" | "paga" | "vencida" | "cancelada";
 
 export interface AccountsPayable {
@@ -397,6 +418,14 @@ export interface CreateAccountsPayableInput {
   installmentTotal?: number;
   /** Preenchido só quando a conta vem de generateAccountsPayableFromTemplate — nunca pela UI. */
   recurringBillTemplateId?: string | null;
+  /**
+   * Chave de idempotência opcional (Missão de Instrumentação Gerencial) — quando informada, nunca
+   * cria uma segunda conta a pagar para o mesmo `externalId`: retorna a já existente. Usada pela
+   * integração Compra → Estoque → Financeiro (`compra-estoque:{movementId}`) para nunca duplicar a
+   * despesa ao reprocessar a mesma entrada de estoque. Ignorada quando `installmentTotal > 1`
+   * (parcelamento nunca é gerado por esse fluxo).
+   */
+  externalId?: string | null;
 }
 
 export interface UpdateAccountsPayableInput {

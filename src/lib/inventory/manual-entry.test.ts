@@ -28,7 +28,7 @@ describe("recordManualEntry", () => {
     const before = await repo.getItem(ITEM_ID);
     if (!before) throw new Error("fixture ausente");
 
-    const movement = await recordManualEntry({
+    const { movement, linkedExpense } = await recordManualEntry({
       itemId: ITEM_ID,
       quantity: 1000,
       unit: "ml",
@@ -46,6 +46,7 @@ describe("recordManualEntry", () => {
     expect(movement.reference).toBe("NF-12345");
     expect(movement.supplier).toBe("Vonixx Distribuidora");
     expect(movement.unitPricePaid).toBe(0.5);
+    expect(linkedExpense).toBeNull(); // generateExpense não foi pedido — nenhuma despesa é criada por padrão
   });
 
   it("sem custo médio anterior, o custo do item passa a ser o preço pago", async () => {
@@ -115,7 +116,7 @@ describe("recordManualEntry", () => {
     const second = await recordManualEntry(input);
     const afterSecond = await repo.getItem(ITEM_ID);
 
-    expect(second.id).toBe(first.id);
+    expect(second.movement.id).toBe(first.movement.id);
     expect(afterSecond?.currentQuantity).toBe(afterFirst?.currentQuantity);
     expect((await repo.listMovements(ITEM_ID)).filter((m) => m.externalId === input.externalId)).toHaveLength(1);
   });
@@ -124,5 +125,108 @@ describe("recordManualEntry", () => {
     await expect(
       recordManualEntry({ itemId: "produto-que-nao-existe", quantity: 10, unit: "ml", date: "2026-08-01", responsible: "Robério", supplier: null, unitPricePaid: null, invoiceNumber: null, notes: null }),
     ).rejects.toThrow(/não encontrado/i);
+  });
+
+  describe("generateExpense — Compra → Estoque → Financeiro (Instrumentação Gerencial)", () => {
+    it("gera a despesa vinculada quando fornecedor real, preço e vencimento são informados", async () => {
+      const { movement, linkedExpense } = await recordManualEntry({
+        itemId: ITEM_ID,
+        quantity: 20,
+        unit: "ml",
+        date: "2026-08-10",
+        responsible: "Robério",
+        supplier: "Mercado Livre",
+        unitPricePaid: 3,
+        invoiceNumber: "NF-500",
+        notes: null,
+        generateExpense: true,
+        expenseDueDate: "2026-08-25",
+        expensePaymentMethod: "pix",
+      });
+
+      expect(linkedExpense).not.toBeNull();
+      expect(linkedExpense?.supplierName).toBe("Mercado Livre");
+      expect(linkedExpense?.originalAmount).toBe(60); // 20 x 3
+      expect(linkedExpense?.externalId).toBe(`compra-estoque:${movement.id}`);
+    });
+
+    it("exige fornecedor para gerar despesa — nunca cria despesa 'sem credor'", async () => {
+      await expect(
+        recordManualEntry({
+          itemId: ITEM_ID,
+          quantity: 5,
+          unit: "ml",
+          date: "2026-08-10",
+          responsible: "Robério",
+          supplier: null,
+          unitPricePaid: 3,
+          invoiceNumber: null,
+          notes: null,
+          generateExpense: true,
+          expenseDueDate: "2026-08-25",
+        }),
+      ).rejects.toThrow(/fornecedor/i);
+    });
+
+    it("exige vencimento para gerar despesa", async () => {
+      await expect(
+        recordManualEntry({
+          itemId: ITEM_ID,
+          quantity: 5,
+          unit: "ml",
+          date: "2026-08-10",
+          responsible: "Robério",
+          supplier: "Mercado Livre",
+          unitPricePaid: 3,
+          invoiceNumber: null,
+          notes: null,
+          generateExpense: true,
+          expenseDueDate: null,
+        }),
+      ).rejects.toThrow(/vencimento/i);
+    });
+
+    it("fornecedor que não corresponde a nenhum cadastro real nunca gera despesa inventada", async () => {
+      await expect(
+        recordManualEntry({
+          itemId: ITEM_ID,
+          quantity: 5,
+          unit: "ml",
+          date: "2026-08-10",
+          responsible: "Robério",
+          supplier: "Distribuidora Inventada Que Não Existe",
+          unitPricePaid: 3,
+          invoiceNumber: null,
+          notes: null,
+          generateExpense: true,
+          expenseDueDate: "2026-08-25",
+        }),
+      ).rejects.toThrow(/não corresponde a nenhum fornecedor cadastrado/i);
+    });
+
+    it("fornecedor inválido nunca deixa uma movimentação de estoque órfã — nada é gravado antes da validação (bug real corrigido)", async () => {
+      const repo = getInventoryRepository();
+      const before = await repo.getItem(ITEM_ID);
+      if (!before) throw new Error("fixture ausente");
+
+      await expect(
+        recordManualEntry({
+          itemId: ITEM_ID,
+          quantity: 5,
+          unit: "ml",
+          date: "2026-08-10",
+          responsible: "Robério",
+          supplier: "Distribuidora Inventada Que Não Existe",
+          unitPricePaid: 3,
+          invoiceNumber: null,
+          notes: null,
+          generateExpense: true,
+          expenseDueDate: "2026-08-25",
+        }),
+      ).rejects.toThrow();
+
+      const after = await repo.getItem(ITEM_ID);
+      expect(after?.currentQuantity).toBe(before.currentQuantity); // saldo intocado — a validação do fornecedor acontece ANTES de qualquer escrita no estoque
+    });
   });
 });

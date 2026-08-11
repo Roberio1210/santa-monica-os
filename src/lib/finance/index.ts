@@ -19,6 +19,7 @@ export type {
   AccountTransferType,
   AuditLogEntry,
   CreateAccountsPayableInput,
+  CreateRecurringBillTemplateInput,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialAccountType,

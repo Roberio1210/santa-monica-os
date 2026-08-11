@@ -2,7 +2,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { RecipesView } from "@/components/inventory/recipes-view";
-import { listRecipesWithNames } from "@/lib/recipes/catalog";
+import { ServiceCostSection } from "@/components/inventory/service-cost-section";
+import { listRecipesWithNames, listServiceCostEstimates } from "@/lib/recipes/catalog";
 import type { RecipeStatus } from "@/lib/recipes/types";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ const VALID_STATUS: RecipeStatus[] = ["rascunho", "em_calibracao", "aprovada", "
 export default async function ReceitasPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { status } = await searchParams;
   const initialStatus = VALID_STATUS.find((s) => s === status);
-  const recipes = await listRecipesWithNames();
+  const [recipes, serviceCosts] = await Promise.all([listRecipesWithNames(), listServiceCostEstimates()]);
 
   return (
     <div className="space-y-6">
@@ -25,6 +26,7 @@ export default async function ReceitasPage({ searchParams }: { searchParams: Pro
           </Button>
         }
       />
+      <ServiceCostSection summaries={serviceCosts} />
       <RecipesView recipes={recipes} initialStatus={initialStatus} />
     </div>
   );

@@ -14,6 +14,7 @@ const initialFormState: FormActionState = { error: null, success: null };
 export function EntryForm({ items, supplierNames }: { items: InventoryItemView[]; supplierNames: string[] }) {
   const [formState, formAction, isPending] = useActionState(recordManualEntryAction, initialFormState);
   const [selectedItemId, setSelectedItemId] = useState("");
+  const [generateExpense, setGenerateExpense] = useState(false);
   const selectedItem = items.find((i) => i.id === selectedItemId);
 
   return (
@@ -48,6 +49,32 @@ export function EntryForm({ items, supplierNames }: { items: InventoryItemView[]
           </datalist>
           <input name="invoiceNumber" type="text" placeholder="Número da nota (opcional)" className={fieldClasses} aria-label="Número da nota" />
           <input name="notes" type="text" placeholder="Observação (opcional)" className={cn(fieldClasses, "sm:col-span-2 lg:col-span-3")} aria-label="Observação" />
+
+          <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-3">
+            <input id="ef-generate-expense" type="checkbox" name="generateExpense" checked={generateExpense} onChange={(e) => setGenerateExpense(e.target.checked)} className="h-4 w-4" />
+            <label htmlFor="ef-generate-expense" className="text-sm text-foreground-muted">
+              Gerar despesa vinculada em Contas a Pagar (categoria &quot;Produtos e insumos&quot;)
+            </label>
+          </div>
+
+          {generateExpense ? (
+            <>
+              <input name="expenseDueDate" type="date" required placeholder="Vencimento" className={fieldClasses} aria-label="Vencimento da despesa" />
+              <select name="expensePaymentMethod" defaultValue="desconhecido" className={fieldClasses} aria-label="Forma de pagamento da despesa">
+                <option value="desconhecido">Forma de pagamento não informada</option>
+                <option value="dinheiro">Dinheiro</option>
+                <option value="debito">Débito</option>
+                <option value="credito">Crédito</option>
+                <option value="pix">Pix</option>
+                <option value="boleto">Boleto</option>
+                <option value="transferencia">Transferência</option>
+                <option value="outro">Outro</option>
+              </select>
+              <p className="text-xs text-foreground-subtle sm:col-span-2 lg:col-span-1">
+                Exige fornecedor cadastrado (selecione da lista acima) e valor pago informados — sem eles, a despesa vinculada não pode ser gerada.
+              </p>
+            </>
+          ) : null}
 
           <div className="flex items-center gap-3 sm:col-span-2 lg:col-span-3">
             <Button type="submit" disabled={isPending}>

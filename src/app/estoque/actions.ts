@@ -7,6 +7,14 @@ import { recordManualEntry } from "@/lib/inventory/manual-entry";
 import { EXIT_REASONS, recordManualExit, type ExitReason } from "@/lib/inventory/manual-exit";
 import { updateItemDetails } from "@/lib/inventory/item-details";
 import type { InventoryUnit, MovementType } from "@/lib/inventory/types";
+import type { FinancePaymentMethod } from "@/lib/finance/types";
+
+const FINANCE_PAYMENT_METHODS: FinancePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "transferencia", "outro", "desconhecido"];
+
+function parsePaymentMethod(value: FormDataEntryValue | null): FinancePaymentMethod {
+  const str = String(value ?? "");
+  return (FINANCE_PAYMENT_METHODS as string[]).includes(str) ? (str as FinancePaymentMethod) : "desconhecido";
+}
 
 export interface FormActionState {
   error: string | null;
@@ -95,6 +103,9 @@ export async function recordManualEntryAction(_prevState: FormActionState, formD
   const unitPricePaidRaw = parseOptionalString(formData.get("unitPricePaid"));
   const invoiceNumber = parseOptionalString(formData.get("invoiceNumber"));
   const notes = parseOptionalString(formData.get("notes"));
+  const generateExpense = formData.get("generateExpense") === "on";
+  const expenseDueDate = parseOptionalString(formData.get("expenseDueDate"));
+  const expensePaymentMethod = parsePaymentMethod(formData.get("expensePaymentMethod"));
 
   if (!itemId) return { error: "Selecione um produto.", success: null };
   const quantity = Number(quantityRaw);
@@ -103,8 +114,23 @@ export async function recordManualEntryAction(_prevState: FormActionState, formD
   const unitPricePaid = unitPricePaidRaw !== null ? Number(unitPricePaidRaw.replace(",", ".")) : null;
   if (unitPricePaid !== null && !Number.isFinite(unitPricePaid)) return { error: "Valor pago inválido.", success: null };
 
+  let linkedExpenseId: string | null = null;
   try {
-    await recordManualEntry({ itemId, quantity, unit, date, responsible, supplier, unitPricePaid, invoiceNumber, notes });
+    const result = await recordManualEntry({
+      itemId,
+      quantity,
+      unit,
+      date,
+      responsible,
+      supplier,
+      unitPricePaid,
+      invoiceNumber,
+      notes,
+      generateExpense,
+      expenseDueDate,
+      expensePaymentMethod,
+    });
+    linkedExpenseId = result.linkedExpense?.id ?? null;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha ao registrar entrada.", success: null };
   }
@@ -113,7 +139,12 @@ export async function recordManualEntryAction(_prevState: FormActionState, formD
   revalidatePath("/estoque");
   revalidatePath("/estoque/produtos");
   revalidatePath(`/estoque/produtos/${itemId}`);
-  return { error: null, success: "Entrada registrada." };
+  if (linkedExpenseId) revalidatePath("/financeiro/contas-a-pagar");
+
+  return {
+    error: null,
+    success: linkedExpenseId ? `Entrada registrada. Despesa vinculada criada em Contas a Pagar (id ${linkedExpenseId}).` : "Entrada registrada.",
+  };
 }
 
 /** "Saídas" (Missão 22) — baixa manual por motivo, mais direta que o formulário genérico de ajustes. */

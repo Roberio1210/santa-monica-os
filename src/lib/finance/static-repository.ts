@@ -14,6 +14,7 @@ import type {
   Contract,
   CostCenter,
   CreateAccountsPayableInput,
+  CreateRecurringBillTemplateInput,
   CreateAccountsReceivableInput,
   CreateAllocationRuleInput,
   CreateCashMovementInput,
@@ -473,6 +474,27 @@ export class StaticFinanceRepository implements FinanceRepository {
     return this.recurringBillTemplates.map((item) => ({ ...item }));
   }
 
+  async createRecurringBillTemplate(input: CreateRecurringBillTemplateInput): Promise<RecurringBillTemplate> {
+    const supplier = input.supplierId ? this.suppliers.find((s) => s.id === input.supplierId) : undefined;
+    const row: RecurringBillTemplate = {
+      id: generateId("recorrencia"),
+      description: input.description,
+      supplierId: input.supplierId ?? null,
+      supplierName: supplier?.name ?? null,
+      categoryId: input.categoryId,
+      costCenterId: input.costCenterId ?? null,
+      financialAccountId: input.financialAccountId ?? null,
+      amount: input.amount,
+      variableAmount: input.variableAmount,
+      dueDay: input.dueDay ?? null,
+      periodicity: input.periodicity ?? "mensal",
+      pendingData: input.pendingData ?? false,
+      notes: input.notes ?? null,
+    };
+    this.recurringBillTemplates.push(row);
+    return { ...row };
+  }
+
   async listAccountsPayable(): Promise<AccountsPayable[]> {
     return this.accountsPayable.map((item) => ({ ...item }));
   }
@@ -483,6 +505,11 @@ export class StaticFinanceRepository implements FinanceRepository {
   }
 
   async createAccountsPayable(input: CreateAccountsPayableInput): Promise<AccountsPayable[]> {
+    if (input.externalId) {
+      const existing = this.accountsPayable.find((i) => i.externalId === input.externalId);
+      if (existing) return [{ ...existing }];
+    }
+
     const now = new Date().toISOString();
     const supplier = input.supplierId ? this.suppliers.find((s) => s.id === input.supplierId) : undefined;
     const category = { id: input.categoryId, name: input.categoryId };
@@ -522,8 +549,8 @@ export class StaticFinanceRepository implements FinanceRepository {
         installmentNumber: installmentTotal > 1 ? installment.number : null,
         installmentTotal: installmentTotal > 1 ? installmentTotal : null,
         attachmentRef: null,
-        source: "manual",
-        externalId: null,
+        source: input.recurringBillTemplateId ? "recorrencia" : "manual",
+        externalId: installmentTotal === 1 ? (input.externalId ?? null) : null,
         notes: input.notes ?? null,
         createdAt: now,
         updatedAt: now,

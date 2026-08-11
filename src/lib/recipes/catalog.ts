@@ -2,6 +2,7 @@ import "server-only";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { listServices } from "@/lib/inventory/services-catalog";
+import { computeServiceCostEstimate, type ServiceCostEstimate } from "@/lib/recipes/serviceCost";
 import type { CalibrationSample, Recipe } from "@/lib/recipes/types";
 
 export interface RecipeWithNames {
@@ -38,6 +39,50 @@ export interface RecipeDetail {
   serviceName: string;
   /** Todas as versões (ativa e antigas) da mesma combinação, em ordem — histórico nunca é apagado. */
   versionHistory: Recipe[];
+}
+
+export interface ServiceCostSummary {
+  serviceId: string;
+  serviceName: string;
+  estimate: ServiceCostEstimate;
+}
+
+/**
+ * Missão de Instrumentação Gerencial — uma linha por serviço real do catálogo (19 hoje), sempre.
+ * Soma as receitas aprovadas de TODAS as categorias de veículo do serviço (limitação documentada:
+ * quando existir receita aprovada para mais de uma categoria de veículo, o custo somado pode não
+ * refletir um único atendimento real — refinar por categoria quando o volume de dados justificar).
+ * Hoje (0 receitas cadastradas na base) toda linha aparece com "Custo parcial", exatamente como
+ * deveria — nenhum custo foi inventado só para preencher a tela.
+ */
+export async function listServiceCostEstimates(): Promise<ServiceCostSummary[]> {
+  const [recipes, items, services] = await Promise.all([getRecipeRepository().listRecipes(), getInventoryRepository().listItems(), listServices()]);
+  const itemMap = new Map(items.map((i) => [i.id, i]));
+  const itemCostById = new Map(items.map((i) => [i.id, i.unitCost]));
+
+  const activeRecipesByService = new Map<string, Recipe[]>();
+  for (const r of recipes) {
+    if (!r.isActiveVersion) continue;
+    const list = activeRecipesByService.get(r.serviceId) ?? [];
+    list.push(r);
+    activeRecipesByService.set(r.serviceId, list);
+  }
+
+  return services
+    .map((service) => {
+      const serviceRecipes = activeRecipesByService.get(service.id) ?? [];
+      const recipeCostInputs = serviceRecipes.map((r) => ({
+        itemId: r.itemId,
+        itemName: itemMap.get(r.itemId)?.name ?? "Produto não encontrado",
+        processStep: r.processStep,
+        quantityPerService: r.quantityPerService,
+        unit: r.unit,
+        status: r.status,
+        isActiveVersion: r.isActiveVersion,
+      }));
+      return { serviceId: service.id, serviceName: service.name, estimate: computeServiceCostEstimate(recipeCostInputs, itemCostById) };
+    })
+    .sort((a, b) => a.serviceName.localeCompare(b.serviceName, "pt-BR"));
 }
 
 export async function fetchRecipeDetail(id: string): Promise<RecipeDetail | null> {
