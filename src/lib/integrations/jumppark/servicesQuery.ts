@@ -174,6 +174,8 @@ export interface ServicesGerencialResult {
   crossSellOpportunities: ServiceOpportunity[];
   upsellOpportunities: ServiceOpportunity[];
   hasData: boolean;
+  /** Itens de serviço reais do período selecionado, mais recentes primeiro — base do drill-down dos KPIs da visão geral. */
+  rows: EnrichedServiceItem[];
 }
 
 function round2(value: number): number {
@@ -216,6 +218,7 @@ export async function fetchServicesGerencial(period: PeriodRange): Promise<Servi
     crossSellOpportunities: [],
     upsellOpportunities: [],
     hasData: false,
+    rows: [],
   };
 
   if (!isDatabaseConfigured()) return empty;
@@ -305,6 +308,7 @@ export async function fetchServicesGerencial(period: PeriodRange): Promise<Servi
     crossSellOpportunities,
     upsellOpportunities,
     hasData: currentItems.length > 0,
+    rows: [...currentItems].sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.orderId.localeCompare(a.orderId)),
   };
 }
 

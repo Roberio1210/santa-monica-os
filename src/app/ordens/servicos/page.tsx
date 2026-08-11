@@ -12,6 +12,7 @@ import { DrillDownDialog } from "@/components/shared/drill-down-dialog";
 import { ServiceRankingsTable } from "@/components/jumppark/service-rankings-table";
 import { ServiceEvolutionChart } from "@/components/jumppark/service-evolution-chart";
 import { ServiceOpportunitiesTable } from "@/components/jumppark/service-opportunities-table";
+import { ServiceItemRowsDrilldown } from "@/components/jumppark/service-item-rows-drilldown";
 import { fetchServicesGerencial } from "@/lib/integrations/jumppark/servicesQuery";
 import { comparisonToTrend } from "@/lib/utils/comparison";
 import { formatCurrency, formatDateBR, formatPercent } from "@/lib/utils/format";
@@ -23,7 +24,7 @@ export default async function ServicosPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const period = parsePeriodParams(params);
   const result = await fetchServicesGerencial(period);
-  const { overview, comparison, rankings, growing, falling, evolutionDaily, evolutionMonthly, combinations, possibleDuplicates, neverSoldFromCatalog, noSaleInPeriod, stoppedSelling, recurrence, crossSellOpportunities, upsellOpportunities } = result;
+  const { overview, comparison, rankings, growing, falling, evolutionDaily, evolutionMonthly, combinations, possibleDuplicates, neverSoldFromCatalog, noSaleInPeriod, stoppedSelling, recurrence, crossSellOpportunities, upsellOpportunities, rows } = result;
 
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
   const previousPeriodCaption = `${formatDateBR(result.previousPeriod.from)} a ${formatDateBR(result.previousPeriod.to)}`;
@@ -63,11 +64,71 @@ export default async function ServicosPage({ searchParams }: { searchParams: Pro
 
       {/* 1. Visão geral */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Serviços realizados" value={String(overview.quantity)} icon={ClipboardList} trend={comparisonToTrend(comparison.quantity)} />
-        <StatCard label="Faturamento" value={formatCurrency(overview.revenue)} icon={DollarSign} trend={comparisonToTrend(comparison.revenue)} />
-        <StatCard label="Ordens com serviço" value={String(overview.distinctOrders)} icon={Receipt} trend={comparisonToTrend(comparison.distinctOrders)} />
+        <StatCard
+          label="Serviços realizados"
+          value={String(overview.quantity)}
+          icon={ClipboardList}
+          trend={comparisonToTrend(comparison.quantity)}
+          detail={
+            <div className="space-y-4">
+              <CalculationNote
+                source="jumppark_service_order_items, filtrados pela data da ordem"
+                formula="Contagem de itens de serviço com data no período selecionado"
+                period={periodCaption}
+                recordsUsed={`${overview.quantity} item(ns) de serviço`}
+              />
+              <ServiceItemRowsDrilldown items={rows} />
+            </div>
+          }
+        />
+        <StatCard
+          label="Faturamento"
+          value={formatCurrency(overview.revenue)}
+          icon={DollarSign}
+          trend={comparisonToTrend(comparison.revenue)}
+          detail={
+            <div className="space-y-4">
+              <CalculationNote
+                source="jumppark_service_order_items, filtrados pela data da ordem"
+                formula="Soma de amount de todos os itens de serviço no período"
+                period={periodCaption}
+                recordsUsed={`${overview.quantity} item(ns) de serviço`}
+              />
+              <ServiceItemRowsDrilldown items={rows} />
+            </div>
+          }
+        />
+        <StatCard
+          label="Ordens com serviço"
+          value={String(overview.distinctOrders)}
+          icon={Receipt}
+          trend={comparisonToTrend(comparison.distinctOrders)}
+          detail={
+            <div className="space-y-4">
+              <CalculationNote source="jumppark_service_order_items agrupados por ordem" formula="Contagem de ordens distintas com pelo menos um item de serviço no período" period={periodCaption} recordsUsed={`${overview.distinctOrders} ordem(ns)`} />
+              <ServiceItemRowsDrilldown items={rows} />
+            </div>
+          }
+        />
         <StatCard label="Serviços por atendimento" value={overview.averageServicesPerOrder.toFixed(2)} icon={Layers} trend={comparisonToTrend(comparison.averageServicesPerOrder)} />
-        <StatCard label="Ticket médio" value={formatCurrency(overview.averageTicket)} icon={Ticket} trend={comparisonToTrend(comparison.averageTicket)} />
+        <StatCard
+          label="Ticket médio"
+          value={formatCurrency(overview.averageTicket)}
+          icon={Ticket}
+          trend={comparisonToTrend(comparison.averageTicket)}
+          detail={
+            <div className="space-y-4">
+              <CalculationNote
+                source="jumppark_service_order_items, filtrados pela data da ordem"
+                formula="Faturamento do período ÷ ordens distintas com serviço no período"
+                period={periodCaption}
+                recordsUsed={`${overview.distinctOrders} ordem(ns) com serviço`}
+                limitations="Média simples por ordem — uma ordem com muitos serviços de baixo valor pesa igual a uma ordem com um único serviço caro."
+              />
+              <ServiceItemRowsDrilldown items={rows} />
+            </div>
+          }
+        />
         <StatCard label="Clientes atendidos" value={String(overview.distinctCustomers)} icon={Users} trend={comparisonToTrend(comparison.distinctCustomers)} />
         <StatCard label="Veículos atendidos" value={String(overview.distinctVehicles)} icon={Car} trend={comparisonToTrend(comparison.distinctVehicles)} />
       </div>
