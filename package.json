@@ -21,7 +21,9 @@
     "db:seed:accounts-payable-foundation": "tsx src/db/seed/accounts-payable-foundation.ts",
     "db:seed:classification-rules": "tsx src/db/seed/classification-rules.ts",
     "db:seed:goals-lavacao-julho-2026": "tsx src/db/seed/goals-lavacao-julho-2026.ts",
-    "db:seed:organizational-beliefs": "tsx src/db/seed/organizational-beliefs.ts"
+    "db:seed:organizational-beliefs": "tsx src/db/seed/organizational-beliefs.ts",
+    "db:seed:base-recipes-etapa": "tsx src/db/seed/base-recipes-etapa.ts",
+    "db:seed:jumppark-service-mappings-confirm": "tsx src/db/seed/jumppark-service-mappings-confirm.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",

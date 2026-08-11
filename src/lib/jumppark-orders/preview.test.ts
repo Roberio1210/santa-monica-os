@@ -20,6 +20,8 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
     sampleCount: 5,
     lastCalibratedAt: "2026-07-15",
     notes: null,
+    technicalReferenceQuantity: null,
+    technicalReferenceSource: null,
     ...overrides,
   };
 }

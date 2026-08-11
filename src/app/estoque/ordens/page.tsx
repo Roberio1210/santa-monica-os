@@ -35,8 +35,12 @@ export default async function OrdensPage({ searchParams }: { searchParams: Promi
     <div className="space-y-6">
       <PageHeader
         title="Ordens JumpPark"
-        description="Ordens finalizadas reais — nenhum consumo é baixado sem confirmação humana explícita."
-        actions={<Badge variant={mode === "preview_and_confirm" ? "positive" : "outline"}>Modo: {mode}</Badge>}
+        description={
+          mode === "automatic"
+            ? "Ordens finalizadas reais — em modo automático, só consome sozinha quando a receita já está aprovada (calibrada com amostras reais) e a prévia está 100% resolvida; o resto continua exigindo confirmação aqui."
+            : "Ordens finalizadas reais — nenhum consumo é baixado sem confirmação humana explícita."
+        }
+        actions={<Badge variant={mode === "preview_and_confirm" || mode === "automatic" ? "positive" : "outline"}>Modo: {mode}</Badge>}
       />
 
       {!result.jumpparkConfigured ? (

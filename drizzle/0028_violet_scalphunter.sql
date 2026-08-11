@@ -1,0 +1,2 @@
+ALTER TABLE "service_consumption_rules" ADD COLUMN "technical_reference_quantity" numeric(12, 3);--> statement-breakpoint
+ALTER TABLE "service_consumption_rules" ADD COLUMN "technical_reference_source" text;

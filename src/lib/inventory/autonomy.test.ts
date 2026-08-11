@@ -52,6 +52,8 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
     sampleCount: 0,
     lastCalibratedAt: null,
     notes: null,
+    technicalReferenceQuantity: null,
+    technicalReferenceSource: null,
     ...overrides,
   };
 }

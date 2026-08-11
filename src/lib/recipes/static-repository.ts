@@ -50,6 +50,8 @@ export class StaticRecipeRepository implements RecipeRepository {
       sampleCount: 0,
       lastCalibratedAt: null,
       notes: input.notes,
+      technicalReferenceQuantity: input.technicalReferenceQuantity ?? null,
+      technicalReferenceSource: input.technicalReferenceSource ?? null,
     };
     this.recipes.push(recipe);
     return { ...recipe };

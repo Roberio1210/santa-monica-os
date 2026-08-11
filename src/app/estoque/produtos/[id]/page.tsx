@@ -13,8 +13,15 @@ import { ItemDetailsForm } from "@/components/inventory/item-details-form";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { fetchProductDetail } from "@/lib/inventory/product-detail";
 import { fetchProductStockDetail } from "@/lib/inventory/stockGerencial";
-import { parsePeriodParams } from "@/lib/utils/timezone";
+import { computeItemYield, type YieldConfidence } from "@/lib/inventory/yield";
+import { parsePeriodParams, saoPauloDateISO } from "@/lib/utils/timezone";
 import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
+
+const YIELD_CONFIDENCE_LABEL: Record<YieldConfidence, string> = {
+  tecnico: "Técnico (referência inicial, ainda sem amostra real)",
+  em_calibracao: "Em calibração (amostras reais, abaixo do mínimo para aprovação)",
+  calibrado: "Calibrado (receita aprovada)",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +74,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
   const { item, movements, recipes, relatedItems, lastEntryDate, lastConsumptionDate, lastPurchase, autonomy } = detail;
   const { priceHistory, balanceEvolution, consumptionByPeriod, lossesByPeriod, turnover, staleBucket } = stockDetail;
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
+  const yieldEstimate = computeItemYield(item, movements, recipes.map((r) => r.recipe), saoPauloDateISO());
 
   return (
     <div className="space-y-6">
@@ -107,6 +115,39 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
       </div>
 
       <ItemDetailsForm item={item} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rendimento do estoque</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <IndicatorCard label="Consumo técnico/lavagem" value={yieldEstimate.technicalConsumption !== null ? `${yieldEstimate.technicalConsumption} ${item.unit}` : "Não configurado"} />
+            <IndicatorCard
+              label="Rendimento estimado"
+              value={yieldEstimate.estimatedServicesRemaining !== null ? `${yieldEstimate.estimatedServicesRemaining} lavagem(ns)` : "Não calculável"}
+              hint={yieldEstimate.confidence ? YIELD_CONFIDENCE_LABEL[yieldEstimate.confidence] : "Aguardando receita/calibração"}
+            />
+            <IndicatorCard label="Consumo 7 dias" value={`${yieldEstimate.consumption7d} ${item.unit}`} />
+            <IndicatorCard label="Consumo 30 dias" value={`${yieldEstimate.consumption30d} ${item.unit}`} />
+            <IndicatorCard label="Média diária" value={`${yieldEstimate.avgDailyConsumption} ${item.unit}/dia`} />
+            <IndicatorCard label="Previsão de duração" value={yieldEstimate.forecastDays !== null ? `${yieldEstimate.forecastDays} dia(s)` : "Sem consumo recente para prever"} />
+          </div>
+          {yieldEstimate.confidence ? (
+            <div className="mt-3">
+              <Badge variant={yieldEstimate.confidence === "calibrado" ? "positive" : yieldEstimate.confidence === "em_calibracao" ? "warning" : "outline"}>
+                Confiança: {YIELD_CONFIDENCE_LABEL[yieldEstimate.confidence]}
+              </Badge>
+            </div>
+          ) : null}
+          <CalculationNote
+            source="Movimentações reais de redução de estoque (saída/consumo/perda) dos últimos 7/30 dias + receita técnica deste produto"
+            formula="Rendimento = saldo atual ÷ consumo de referência (aprovado > calibrando > técnico, nunca inventado). Previsão de duração = saldo atual ÷ média diária dos últimos 30 dias."
+            period="Hoje, últimos 7 e 30 dias"
+            recordsUsed={`${movements.length} movimentação(ões) no histórico completo deste produto`}
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>

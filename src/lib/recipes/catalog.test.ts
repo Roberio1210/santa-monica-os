@@ -44,4 +44,26 @@ describe("matchServiceCostEstimateForCategory — conectar categoria JumpPark ao
     expect(result.mapped).toBe(false);
     expect(result.summary).toBeNull();
   });
+
+  it("ponte segura: categoria agrupada (serviceCategoryOf, sem sufixo de veículo) encontra o mapeamento confirmado com sufixo real", () => {
+    const result = matchServiceCostEstimateForCategory(
+      "Lavação Gold",
+      [
+        { jumpparkServiceName: "Lavação Gold - Hatch", canonicalServiceId: "svc-gold", status: "mapeado" },
+        { jumpparkServiceName: "Lavação Gold - SUV", canonicalServiceId: "svc-gold", status: "mapeado" },
+      ],
+      estimates,
+    );
+    expect(result.mapped).toBe(true);
+    expect(result.summary?.serviceId).toBe("svc-gold");
+  });
+
+  it("ponte por prefixo nunca cruza para um serviço diferente — só considera mapeamentos confirmados", () => {
+    const result = matchServiceCostEstimateForCategory(
+      "Lavação Gold",
+      [{ jumpparkServiceName: "Lavação Gold - Hatch", canonicalServiceId: "svc-gold", status: "nao_mapeado" }],
+      estimates,
+    );
+    expect(result.mapped).toBe(false);
+  });
 });

@@ -82,6 +82,14 @@ export interface Recipe {
   sampleCount: number;
   lastCalibratedAt: string | null;
   notes: string | null;
+  /**
+   * Missão de Automação JumpPark → Consumo — valor técnico de referência inicial (fabricante/
+   * gestor), nunca calculado pelo sistema. Distinto de `quantityPerService` (só vem de
+   * calibração real). Null quando não há referência técnica configurada ainda.
+   */
+  technicalReferenceQuantity: number | null;
+  /** Fonte do valor técnico de referência (instrução do gestor, ficha técnica do fabricante etc.). Null quando technicalReferenceQuantity é null. */
+  technicalReferenceSource: string | null;
 }
 
 export interface NewRecipeInput {
@@ -92,6 +100,8 @@ export interface NewRecipeInput {
   unit: InventoryUnit;
   dilutionRatio: number | null;
   notes: string | null;
+  technicalReferenceQuantity?: number | null;
+  technicalReferenceSource?: string | null;
 }
 
 /** Campos que o repositório aceita alterar — identidade da receita (serviço/categoria/etapa/produto) nunca muda após criada; para isso, ver createNewVersion. */
@@ -108,6 +118,8 @@ export interface RecipePatch {
   sampleCount?: number;
   lastCalibratedAt?: string | null;
   notes?: string | null;
+  technicalReferenceQuantity?: number | null;
+  technicalReferenceSource?: string | null;
 }
 
 export interface CalibrationSample {

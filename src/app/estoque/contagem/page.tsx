@@ -7,9 +7,14 @@ import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { generateStocktakeReference } from "@/lib/inventory/stocktake";
 import { toItemView } from "@/lib/inventory/status";
 import { deriveStocktakeSessions } from "@/lib/inventory/stockAnalytics";
+import { fetchPeriodComparison, detectPersistentDeviation, type PeriodComparison } from "@/lib/inventory/calibration-comparison";
+import { Badge } from "@/components/ui/badge";
 import { formatDateBR } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
+
+/** Bound de consultas — só as contagens mais recentes recebem comparação teórico x físico ao vivo (seção 10). */
+const SESSIONS_WITH_COMPARISON = 5;
 
 export default async function ContagemPage() {
   const [rawItems, allMovements] = await Promise.all([getInventoryRepository().listItems(), getInventoryRepository().listMovements()]);
@@ -19,6 +24,33 @@ export default async function ContagemPage() {
   const reference = generateStocktakeReference();
   const sessions = deriveStocktakeSessions(allMovements, itemById).filter((s) => s.type === "correcao_inventario");
 
+  const comparisons = new Map<string, PeriodComparison | null>();
+  const recentSessions = sessions.slice(0, SESSIONS_WITH_COMPARISON);
+  for (const session of recentSessions) {
+    for (const line of session.lines) {
+      const key = `${session.date}:${line.itemId}`;
+      if (comparisons.has(key)) continue;
+      comparisons.set(key, await fetchPeriodComparison(line.itemId, session.date));
+    }
+  }
+
+  // Alerta de desperdício (seção 11) — agrupa as comparações já calculadas por produto, em ordem
+  // cronológica, e só sinaliza quando as últimas contagens consecutivas mostram desvio
+  // persistente (nunca por uma única ocorrência). Limitado às mesmas contagens recentes acima.
+  const comparisonsByItem = new Map<string, PeriodComparison[]>();
+  for (const session of [...recentSessions].sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const line of session.lines) {
+      const comparison = comparisons.get(`${session.date}:${line.itemId}`);
+      if (!comparison) continue;
+      const list = comparisonsByItem.get(line.itemId) ?? [];
+      list.push(comparison);
+      comparisonsByItem.set(line.itemId, list);
+    }
+  }
+  const persistentDeviationAlerts = Array.from(comparisonsByItem.entries())
+    .filter(([, list]) => detectPersistentDeviation(list))
+    .map(([itemId, list]) => ({ itemId, itemName: itemById.get(itemId)?.name ?? "Produto não encontrado", latest: list[list.length - 1] }));
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -26,6 +58,32 @@ export default async function ContagemPage() {
         description="Compare o saldo teórico com a contagem física real. Cada divergência confirmada vira uma movimentação de correção — o saldo nunca é sobrescrito diretamente."
       />
       <StocktakeView items={items} reference={reference} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Alertas de desvio persistente — {persistentDeviationAlerts.length}</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {persistentDeviationAlerts.length === 0 ? (
+            <EmptyState
+              title="Nenhum desvio persistente detectado."
+              description={`Um alerta só aparece aqui quando o consumo real supera o consumo teórico em mais de ${20}% em pelo menos 2 contagens consecutivas — uma única ocorrência nunca é tratada como desperdício.`}
+            />
+          ) : (
+            <ul className="space-y-2">
+              {persistentDeviationAlerts.map((alert) => (
+                <li key={alert.itemId} className="flex items-center justify-between rounded-lg border border-critical/30 bg-critical-bg/20 p-3 text-sm">
+                  <span className="font-medium text-foreground">{alert.itemName}</span>
+                  <Badge variant="critical">
+                    Consumo real {alert.latest.differencePercent !== null && alert.latest.differencePercent > 0 ? "+" : ""}
+                    {alert.latest.differencePercent}% acima do teórico
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -55,21 +113,28 @@ export default async function ContagemPage() {
                           <th className="pb-2 pr-3 font-medium">Saldo anterior</th>
                           <th className="pb-2 pr-3 font-medium">Contado</th>
                           <th className="pb-2 pr-3 font-medium">Diferença</th>
+                          <th className="pb-2 pr-3 font-medium">Consumo teórico (30d)</th>
+                          <th className="pb-2 pr-3 font-medium">Desvio</th>
                           <th className="pb-2 font-medium">Observação</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {session.lines.map((line) => (
-                          <tr key={`${session.reference}-${line.itemId}`} className="border-b border-border-subtle last:border-0">
-                            <td className="py-2 pr-3 text-foreground-muted">{line.itemName}</td>
-                            <td className="py-2 pr-3 text-foreground-muted">{line.previousBalance ?? "—"}</td>
-                            <td className="py-2 pr-3 text-foreground-muted">{line.countedQuantity}</td>
-                            <td className={`py-2 pr-3 font-medium ${line.difference !== null && line.difference < 0 ? "text-critical" : line.difference !== null && line.difference > 0 ? "text-positive" : "text-foreground-muted"}`}>
-                              {line.difference !== null ? (line.difference > 0 ? `+${line.difference}` : line.difference) : "—"}
-                            </td>
-                            <td className="py-2 text-foreground-muted">{line.notes ?? "—"}</td>
-                          </tr>
-                        ))}
+                        {session.lines.map((line) => {
+                          const comparison = comparisons.get(`${session.date}:${line.itemId}`) ?? null;
+                          return (
+                            <tr key={`${session.reference}-${line.itemId}`} className="border-b border-border-subtle last:border-0">
+                              <td className="py-2 pr-3 text-foreground-muted">{line.itemName}</td>
+                              <td className="py-2 pr-3 text-foreground-muted">{line.previousBalance ?? "—"}</td>
+                              <td className="py-2 pr-3 text-foreground-muted">{line.countedQuantity}</td>
+                              <td className={`py-2 pr-3 font-medium ${line.difference !== null && line.difference < 0 ? "text-critical" : line.difference !== null && line.difference > 0 ? "text-positive" : "text-foreground-muted"}`}>
+                                {line.difference !== null ? (line.difference > 0 ? `+${line.difference}` : line.difference) : "—"}
+                              </td>
+                              <td className="py-2 pr-3 text-foreground-muted">{comparison?.theoreticalConsumption ?? "Sem receita aplicada"}</td>
+                              <td className="py-2 pr-3 text-foreground-muted">{comparison?.differencePercent !== null && comparison?.differencePercent !== undefined ? `${comparison.differencePercent > 0 ? "+" : ""}${comparison.differencePercent}%` : "Não calculável"}</td>
+                              <td className="py-2 text-foreground-muted">{line.notes ?? "—"}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -83,7 +148,7 @@ export default async function ContagemPage() {
               formula="Diferença = saldo depois da correção − saldo antes dela (nunca a quantidade contada isolada, que é o valor absoluto recontado)"
               period="Histórico completo"
               recordsUsed={`${sessions.length} contagem(ns) confirmada(s)`}
-              limitations="A carga inicial (contagem_fisica_inicial) não aparece aqui — é o ponto de partida do sistema, não uma recontagem com divergência a comparar."
+              limitations={`A carga inicial (contagem_fisica_inicial) não aparece aqui — é o ponto de partida do sistema, não uma recontagem com divergência a comparar. Consumo teórico calculado numa janela fixa de 30 dias antes da contagem (não "desde a contagem anterior"), só para as ${SESSIONS_WITH_COMPARISON} contagens mais recentes.`}
             />
           </div>
         </CardContent>

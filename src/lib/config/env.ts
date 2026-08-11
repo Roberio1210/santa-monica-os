@@ -92,9 +92,16 @@ export function isStoneConfigured(): boolean {
   return getStoneEnv() !== null;
 }
 
-export type InventoryConsumptionMode = "disabled" | "preview_only" | "preview_and_confirm";
+/**
+ * "automatic" (Missão de Automação JumpPark → Consumo, seção 8) — só existe desde essa missão.
+ * Mesmo em "automatic", nenhuma ordem consome sozinha até ter uma receita "aprovada" real (exige
+ * >= 5 amostras de calibração humanas, ver approveRecipe) e a prévia estar 100% resolvida (ver
+ * src/lib/jumppark-orders/automatic-consumption.ts) — "automatic" remove o clique por ordem, não
+ * a exigência de receita calibrada e aprovada por um humano.
+ */
+export type InventoryConsumptionMode = "disabled" | "preview_only" | "preview_and_confirm" | "automatic";
 
-const VALID_CONSUMPTION_MODES: InventoryConsumptionMode[] = ["disabled", "preview_only", "preview_and_confirm"];
+const VALID_CONSUMPTION_MODES: InventoryConsumptionMode[] = ["disabled", "preview_only", "preview_and_confirm", "automatic"];
 
 /**
  * Modo de operação da integração de consumo JumpPark → estoque (Fase D, seção 10). Nunca

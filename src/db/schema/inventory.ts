@@ -230,6 +230,18 @@ export const serviceConsumptionRules = pgTable("service_consumption_rules", {
   processStep: processStepEnum("process_step").notNull(),
   /** Mediana das amostras válidas — null até haver ao menos 1 amostra (nunca um valor inventado). */
   quantityPerService: numeric("quantity_per_service", { precision: 12, scale: 3 }),
+  /**
+   * Missão de Automação JumpPark → Consumo — valor técnico de referência inicial (informado por
+   * fabricante/gestor, nunca calculado pelo sistema), distinto de `quantityPerService` (que só
+   * vem de calibração real — amostra física, nunca preenchida manualmente). Usado apenas como
+   * estimativa provisória rotulada "técnico" (rendimento estimado, painel de consumo) enquanto
+   * não houver amostras reais suficientes. Nunca substitui `quantityPerService` nem torna uma
+   * receita aprovável sozinho — aprovação continua exigindo MIN_SAMPLES_FOR_PROVISIONAL amostras
+   * reais (ver approveRecipe em src/lib/recipes/service.ts).
+   */
+  technicalReferenceQuantity: numeric("technical_reference_quantity", { precision: 12, scale: 3 }),
+  /** Fonte do valor técnico de referência (ex.: "Instrução do gestor — missão automação JumpPark, 2026-08-11" ou "vonixx.com.br/produto/v-floc — diluição 1:400"). Null quando technicalReferenceQuantity é null. */
+  technicalReferenceSource: text("technical_reference_source"),
   unit: inventoryUnitEnum("unit").notNull(),
   status: recipeStatusEnum("status").notNull().default("rascunho"),
   version: integer("version").notNull().default(1),

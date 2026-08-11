@@ -102,14 +102,16 @@ export interface ServiceCostForCategoryResult {
 }
 
 /**
- * Missão de Fechamento de Lacunas Operacionais — conecta a categoria de serviço vendida na
- * JumpPark (texto livre) ao catálogo de receitas (`services`), para mostrar o custo conhecido
- * na própria tela do serviço (`/ordens/servicos/[slug]`). Nunca adivinha: só conecta via (1) um
- * mapeamento humano já confirmado em `jumppark_service_mappings` ou (2) nome exatamente igual
- * (case/acento insensível) ao catálogo — mesmo critério já usado em `servicesQuery.ts` para
- * "nunca vendido". Auditoria real (07/08/2026): os 40 mapeamentos existentes estavam 0%
- * confirmados — "não mapeado" é o estado honesto e esperado até o usuário mapear em
- * /estoque/mapeamentos, nunca um bug desta função.
+ * Missão de Fechamento de Lacunas Operacionais, estendida na Missão de Automação JumpPark →
+ * Consumo — conecta a categoria de serviço vendida na JumpPark (texto livre) ao catálogo de
+ * receitas (`services`), para mostrar o custo conhecido na própria tela do serviço
+ * (`/ordens/servicos/[slug]`). Nunca adivinha: só conecta via (1) um mapeamento humano já
+ * confirmado em `jumppark_service_mappings` para o texto exato, (2) o mesmo mapeamento confirmado
+ * quando `category` é a versão AGRUPADA sem categoria de veículo (`serviceCategoryOf` — ex.:
+ * "Lavação Gold" agrupa "Lavação Gold - Hatch"/"- SUV"/etc.; como todas as variantes reais
+ * confirmadas apontam para o MESMO serviço canônico, usar qualquer uma delas como ponte é seguro,
+ * nunca uma aproximação vaga), ou (3) nome exatamente igual (case/acento insensível) ao catálogo
+ * — mesmo critério já usado em `servicesQuery.ts` para "nunca vendido".
  */
 export function matchServiceCostEstimateForCategory(
   category: string,
@@ -118,11 +120,12 @@ export function matchServiceCostEstimateForCategory(
 ): ServiceCostForCategoryResult {
   const normalizedCategory = normalizeForExactMatch(category);
 
-  const confirmedMapping = mappings.find(
-    (m) => m.status === "mapeado" && m.canonicalServiceId !== null && normalizeForExactMatch(m.jumpparkServiceName) === normalizedCategory,
-  );
-  if (confirmedMapping) {
-    const summary = estimates.find((e) => e.serviceId === confirmedMapping.canonicalServiceId) ?? null;
+  const confirmed = mappings.filter((m) => m.status === "mapeado" && m.canonicalServiceId !== null);
+
+  const exactMapping = confirmed.find((m) => normalizeForExactMatch(m.jumpparkServiceName) === normalizedCategory);
+  const prefixMapping = exactMapping ?? confirmed.find((m) => normalizeForExactMatch(m.jumpparkServiceName).startsWith(`${normalizedCategory} - `));
+  if (prefixMapping) {
+    const summary = estimates.find((e) => e.serviceId === prefixMapping.canonicalServiceId) ?? null;
     return { mapped: summary !== null, summary };
   }
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { runHistoricalBackfill } from "@/lib/integrations/jumppark/backfill";
+import { processAutomaticConsumption, AUTOMATIC_CONSUMPTION_ACTIVATED_AT } from "@/lib/jumppark-orders/automatic-consumption";
+import { getInventoryConsumptionMode } from "@/lib/config/env";
 import { saoPauloDateISO, addDaysIso, isValidIsoDate } from "@/lib/utils/timezone";
 
 /**
@@ -17,6 +19,11 @@ import { saoPauloDateISO, addDaysIso, isValidIsoDate } from "@/lib/utils/timezon
  *    (`runHistoricalBackfill`, Missão 27).
  *
  * Nunca lança — toda falha de lote já vira `status: "error"` dentro do resultado.
+ *
+ * Missão de Automação JumpPark → Consumo — quando `INVENTORY_CONSUMPTION_MODE=automatic`, ao
+ * final da sincronização processa consumo automático (`processAutomaticConsumption`) para o
+ * mesmo intervalo sincronizado, nunca antes de `AUTOMATIC_CONSUMPTION_ACTIVATED_AT` (sem
+ * backfill retroativo). Falha no consumo automático nunca derruba a resposta da sincronização.
  */
 export const maxDuration = 60;
 
@@ -65,5 +72,18 @@ export async function GET(request: Request) {
     maxBatchesPerRun: Number.isFinite(maxBatchesParam) && maxBatchesParam > 0 ? maxBatchesParam : undefined,
   });
 
-  return NextResponse.json(result);
+  let automaticConsumption = null;
+  if (getInventoryConsumptionMode() === "automatic" && overallEnd >= AUTOMATIC_CONSUMPTION_ACTIVATED_AT) {
+    // Nunca avalia data anterior à ativação (seção 13 — sem backfill retroativo), mesmo que a
+    // sincronização em si cubra uma janela mais antiga (ex.: cron diário retroativo de 5 dias).
+    const consumptionStart = overallStart < AUTOMATIC_CONSUMPTION_ACTIVATED_AT ? AUTOMATIC_CONSUMPTION_ACTIVATED_AT : overallStart;
+    try {
+      automaticConsumption = await processAutomaticConsumption(consumptionStart, overallEnd);
+    } catch (err) {
+      // Consumo automático nunca derruba a sincronização — mesma garantia de resiliência do resto desta rota.
+      automaticConsumption = { error: err instanceof Error ? err.message : "Falha desconhecida no consumo automático." };
+    }
+  }
+
+  return NextResponse.json({ ...result, automaticConsumption });
 }

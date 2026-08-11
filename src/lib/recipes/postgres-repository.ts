@@ -35,6 +35,8 @@ function toRecipe(row: typeof serviceConsumptionRules.$inferSelect): Recipe {
     sampleCount: row.sampleCount,
     lastCalibratedAt: row.lastCalibratedAt,
     notes: row.notes,
+    technicalReferenceQuantity: row.technicalReferenceQuantity !== null ? Number(row.technicalReferenceQuantity) : null,
+    technicalReferenceSource: row.technicalReferenceSource,
   };
 }
 
@@ -114,6 +116,8 @@ export class PostgresRecipeRepository implements RecipeRepository {
         sampleCount: 0,
         lastCalibratedAt: null,
         notes: input.notes,
+        technicalReferenceQuantity: input.technicalReferenceQuantity != null ? String(input.technicalReferenceQuantity) : null,
+        technicalReferenceSource: input.technicalReferenceSource ?? null,
       })
       .returning();
     return toRecipe(inserted);
@@ -132,6 +136,8 @@ export class PostgresRecipeRepository implements RecipeRepository {
     if (patch.sampleCount !== undefined) values.sampleCount = patch.sampleCount;
     if (patch.lastCalibratedAt !== undefined) values.lastCalibratedAt = patch.lastCalibratedAt;
     if (patch.notes !== undefined) values.notes = patch.notes;
+    if (patch.technicalReferenceQuantity !== undefined) values.technicalReferenceQuantity = patch.technicalReferenceQuantity !== null ? String(patch.technicalReferenceQuantity) : null;
+    if (patch.technicalReferenceSource !== undefined) values.technicalReferenceSource = patch.technicalReferenceSource;
 
     const [updated] = await this.db().update(serviceConsumptionRules).set(values).where(eq(serviceConsumptionRules.id, id)).returning();
     if (!updated) throw new Error(`Receita não encontrada: ${id}`);
