@@ -27,6 +27,17 @@ export function filterPayablesByCompetencePeriod(items: AccountsPayableView[], f
   return items.filter((item) => item.competenceDate >= from && item.competenceDate <= to);
 }
 
+/**
+ * Validação Final — "resultado operacional" (faturamento − despesas) só é um número gerencial
+ * real quando os DOIS lados da conta têm dado real: receita vinda de uma JumpPark configurada e
+ * sem erro, e pelo menos uma despesa real lançada no período (ExpensesSummary.hasData). Sem isso,
+ * `netRevenue - 0` (ou `0 - despesas`) pareceria um resultado real quando na verdade é só ausência
+ * de dado de um dos dois lados — "ausência de dado ≠ zero" (regra absoluta do módulo).
+ */
+export function isOperationalResultCalculable(jumpparkConfigured: boolean, jumpparkError: string | null, expensesHasData: boolean): boolean {
+  return jumpparkConfigured && jumpparkError === null && expensesHasData;
+}
+
 const STATUS_LABELS: Record<AccountsPayableView["computedStatus"], string> = {
   rascunho: "Rascunho",
   pendente: "Pendente",

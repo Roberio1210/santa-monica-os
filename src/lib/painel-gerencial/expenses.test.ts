@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AccountsPayableView } from "@/lib/finance/types";
-import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod } from "@/lib/painel-gerencial/expenses";
+import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod, isOperationalResultCalculable } from "@/lib/painel-gerencial/expenses";
 
 function payable(overrides: Partial<AccountsPayableView> = {}): AccountsPayableView {
   return {
@@ -85,6 +85,28 @@ describe("computeExpensesSummary — despesas", () => {
     expect(summary.upcomingCount).toBe(1);
     expect(summary.paidCount).toBe(1);
     expect(summary.unpaidCount).toBe(2);
+  });
+});
+
+describe("isOperationalResultCalculable — Validação Final (ausência de dado ≠ zero)", () => {
+  it("sem nenhuma despesa registrada no período, resultado NUNCA é calculável mesmo com faturamento real", () => {
+    expect(isOperationalResultCalculable(true, null, false)).toBe(false);
+  });
+
+  it("JumpPark não configurado (faturamento indisponível), resultado NUNCA é calculável mesmo com despesas reais", () => {
+    expect(isOperationalResultCalculable(false, null, true)).toBe(false);
+  });
+
+  it("JumpPark configurado mas com erro na consulta, resultado NUNCA é calculável", () => {
+    expect(isOperationalResultCalculable(true, "A API do JumpPark não respondeu.", true)).toBe(false);
+  });
+
+  it("faturamento real (JumpPark ok) e ao menos uma despesa real registrada -> calculável", () => {
+    expect(isOperationalResultCalculable(true, null, true)).toBe(true);
+  });
+
+  it("nenhum dos dois lados disponível -> continua não calculável, nunca 'sem erro = ok'", () => {
+    expect(isOperationalResultCalculable(false, null, false)).toBe(false);
   });
 });
 

@@ -39,6 +39,12 @@ export default async function PainelGerencialPage({
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
   const previousPeriodCaption = `${formatDateBR(previousPeriod.from)} a ${formatDateBR(previousPeriod.to)} (mesma duração, período imediatamente anterior)`;
 
+  const operationalResultReasonParts: string[] = [];
+  if (!result.jumpparkConfigured) operationalResultReasonParts.push("faturamento indisponível (JumpPark não configurado)");
+  else if (result.jumpparkError) operationalResultReasonParts.push(`faturamento indisponível (${result.jumpparkError})`);
+  if (!result.expenses.summary.hasData) operationalResultReasonParts.push("nenhuma despesa registrada no período");
+  const operationalResultReason = result.operationalResultCalculable ? null : `Resultado ainda não calculável — ${operationalResultReasonParts.join(" e ")}.`;
+
   const ordersCalcNote = (
     <CalculationNote
       source="Ordens de serviço da JumpPark (consulta ao vivo à API, sem persistência própria neste módulo)"
@@ -209,10 +215,10 @@ export default async function PainelGerencialPage({
         />
         <StatCard
           label="Resultado operacional com dados registrados"
-          value={formatCurrency(result.operationalResult)}
-          icon={result.operationalResult >= 0 ? DollarSign : TrendingDown}
-          hint="Faturamento líquido menos despesas registradas — não é lucro contábil"
-          trend={comparisonToTrend(comparison.operationalResult)}
+          value={result.operationalResultCalculable ? formatCurrency(result.operationalResult) : "Ainda não calculável"}
+          icon={!result.operationalResultCalculable ? Wallet : result.operationalResult >= 0 ? DollarSign : TrendingDown}
+          hint={result.operationalResultCalculable ? "Faturamento líquido menos despesas registradas — não é lucro contábil" : (operationalResultReason ?? undefined)}
+          trend={result.operationalResultCalculable ? comparisonToTrend(comparison.operationalResult) : undefined}
           detail={
             <div className="space-y-4">
               <CalculationNote
@@ -220,18 +226,26 @@ export default async function PainelGerencialPage({
                 formula="Faturamento líquido do período menos o total de despesas com competência no período"
                 period={periodCaption}
                 recordsUsed={`${indicators.ordersCount} ordem(ns) + ${result.expenses.summary.count} despesa(s)`}
-                limitations='Não é o resultado contábil oficial (ver DRE em Financeiro > DRE) — não considera impostos, depreciação nem despesas fora do Contas a Pagar. "Com dados registrados" significa: só o que já está lançado no sistema.'
+                limitations={
+                  result.operationalResultCalculable
+                    ? 'Não é o resultado contábil oficial (ver DRE em Financeiro > DRE) — não considera impostos, depreciação nem despesas fora do Contas a Pagar. "Com dados registrados" significa: só o que já está lançado no sistema.'
+                    : `Resultado não apresentado como número porque ${operationalResultReason?.toLowerCase()} — faturamento menos despesa ausente pareceria um resultado real quando na verdade é ausência de dado, não zero.`
+                }
               />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg border border-border-subtle p-3">
-                  <p className="text-xs text-foreground-subtle">Faturamento líquido</p>
-                  <p className="text-lg font-semibold text-foreground">{formatCurrency(indicators.netRevenue)}</p>
+              {result.operationalResultCalculable ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-border-subtle p-3">
+                    <p className="text-xs text-foreground-subtle">Faturamento líquido</p>
+                    <p className="text-lg font-semibold text-foreground">{formatCurrency(indicators.netRevenue)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border-subtle p-3">
+                    <p className="text-xs text-foreground-subtle">Despesas registradas</p>
+                    <p className="text-lg font-semibold text-foreground">{formatCurrency(result.expenses.summary.total)}</p>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-border-subtle p-3">
-                  <p className="text-xs text-foreground-subtle">Despesas registradas</p>
-                  <p className="text-lg font-semibold text-foreground">{formatCurrency(result.expenses.summary.total)}</p>
-                </div>
-              </div>
+              ) : (
+                <p className="text-sm text-foreground-muted">{operationalResultReason}</p>
+              )}
             </div>
           }
         />

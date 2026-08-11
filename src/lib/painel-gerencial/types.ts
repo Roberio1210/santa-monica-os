@@ -151,6 +151,8 @@ export interface PainelGerencialResult {
     summary: ExpensesSummary;
   };
   operationalResult: number;
+  /** Validação Final — false quando faturamento (JumpPark) ou despesas (Contas a Pagar) não têm dado real no período; nesse caso `operationalResult` não deve ser apresentado como um resultado real. */
+  operationalResultCalculable: boolean;
   comparison: PainelGerencialComparison;
   findings: ManagementFinding[];
 }

@@ -6,7 +6,7 @@ import { toAccountsPayableView } from "@/lib/finance/status";
 import type { JumpParkOrderInput } from "@/lib/domain/operational";
 import { comparePeriodValues, previousPeriodOf, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
 import { buildCustomerAggregates, buildManagementOrderRows, buildServiceAggregates, computeManagementIndicators, rankCustomersBySpend } from "@/lib/painel-gerencial/orders";
-import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod } from "@/lib/painel-gerencial/expenses";
+import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod, isOperationalResultCalculable } from "@/lib/painel-gerencial/expenses";
 import { buildFindings } from "@/lib/painel-gerencial/insights";
 import type { PainelGerencialResult } from "@/lib/painel-gerencial/types";
 
@@ -84,6 +84,7 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
 
   const previousOperationalResult = Math.round((previousIndicators.netRevenue - previousExpensesSummary.total) * 100) / 100;
   const operationalResult = Math.round((indicators.netRevenue - expensesSummary.total) * 100) / 100;
+  const operationalResultCalculable = isOperationalResultCalculable(jumpparkConfigured, currentFetch.error, expensesSummary.hasData);
 
   return {
     period,
@@ -100,6 +101,7 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
       summary: expensesSummary,
     },
     operationalResult,
+    operationalResultCalculable,
     comparison: {
       netRevenue: comparePeriodValues(indicators.netRevenue, previousIndicators.netRevenue),
       grossRevenue: comparePeriodValues(indicators.grossRevenue, previousIndicators.grossRevenue),
