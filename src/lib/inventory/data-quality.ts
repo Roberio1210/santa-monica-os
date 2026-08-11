@@ -4,6 +4,7 @@ import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { listServices, type ServiceCatalogEntry } from "@/lib/inventory/services-catalog";
 import { listSuggestions, type ProductStepSuggestion } from "@/lib/inventory/suggestions";
 import { toItemView } from "@/lib/inventory/status";
+import { listServiceCostEstimates, type ServiceCostSummary } from "@/lib/recipes/catalog";
 import { MIN_SAMPLES_FOR_PROVISIONAL } from "@/lib/recipes/types";
 import type { InventoryItemView } from "@/lib/inventory/types";
 import type { Recipe } from "@/lib/recipes/types";
@@ -17,6 +18,8 @@ export interface DataQualitySummary {
   recipesWithoutSamples: Recipe[];
   recipesWithFewSamples: Recipe[];
   pendingMappings: ProductStepSuggestion[];
+  /** Missão de Fechamento de Lacunas Operacionais — serviços cujo custo conhecido ainda é parcial (receita ausente ou produto sem custo). */
+  servicesWithPartialCost: ServiceCostSummary[];
 }
 
 /**
@@ -26,11 +29,12 @@ export interface DataQualitySummary {
  * `src/app/estoque/produtos/[id]/page.tsx` para a edição desses campos.
  */
 export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
-  const [rawItems, recipes, services, suggestions] = await Promise.all([
+  const [rawItems, recipes, services, suggestions, serviceCostEstimates] = await Promise.all([
     getInventoryRepository().listItems(),
     getRecipeRepository().listRecipes(),
     listServices(),
     listSuggestions(),
+    listServiceCostEstimates(),
   ]);
 
   const items = rawItems.map(toItemView);
@@ -46,5 +50,6 @@ export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
     recipesWithoutSamples: activeRecipes.filter((r) => r.sampleCount === 0 && r.status !== "suspensa"),
     recipesWithFewSamples: activeRecipes.filter((r) => r.sampleCount > 0 && r.sampleCount < MIN_SAMPLES_FOR_PROVISIONAL && r.status !== "suspensa"),
     pendingMappings: suggestions.filter((s) => s.active && !s.confirmed),
+    servicesWithPartialCost: serviceCostEstimates.filter((s) => s.estimate.isPartial),
   };
 }

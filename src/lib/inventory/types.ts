@@ -154,6 +154,14 @@ export interface InventoryItem {
   unitCost: number | null;
   /** "measurement_pending" quando o conteúdo real da embalagem ainda não foi medido. Default "confirmed". */
   quantityStatus: QuantityStatus;
+  /**
+   * Missão de Fechamento de Lacunas Operacionais — opcional (não quebra literais existentes em
+   * testes/seeds) para permitir descontinuar um produto sem apagar seu histórico real.
+   * `undefined`/`true` = ativo (comportamento padrão de sempre); `false` = inativo, não aparece
+   * mais em `listItems()`, mas continua acessível via `getItem`/`listInactiveItems` com todo o
+   * histórico intacto.
+   */
+  active?: boolean;
 }
 
 export interface InventoryItemView extends InventoryItem {

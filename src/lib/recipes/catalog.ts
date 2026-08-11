@@ -2,8 +2,10 @@ import "server-only";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { listServices } from "@/lib/inventory/services-catalog";
+import { listServiceMappings } from "@/lib/jumppark-orders/service-mapping";
 import { computeServiceCostEstimate, type ServiceCostEstimate } from "@/lib/recipes/serviceCost";
 import type { CalibrationSample, Recipe } from "@/lib/recipes/types";
+import type { ServiceMapping } from "@/lib/jumppark-orders/types";
 
 export interface RecipeWithNames {
   recipe: Recipe;
@@ -83,6 +85,56 @@ export async function listServiceCostEstimates(): Promise<ServiceCostSummary[]> 
       return { serviceId: service.id, serviceName: service.name, estimate: computeServiceCostEstimate(recipeCostInputs, itemCostById) };
     })
     .sort((a, b) => a.serviceName.localeCompare(b.serviceName, "pt-BR"));
+}
+
+function normalizeForExactMatch(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+export interface ServiceCostForCategoryResult {
+  /** true quando foi possível conectar a categoria JumpPark a um serviço real do catálogo de receitas. */
+  mapped: boolean;
+  summary: ServiceCostSummary | null;
+}
+
+/**
+ * Missão de Fechamento de Lacunas Operacionais — conecta a categoria de serviço vendida na
+ * JumpPark (texto livre) ao catálogo de receitas (`services`), para mostrar o custo conhecido
+ * na própria tela do serviço (`/ordens/servicos/[slug]`). Nunca adivinha: só conecta via (1) um
+ * mapeamento humano já confirmado em `jumppark_service_mappings` ou (2) nome exatamente igual
+ * (case/acento insensível) ao catálogo — mesmo critério já usado em `servicesQuery.ts` para
+ * "nunca vendido". Auditoria real (07/08/2026): os 40 mapeamentos existentes estavam 0%
+ * confirmados — "não mapeado" é o estado honesto e esperado até o usuário mapear em
+ * /estoque/mapeamentos, nunca um bug desta função.
+ */
+export function matchServiceCostEstimateForCategory(
+  category: string,
+  mappings: Pick<ServiceMapping, "jumpparkServiceName" | "canonicalServiceId" | "status">[],
+  estimates: ServiceCostSummary[],
+): ServiceCostForCategoryResult {
+  const normalizedCategory = normalizeForExactMatch(category);
+
+  const confirmedMapping = mappings.find(
+    (m) => m.status === "mapeado" && m.canonicalServiceId !== null && normalizeForExactMatch(m.jumpparkServiceName) === normalizedCategory,
+  );
+  if (confirmedMapping) {
+    const summary = estimates.find((e) => e.serviceId === confirmedMapping.canonicalServiceId) ?? null;
+    return { mapped: summary !== null, summary };
+  }
+
+  const exactNameMatch = estimates.find((e) => normalizeForExactMatch(e.serviceName) === normalizedCategory);
+  if (exactNameMatch) return { mapped: true, summary: exactNameMatch };
+
+  return { mapped: false, summary: null };
+}
+
+export async function getServiceCostEstimateForJumpParkCategory(category: string): Promise<ServiceCostForCategoryResult> {
+  const [mappings, estimates] = await Promise.all([listServiceMappings(), listServiceCostEstimates()]);
+  return matchServiceCostEstimateForCategory(category, mappings, estimates);
 }
 
 export async function fetchRecipeDetail(id: string): Promise<RecipeDetail | null> {

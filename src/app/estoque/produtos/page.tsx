@@ -15,13 +15,15 @@ export default async function ProdutosPage({ searchParams }: { searchParams: Pro
   const initialStatus = VALID_STATUS.find((s) => s === status);
   const initialQuantityStatus = VALID_QUANTITY_STATUS.find((s) => s === quantityStatus);
 
-  const [rawItems, movements, recipes] = await Promise.all([
+  const [rawItems, rawInactiveItems, movements, recipes] = await Promise.all([
     getInventoryRepository().listItems(),
+    getInventoryRepository().listInactiveItems(),
     getInventoryRepository().listMovements(),
     getRecipeRepository().listRecipes(),
   ]);
 
   const items = rawItems.map(toItemView);
+  const inactiveItems = rawInactiveItems.map(toItemView);
   const itemsWithMovement = new Set(movements.map((m) => m.itemId));
   const itemsWithRecipe = new Set(recipes.filter((r) => r.isActiveVersion).map((r) => r.itemId));
 
@@ -41,6 +43,7 @@ export default async function ProdutosPage({ searchParams }: { searchParams: Pro
         lastMovementByItem={Object.fromEntries(lastMovementByItem)}
         initialStatus={initialStatus}
         initialQuantityStatus={initialQuantityStatus}
+        inactiveItems={inactiveItems}
       />
     </div>
   );

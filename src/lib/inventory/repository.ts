@@ -7,6 +7,12 @@ import type { InventoryItem, StockMovement } from "@/lib/inventory/types";
  */
 export interface InventoryRepository {
   listItems(): Promise<InventoryItem[]>;
+  /**
+   * Missão de Fechamento de Lacunas Operacionais — produtos com `active=false`, para que
+   * desativar um produto nunca signifique perdê-lo: continua encontrável, só sai da listagem
+   * padrão de `listItems()`.
+   */
+  listInactiveItems(): Promise<InventoryItem[]>;
   getItem(id: string): Promise<InventoryItem | null>;
   listMovements(itemId?: string): Promise<StockMovement[]>;
   /**
@@ -28,9 +34,11 @@ export interface InventoryRepository {
     patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
   ): Promise<InventoryItem>;
   /**
-   * Missão 23 — só usada para desativar um item incorporado numa consolidação (nunca exclusão
-   * destrutiva). `getItem`/histórico continuam funcionando normalmente para um item inativo;
-   * apenas `listItems()` deixa de trazê-lo na listagem padrão.
+   * Missão 23 — usada para desativar um item incorporado numa consolidação. Reaproveitada na
+   * Missão de Fechamento de Lacunas Operacionais para descontinuar/reativar um produto pela
+   * interface (nunca exclusão destrutiva). `getItem`/histórico continuam funcionando
+   * normalmente para um item inativo; apenas `listItems()` deixa de trazê-lo na listagem padrão
+   * (ver `listInactiveItems`).
    */
   setItemActive(id: string, active: boolean): Promise<void>;
 }

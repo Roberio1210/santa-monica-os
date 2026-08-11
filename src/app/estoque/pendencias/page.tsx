@@ -48,7 +48,8 @@ export default async function PendenciasPage() {
     dq.servicesWithoutRecipe.length === 0 &&
     dq.recipesWithoutSamples.length === 0 &&
     dq.recipesWithFewSamples.length === 0 &&
-    dq.pendingMappings.length === 0;
+    dq.pendingMappings.length === 0 &&
+    dq.servicesWithPartialCost.length === 0;
 
   return (
     <div className="space-y-6">
@@ -120,6 +121,14 @@ export default async function PendenciasPage() {
             count={dq.pendingMappings.length}
             href="/estoque/mapeamentos"
             actionLabel="Revisar mapeamentos"
+            severity="warning"
+          />
+          <PendingSection
+            title="Serviços com custo parcial"
+            description="Falta receita aprovada ou custo de algum produto da receita — a margem real ainda não pode ser calculada para este serviço."
+            count={dq.servicesWithPartialCost.length}
+            href="/estoque/receitas"
+            actionLabel="Ver custo por serviço"
             severity="warning"
           />
         </div>

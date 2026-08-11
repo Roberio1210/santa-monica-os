@@ -38,6 +38,7 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
     lastCountDate: row.lastCountDate,
     unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
     quantityStatus: row.quantityStatus as QuantityStatus,
+    active: row.active,
   };
 }
 
@@ -78,6 +79,11 @@ export class PostgresInventoryRepository implements InventoryRepository {
 
   async listItems(): Promise<InventoryItem[]> {
     const rows = await this.db().select().from(inventoryItems).where(eq(inventoryItems.active, true));
+    return rows.map(toItem);
+  }
+
+  async listInactiveItems(): Promise<InventoryItem[]> {
+    const rows = await this.db().select().from(inventoryItems).where(eq(inventoryItems.active, false));
     return rows.map(toItem);
   }
 

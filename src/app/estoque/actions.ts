@@ -6,7 +6,9 @@ import { confirmStocktake, type StocktakeLineInput } from "@/lib/inventory/stock
 import { recordManualEntry } from "@/lib/inventory/manual-entry";
 import { EXIT_REASONS, recordManualExit, type ExitReason } from "@/lib/inventory/manual-exit";
 import { updateItemDetails } from "@/lib/inventory/item-details";
-import type { InventoryUnit, MovementType } from "@/lib/inventory/types";
+import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import { inventoryCategories } from "@/lib/inventory/types";
+import type { InventoryCategory, InventoryUnit, MovementType } from "@/lib/inventory/types";
 import type { FinancePaymentMethod } from "@/lib/finance/types";
 
 const FINANCE_PAYMENT_METHODS: FinancePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "transferencia", "outro", "desconhecido"];
@@ -176,22 +178,36 @@ export async function recordManualExitAction(_prevState: FormActionState, formDa
   return { error: null, success: "Saída registrada." };
 }
 
-/** Edição de metadados complementares do produto (Missão 22) — fornecedor, localização, estoque mínimo/ideal. */
+/** Edição de metadados complementares do produto (Missão 22, estendida com nome/marca/categoria na Missão de Fechamento de Lacunas Operacionais). */
 export async function updateItemDetailsAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
   const itemId = String(formData.get("itemId") ?? "");
   const supplier = parseOptionalString(formData.get("supplier"));
   const location = parseOptionalString(formData.get("location"));
   const minimumStockRaw = parseOptionalString(formData.get("minimumStock"));
   const idealStockRaw = parseOptionalString(formData.get("idealStock"));
+  const name = parseOptionalString(formData.get("name"));
+  const brand = parseOptionalString(formData.get("brand"));
+  const categoryRaw = parseOptionalString(formData.get("category"));
 
   if (!itemId) return { error: "Produto não identificado.", success: null };
   const minimumStock = minimumStockRaw !== null ? Number(minimumStockRaw.replace(",", ".")) : null;
   const idealStock = idealStockRaw !== null ? Number(idealStockRaw.replace(",", ".")) : null;
   if (minimumStock !== null && !Number.isFinite(minimumStock)) return { error: "Estoque mínimo inválido.", success: null };
   if (idealStock !== null && !Number.isFinite(idealStock)) return { error: "Estoque ideal inválido.", success: null };
+  const category = categoryRaw !== null && (inventoryCategories as string[]).includes(categoryRaw) ? (categoryRaw as InventoryCategory) : undefined;
+  if (categoryRaw !== null && category === undefined) return { error: "Categoria inválida.", success: null };
 
   try {
-    await updateItemDetails({ itemId, supplier, location, minimumStock, idealStock });
+    await updateItemDetails({
+      itemId,
+      supplier,
+      location,
+      minimumStock,
+      idealStock,
+      ...(name !== null ? { name } : {}),
+      ...(brand !== null ? { brand } : {}),
+      ...(category !== undefined ? { category } : {}),
+    });
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha ao salvar dados do produto.", success: null };
   }
@@ -200,4 +216,26 @@ export async function updateItemDetailsAction(_prevState: FormActionState, formD
   revalidatePath("/estoque/produtos");
   revalidatePath(`/estoque/produtos/${itemId}`);
   return { error: null, success: "Dados do produto atualizados." };
+}
+
+/**
+ * Ativar/desativar produto (Missão 23 — infraestrutura já existia via `setItemActive`, nunca
+ * exposta na interface até a Missão de Fechamento de Lacunas Operacionais). Nunca exclui:
+ * desativar apenas remove o produto de `listItems()`; histórico e detalhe continuam intactos.
+ */
+export async function toggleItemActiveAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const itemId = String(formData.get("itemId") ?? "");
+  const nextActive = String(formData.get("active") ?? "") === "true";
+  if (!itemId) return { error: "Produto não identificado.", success: null };
+
+  try {
+    await getInventoryRepository().setItemActive(itemId, nextActive);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao atualizar o status do produto.", success: null };
+  }
+
+  revalidatePath("/estoque");
+  revalidatePath("/estoque/produtos");
+  revalidatePath(`/estoque/produtos/${itemId}`);
+  return { error: null, success: nextActive ? "Produto reativado." : "Produto desativado — continua acessível pelo histórico, mas não aparece mais na listagem padrão." };
 }

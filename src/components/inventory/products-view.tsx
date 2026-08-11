@@ -29,9 +29,11 @@ interface ProductsViewProps {
   lastMovementByItem: Record<string, string>;
   initialStatus?: InventoryStatus;
   initialQuantityStatus?: QuantityStatus;
+  /** Produtos desativados (Missão de Fechamento de Lacunas Operacionais) — nunca somem, só saem da listagem padrão. */
+  inactiveItems?: InventoryItemView[];
 }
 
-export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMovementByItem, initialStatus, initialQuantityStatus }: ProductsViewProps) {
+export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMovementByItem, initialStatus, initialQuantityStatus, inactiveItems = [] }: ProductsViewProps) {
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState<"all" | InventoryCategory>("all");
@@ -248,6 +250,29 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
           )}
         </CardContent>
       </Card>
+
+      {inactiveItems.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Produtos inativos ({inactiveItems.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="mb-3 text-xs text-foreground-subtle">Desativados manualmente — nunca excluídos. Histórico e detalhe continuam intactos; reative pelo detalhe do produto.</p>
+            <ul className="space-y-1.5">
+              {inactiveItems.map((item) => (
+                <li key={item.id}>
+                  <Link href={`/estoque/produtos/${item.id}`} className="flex items-center justify-between rounded-lg border border-border-subtle p-2 text-sm hover:border-accent/50 hover:bg-background-elevated">
+                    <span className="text-foreground-muted">
+                      {item.name} — {item.brand}
+                    </span>
+                    <Badge variant="outline">Inativo</Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

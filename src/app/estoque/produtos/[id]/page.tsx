@@ -75,6 +75,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
         description={`${item.brand} — ${item.category}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {item.active === false ? <Badge variant="outline">Inativo</Badge> : null}
             <Badge variant={statusMeta[item.status].variant}>{statusMeta[item.status].label}</Badge>
             {item.quantityStatus === "measurement_pending" ? <Badge variant="warning">Medição pendente</Badge> : null}
             {staleBucket ? <Badge variant="outline">{STALE_BUCKET_LABEL[staleBucket]}</Badge> : null}

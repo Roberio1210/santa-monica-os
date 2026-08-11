@@ -49,7 +49,7 @@ function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview
     inventory: { data: { totalItems: 10, lowStockCount: 0, nearEmptyCount: 0, itemsWithoutMinimum: 0, sealedCount: 0, totalStockValue: 0 }, error: null },
     negativeStockCount: { data: 0, error: null },
     inventoryQuality: {
-      data: { measurementPending: [], withoutCost: [], withoutMinimum: [], withoutBrand: [], servicesWithoutRecipe: [], recipesWithoutSamples: [], recipesWithFewSamples: [], pendingMappings: [] },
+      data: { measurementPending: [], withoutCost: [], withoutMinimum: [], withoutBrand: [], servicesWithoutRecipe: [], recipesWithoutSamples: [], recipesWithFewSamples: [], pendingMappings: [], servicesWithPartialCost: [] },
       error: null,
     },
     ordersConsumption: { data: null, error: null },
@@ -386,6 +386,7 @@ describe("Fase C: alertas de estoque/receitas — severidade correta, nunca crí
           recipesWithoutSamples: [{ id: "r1" } as never],
           recipesWithFewSamples: [],
           pendingMappings: [{ id: "m1" } as never],
+          servicesWithPartialCost: [],
         },
         error: null,
       },

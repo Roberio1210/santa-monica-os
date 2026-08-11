@@ -34,7 +34,11 @@ export class StaticInventoryRepository implements InventoryRepository {
   private nextMovementId = 1;
 
   async listItems(): Promise<InventoryItem[]> {
-    return this.items.map((item) => ({ ...item }));
+    return this.items.filter((item) => item.active !== false).map((item) => ({ ...item }));
+  }
+
+  async listInactiveItems(): Promise<InventoryItem[]> {
+    return this.items.filter((item) => item.active === false).map((item) => ({ ...item }));
   }
 
   async getItem(id: string): Promise<InventoryItem | null> {
@@ -75,6 +79,9 @@ export class StaticInventoryRepository implements InventoryRepository {
     return { ...item };
   }
 
-  /** Modo memória não rastreia `active` por item (sem persistência real) — no-op documentado, nunca lança erro. */
-  async setItemActive(): Promise<void> {}
+  async setItemActive(id: string, active: boolean): Promise<void> {
+    const item = this.items.find((i) => i.id === id);
+    if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);
+    item.active = active;
+  }
 }

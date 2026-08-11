@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { CalculationNote } from "@/components/shared/calculation-note";
 import { ServiceEvolutionChart } from "@/components/jumppark/service-evolution-chart";
 import { PeriodSelector } from "@/components/operations/period-selector";
-import { fetchServiceDetail } from "@/lib/integrations/jumppark/servicesQuery";
+import { fetchServiceDetail, unslugifyServiceCategory } from "@/lib/integrations/jumppark/servicesQuery";
+import { getServiceCostEstimateForJumpParkCategory } from "@/lib/recipes/catalog";
 import { formatCurrency, formatDateBR, formatPercent } from "@/lib/utils/format";
 import { parsePeriodParams } from "@/lib/utils/timezone";
 
@@ -49,6 +50,14 @@ export default async function ServicoDetailPage({ params, searchParams }: { para
   const { category, lifetimeStats, currentStats, previousStats, comparison, trend, evolutionMonthly, combinations, customers, vehicles, daysSinceLastSale, revenueShareLifetime } = detail;
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
 
+  const rawCategory = unslugifyServiceCategory(slug) ?? category;
+  const costMatch = await getServiceCostEstimateForJumpParkCategory(rawCategory);
+  const averageTicket = lifetimeStats?.averageTicket ?? null;
+  const knownCost = costMatch.summary?.estimate.knownCost ?? null;
+  const isPartialCost = costMatch.summary?.estimate.isPartial ?? true;
+  const margin = averageTicket !== null && knownCost !== null && !isPartialCost ? averageTicket - knownCost : null;
+  const marginPercent = margin !== null && averageTicket !== null && averageTicket > 0 ? (margin / averageTicket) * 100 : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -77,6 +86,44 @@ export default async function ServicoDetailPage({ params, searchParams }: { para
           <Field label="Clientes distintos" value={lifetimeStats ? String(lifetimeStats.distinctCustomers) : null} />
           <Field label="Veículos distintos" value={lifetimeStats ? String(lifetimeStats.distinctVehicles) : null} />
           <Field label="Participação no faturamento total de serviços" value={formatPercent(revenueShareLifetime, 1)} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Custo e margem conhecidos</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {!costMatch.mapped ? (
+            <div className="space-y-2">
+              <p className="text-sm text-foreground-muted">Este serviço ainda não está mapeado ao catálogo de receitas — não é possível calcular o custo conhecido.</p>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/estoque/mapeamentos">Mapear este serviço</Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field label="Preço médio vendido (vitalício)" value={averageTicket !== null ? formatCurrency(averageTicket) : null} />
+                <Field label="Custo conhecido de produtos" value={knownCost !== null ? formatCurrency(knownCost) : "Custo parcial — nenhum custo conhecido ainda"} />
+                <div>
+                  <p className="text-xs text-foreground-subtle">Margem</p>
+                  <p className={margin !== null ? "text-sm text-foreground-muted" : "text-sm italic text-foreground-subtle"}>
+                    {margin !== null ? `${formatCurrency(margin)}${marginPercent !== null ? ` (${formatPercent(marginPercent, 0)})` : ""}` : "Margem ainda não calculável"}
+                  </p>
+                </div>
+              </div>
+              {isPartialCost ? (
+                <p className="text-xs text-foreground-subtle">
+                  {costMatch.summary?.estimate.partialReason ?? "Custo parcial — existem custos ainda não cadastrados."} Ver detalhe da receita em{" "}
+                  <Link href="/estoque/receitas" className="text-accent hover:underline">
+                    Receitas
+                  </Link>
+                  .
+                </p>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 

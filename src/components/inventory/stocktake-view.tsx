@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { cn } from "@/lib/utils/cn";
 import { inventoryCategories } from "@/lib/inventory/types";
 import { confirmStocktakeAction, type StocktakeActionState } from "@/app/estoque/actions";
+import { formatCurrency } from "@/lib/utils/format";
 import type { InventoryCategory, InventoryItemView } from "@/lib/inventory/types";
 import type { StocktakeLineInput } from "@/lib/inventory/stocktake";
 
@@ -52,11 +53,19 @@ export function StocktakeView({ items, reference }: { items: InventoryItemView[]
         .map(([itemId, line]) => {
           const item = items.find((i) => i.id === itemId);
           const physical = Number(line.physicalQuantity.replace(",", "."));
-          return { item, physical, delta: item ? physical - item.currentQuantity : 0 };
+          const delta = item ? physical - item.currentQuantity : 0;
+          const estimatedValue = item && item.unitCost !== null ? delta * item.unitCost : null;
+          return { item, physical, delta, estimatedValue };
         })
         .filter((d) => d.item && Math.abs(d.delta) >= 0.001),
     [touchedEntries, items],
   );
+
+  const divergenceValueSummary = useMemo(() => {
+    const withoutCost = divergences.filter((d) => d.estimatedValue === null).length;
+    const totalValue = divergences.reduce((sum, d) => sum + (d.estimatedValue ?? 0), 0);
+    return { withoutCost, totalValue };
+  }, [divergences]);
 
   function updateLine(itemId: string, patch: Partial<LineState>) {
     setLines((prev) => ({ ...prev, [itemId]: { ...(prev[itemId] ?? emptyLine), ...patch } }));
@@ -212,22 +221,31 @@ export function StocktakeView({ items, reference }: { items: InventoryItemView[]
           ) : divergences.length === 0 ? (
             <p className="text-sm text-foreground-muted">Nenhuma divergência entre o saldo teórico e a contagem física registrada até agora.</p>
           ) : (
-            <ul className="space-y-2">
-              {divergences.map((d) => (
-                <li key={d.item!.id} className="flex items-center justify-between rounded-lg border border-border-subtle p-2 text-sm">
-                  <span className="text-foreground-muted">{d.item!.name}</span>
-                  <span className="flex items-center gap-2">
-                    <span className="text-foreground-subtle">
-                      {d.item!.currentQuantity} → {d.physical} {d.item!.unit}
+            <>
+              <ul className="space-y-2">
+                {divergences.map((d) => (
+                  <li key={d.item!.id} className="flex items-center justify-between rounded-lg border border-border-subtle p-2 text-sm">
+                    <span className="text-foreground-muted">{d.item!.name}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-foreground-subtle">
+                        {d.item!.currentQuantity} → {d.physical} {d.item!.unit}
+                      </span>
+                      <span className="text-xs text-foreground-subtle">{d.estimatedValue !== null ? formatCurrency(d.estimatedValue) : "Custo não informado"}</span>
+                      <Badge variant={d.delta > 0 ? "positive" : "critical"}>
+                        {d.delta > 0 ? "+" : ""}
+                        {Math.round(d.delta * 1000) / 1000} {d.item!.unit}
+                      </Badge>
                     </span>
-                    <Badge variant={d.delta > 0 ? "positive" : "critical"}>
-                      {d.delta > 0 ? "+" : ""}
-                      {Math.round(d.delta * 1000) / 1000} {d.item!.unit}
-                    </Badge>
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-foreground-subtle">
+                Valor estimado da divergência: {formatCurrency(divergenceValueSummary.totalValue)}
+                {divergenceValueSummary.withoutCost > 0
+                  ? ` (parcial — ${divergenceValueSummary.withoutCost} produto(s) sem custo médio cadastrado, não entram nesta soma)`
+                  : ""}
+              </p>
+            </>
           )}
         </CardContent>
       </Card>
