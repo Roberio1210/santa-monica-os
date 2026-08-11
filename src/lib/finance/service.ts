@@ -931,7 +931,7 @@ export function computeAccountingAlerts(current: DreReport, previous: DreReport 
   if (current.margemContribuicaoPercentual !== null && current.margemContribuicaoPercentual < 0) {
     alerts.push({ level: "margem_negativa", message: "Margem de contribuição negativa no período.", amount: current.margemContribuicao });
   }
-  if (current.resultadoOperacional < 0) {
+  if (current.resultadoOperacional !== null && current.resultadoOperacional < 0) {
     alerts.push({ level: "resultado_operacional_negativo", message: "Resultado operacional negativo no período.", amount: current.resultadoOperacional });
   }
   if (current.naoClassificados.some((i) => i.costCenterName === "Administrativo")) {
@@ -939,7 +939,7 @@ export function computeAccountingAlerts(current: DreReport, previous: DreReport 
   }
   if (byCostCenter) {
     for (const [group, report] of Object.entries(byCostCenter) as [DreCostCenterGroup, DreReport][]) {
-      if (report.resultadoOperacional < 0) {
+      if (report.resultadoOperacional !== null && report.resultadoOperacional < 0) {
         alerts.push({ level: "centro_custo_negativo", message: `Centro de custo "${group}" com resultado operacional negativo.`, amount: report.resultadoOperacional });
       }
     }

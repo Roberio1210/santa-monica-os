@@ -190,8 +190,9 @@ export async function buildComparisonReport(periodA: PeriodRange, periodB: Perio
     metric("cashResultado", "Resultado de caixa", "currency", cashA.resultado, cashB?.resultado ?? null, hasB, "Fluxo de Caixa (Neon)"),
   ];
 
-  if (dreA) {
-    metrics.push(metric("dreResultado", "Resultado gerencial (DRE)", "currency", dreA.resultadoOperacional, dreB?.resultadoOperacional ?? null, hasB && !!dreB, "DRE Gerencial"));
+  if (dreA && dreA.resultadoOperacional !== null) {
+    const dreBValue = dreB && dreB.resultadoOperacional !== null ? dreB.resultadoOperacional : null;
+    metrics.push(metric("dreResultado", "Resultado gerencial (DRE)", "currency", dreA.resultadoOperacional, dreBValue, hasB && dreBValue !== null, "DRE Gerencial"));
   }
 
   return {

@@ -281,12 +281,45 @@ export function computeDreReport(input: DreComputationInput): DreReport {
     }
   }
 
-  const receitaBruta = round2(receitaBrutaEstetica.amount + receitaBrutaEstacionamento.amount + receitaBrutaOutras.amount);
-  const receitaLiquida = round2(receitaBruta - deducoes.amount);
-  const margemContribuicao = round2(receitaLiquida - custosDiretos.amount);
-  const resultadoOperacional = round2(margemContribuicao - despesasOperacionais.amount);
-  const resultadoAntesTributos = round2(resultadoOperacional + resultadoFinanceiro.amount);
-  const resultadoLiquido = round2(resultadoAntesTributos - tributos.amount);
+  /**
+   * Validação Final / Missão DRE — "ausência de dado ≠ zero" (mesmo princípio já aplicado ao
+   * Painel Gerencial). Um grupo com ZERO lançamentos reais classificados não prova "valor real
+   * zero" — pode ser só ausência de registro. Por isso cada total derivado só é exposto como
+   * número quando os grupos que o alimentam têm pelo menos 1 lançamento real; do contrário, o
+   * total sai `null` acompanhado de um motivo explícito (mesmo padrão já usado em `ebitda`/
+   * `ebitdaIndisponivelMotivo` abaixo). Deduções, resultado financeiro e tributos são tratados
+   * como "seguramente zero quando vazios" — são categorias inerentemente eventuais (estorno, taxa
+   * bancária, imposto já classificado), não uma expectativa universal de toda operação, ao
+   * contrário de receita/custos diretos/despesas operacionais.
+   */
+  const hasRevenueData = receitaBrutaEstetica.items.length + receitaBrutaEstacionamento.items.length + receitaBrutaOutras.items.length > 0;
+  const hasCustosDiretosData = custosDiretos.items.length > 0;
+  const hasDespesasOperacionaisData = despesasOperacionais.items.length > 0;
+
+  const receitaBrutaValue = round2(receitaBrutaEstetica.amount + receitaBrutaEstacionamento.amount + receitaBrutaOutras.amount);
+  const receitaLiquidaValue = round2(receitaBrutaValue - deducoes.amount);
+  const margemContribuicaoValue = round2(receitaLiquidaValue - custosDiretos.amount);
+  const resultadoOperacionalValue = round2(margemContribuicaoValue - despesasOperacionais.amount);
+  const resultadoAntesTributosValue = round2(resultadoOperacionalValue + resultadoFinanceiro.amount);
+  const resultadoLiquidoValue = round2(resultadoAntesTributosValue - tributos.amount);
+
+  const sourceLabel = input.regime === "competencia" ? "Contas a Receber/Contas a Pagar" : "Movimentações de Caixa";
+  const receitaBrutaIndisponivelMotivo = hasRevenueData
+    ? null
+    : `Nenhuma receita registrada com competência neste período (fonte: ${sourceLabel}). Ausência de lançamento não significa faturamento zero — pode haver receita real ainda não lançada no sistema.`;
+  const margemContribuicaoIndisponivelMotivo =
+    receitaBrutaIndisponivelMotivo ??
+    (hasCustosDiretosData ? null : `Nenhum custo direto (Produtos e insumos / Prestadores PJ) registrado neste período (fonte: ${sourceLabel}). Ausência de lançamento não significa custo zero.`);
+  const resultadoOperacionalIndisponivelMotivo =
+    margemContribuicaoIndisponivelMotivo ??
+    (hasDespesasOperacionaisData ? null : `Nenhuma despesa operacional registrada neste período (fonte: ${sourceLabel}). Ausência de lançamento não significa despesa zero.`);
+
+  const receitaBruta = receitaBrutaIndisponivelMotivo ? null : receitaBrutaValue;
+  const receitaLiquida = receitaBrutaIndisponivelMotivo ? null : receitaLiquidaValue;
+  const margemContribuicao = margemContribuicaoIndisponivelMotivo ? null : margemContribuicaoValue;
+  const resultadoOperacional = resultadoOperacionalIndisponivelMotivo ? null : resultadoOperacionalValue;
+  const resultadoAntesTributos = resultadoOperacionalIndisponivelMotivo ? null : resultadoAntesTributosValue;
+  const resultadoLiquido = resultadoOperacionalIndisponivelMotivo ? null : resultadoLiquidoValue;
 
   return {
     regime: input.regime,
@@ -297,25 +330,39 @@ export function computeDreReport(input: DreComputationInput): DreReport {
     receitaBrutaEstacionamento,
     receitaBrutaOutras,
     receitaBruta,
+    receitaBrutaIndisponivelMotivo,
     deducoes,
     receitaLiquida,
     custosDiretos,
     margemContribuicao,
+    margemContribuicaoIndisponivelMotivo,
     despesasOperacionais,
     resultadoOperacional,
+    resultadoOperacionalIndisponivelMotivo,
     resultadoFinanceiro,
     resultadoAntesTributos,
     tributos,
     resultadoLiquido,
     naoClassificados,
-    margemContribuicaoPercentual: receitaBruta > 0 ? round2((margemContribuicao / receitaBruta) * 100) : null,
-    margemOperacionalPercentual: receitaBruta > 0 ? round2((resultadoOperacional / receitaBruta) * 100) : null,
-    margemLiquidaPercentual: receitaBruta > 0 ? round2((resultadoLiquido / receitaBruta) * 100) : null,
-    participacaoEsteticaReceita: receitaBruta > 0 ? round2((receitaBrutaEstetica.amount / receitaBruta) * 100) : null,
-    participacaoEstacionamentoReceita: receitaBruta > 0 ? round2((receitaBrutaEstacionamento.amount / receitaBruta) * 100) : null,
+    margemContribuicaoPercentual: receitaBruta !== null && receitaBruta > 0 && margemContribuicao !== null ? round2((margemContribuicao / receitaBruta) * 100) : null,
+    margemOperacionalPercentual: receitaBruta !== null && receitaBruta > 0 && resultadoOperacional !== null ? round2((resultadoOperacional / receitaBruta) * 100) : null,
+    margemLiquidaPercentual: receitaBruta !== null && receitaBruta > 0 && resultadoLiquido !== null ? round2((resultadoLiquido / receitaBruta) * 100) : null,
+    participacaoEsteticaReceita: receitaBruta !== null && receitaBruta > 0 ? round2((receitaBrutaEstetica.amount / receitaBruta) * 100) : null,
+    participacaoEstacionamentoReceita: receitaBruta !== null && receitaBruta > 0 ? round2((receitaBrutaEstacionamento.amount / receitaBruta) * 100) : null,
     ebitda: null,
     ebitdaIndisponivelMotivo: "Depreciação e amortização não são registradas no sistema — classificação insuficiente para calcular EBITDA.",
   };
+}
+
+/**
+ * Variação percentual segura entre um total da DRE atual e o mesmo total no período anterior —
+ * nunca calcula quando um dos dois lados não é calculável (`null`) nem quando a base anterior é
+ * literalmente zero (percentual indefinido). Denominador em módulo (`Math.abs`) para a variação
+ * nunca inverter de sinal só porque o período anterior foi negativo.
+ */
+export function computeDreVariationPercent(current: number | null, previous: number | null): number | null {
+  if (current === null || previous === null || previous === 0) return null;
+  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10;
 }
 
 function buildCompetenceCandidates(input: DreComputationInput): DreCandidate[] {

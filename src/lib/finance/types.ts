@@ -727,22 +727,28 @@ export interface DreReport {
   receitaBrutaEstetica: DreGroupTotal;
   receitaBrutaEstacionamento: DreGroupTotal;
   receitaBrutaOutras: DreGroupTotal;
-  receitaBruta: number;
+  /** Null quando nenhuma receita foi registrada no período — ausência de lançamento nunca vira R$ 0 (ver `receitaBrutaIndisponivelMotivo`). */
+  receitaBruta: number | null;
+  receitaBrutaIndisponivelMotivo: string | null;
 
   deducoes: DreGroupTotal;
-  receitaLiquida: number;
+  receitaLiquida: number | null;
 
   custosDiretos: DreGroupTotal;
-  margemContribuicao: number;
+  /** Null quando receita OU custos diretos não têm nenhum lançamento real no período (ver `margemContribuicaoIndisponivelMotivo`). */
+  margemContribuicao: number | null;
+  margemContribuicaoIndisponivelMotivo: string | null;
 
   despesasOperacionais: DreGroupTotal;
-  resultadoOperacional: number;
+  /** Null quando receita, custos diretos OU despesas operacionais não têm nenhum lançamento real no período (ver `resultadoOperacionalIndisponivelMotivo`). */
+  resultadoOperacional: number | null;
+  resultadoOperacionalIndisponivelMotivo: string | null;
 
   resultadoFinanceiro: DreGroupTotal;
-  resultadoAntesTributos: number;
+  resultadoAntesTributos: number | null;
 
   tributos: DreGroupTotal;
-  resultadoLiquido: number;
+  resultadoLiquido: number | null;
 
   /** Lançamentos encontrados mas sem classificação (nature=nao_classificavel ou pendente) — não entram nos totais acima. */
   naoClassificados: DreLineItem[];

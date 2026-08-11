@@ -286,8 +286,16 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
       const group = questionId === "estetica_mes" ? "estetica_automotiva" : "estacionamento";
       try {
         const report = await fetchDreReport("competencia", from, to, group);
+        const groupLabel = group === "estetica_automotiva" ? "Estética Automotiva" : "Estacionamento";
+        if (report.receitaBruta === null || report.resultadoOperacional === null) {
+          const motivo = report.receitaBrutaIndisponivelMotivo ?? report.resultadoOperacionalIndisponivelMotivo ?? "Dados insuficientes no período.";
+          return {
+            text: `Ainda não é possível calcular o resultado de ${groupLabel} em ${label} — ${motivo}`,
+            links: [{ label: "Ver DRE Gerencial", href: `/financeiro/dre?from=${from}&to=${to}&costCenterGroup=${group}` }],
+          };
+        }
         return {
-          text: `Em ${label}, ${group === "estetica_automotiva" ? "Estética Automotiva" : "Estacionamento"} teve receita bruta de ${formatCurrency(report.receitaBruta)} e resultado operacional de ${formatCurrency(report.resultadoOperacional)} (regime de competência).`,
+          text: `Em ${label}, ${groupLabel} teve receita bruta de ${formatCurrency(report.receitaBruta)} e resultado operacional de ${formatCurrency(report.resultadoOperacional)} (regime de competência).`,
           links: [{ label: "Ver DRE Gerencial", href: `/financeiro/dre?from=${from}&to=${to}&costCenterGroup=${group}` }],
         };
       } catch {
@@ -317,6 +325,13 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
       const { from, to, label } = currentMonthRange();
       try {
         const report = await fetchDreReport("competencia", from, to, "consolidado");
+        if (report.resultadoLiquido === null) {
+          const motivo = report.resultadoOperacionalIndisponivelMotivo ?? "Dados insuficientes no período.";
+          return {
+            text: `Ainda não é possível calcular o resultado líquido gerencial de ${label} — ${motivo}`,
+            links: [{ label: "Ver DRE Gerencial", href: `/financeiro/dre?from=${from}&to=${to}` }],
+          };
+        }
         return {
           text: `O resultado líquido gerencial de ${label} (regime de competência) é ${formatCurrency(report.resultadoLiquido)}.`,
           links: [{ label: "Ver DRE Gerencial", href: `/financeiro/dre?from=${from}&to=${to}` }],

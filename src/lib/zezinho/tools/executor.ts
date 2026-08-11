@@ -135,8 +135,13 @@ async function runDreResult(call: ToolCall): Promise<ToolResult> {
       fetchDreReport("competencia", call.periodA.from, call.periodA.to, "consolidado"),
       call.periodB ? fetchDreReport("competencia", call.periodB.from, call.periodB.to, "consolidado").catch(() => null) : Promise.resolve(null),
     ]);
-    const hasB = !!call.periodB && dreB !== null;
-    const metrics: ComparisonMetric[] = [metric("dreResultado", "Resultado gerencial (DRE)", "currency", dreA.resultadoOperacional, dreB?.resultadoOperacional ?? null, hasB, source)];
+    if (dreA.resultadoOperacional === null) {
+      const motivo = dreA.resultadoOperacionalIndisponivelMotivo ?? "Dados insuficientes para calcular o resultado gerencial no período.";
+      return { id: "dre_result", source, error: null, ...meta("no_data", [motivo]), metrics: [] };
+    }
+    const dreBValue = dreB && dreB.resultadoOperacional !== null ? dreB.resultadoOperacional : null;
+    const hasB = !!call.periodB && dreBValue !== null;
+    const metrics: ComparisonMetric[] = [metric("dreResultado", "Resultado gerencial (DRE)", "currency", dreA.resultadoOperacional, dreBValue, hasB, source)];
     return { id: "dre_result", source, error: null, ...meta("ok"), metrics };
   } catch {
     return { id: "dre_result", source, error: "Não foi possível consultar o resultado gerencial (DRE).", ...meta("temporary_failure"), metrics: [] };

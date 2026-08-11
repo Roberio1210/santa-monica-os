@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeDreReport, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
+import { computeDreReport, computeDreVariationPercent, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
 import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification } from "@/lib/finance/types";
 
 function makeAR(overrides: Partial<AccountsReceivable>): AccountsReceivable {
@@ -147,7 +147,9 @@ describe("DRE em regime de competência", () => {
       rules: emptyRules,
     });
     expect(report.despesasOperacionais.amount).toBe(4750);
-    expect(report.resultadoOperacional).toBe(-4750);
+    // Despesa presente mas NENHUMA receita no período — resultado não pode ser apresentado como "0 - 4750" (ausência de dado ≠ zero).
+    expect(report.resultadoOperacional).toBeNull();
+    expect(report.resultadoOperacionalIndisponivelMotivo).toMatch(/receita/i);
   });
 
   it("classifica produtos e insumos como custo direto (margem de contribuição)", () => {
@@ -180,7 +182,9 @@ describe("DRE em regime de competência", () => {
       classifications: emptyClassifications,
       rules: emptyRules,
     });
-    expect(report.receitaBruta).toBe(0);
+    // Conta cancelada nunca vira candidata — sem NENHUM lançamento real de receita, o total é "não calculável", nunca 0 fabricado.
+    expect(report.receitaBruta).toBeNull();
+    expect(report.receitaBrutaIndisponivelMotivo).toMatch(/nenhuma receita/i);
   });
 
   it("estorno gera receita bruta + dedução equivalente — reverte corretamente o efeito gerencial", () => {
@@ -313,7 +317,9 @@ describe("DRE em regime de caixa", () => {
       classifications: emptyClassifications,
       rules: emptyRules,
     });
-    expect(report.receitaBruta).toBe(0);
+    // Movimento fora da janela nunca vira candidato — sem lançamento real dentro do período, o total é "não calculável", nunca 0 fabricado.
+    expect(report.receitaBruta).toBeNull();
+    expect(report.receitaBrutaIndisponivelMotivo).not.toBeNull();
   });
 });
 
@@ -513,5 +519,174 @@ describe("EBITDA", () => {
     });
     expect(report.ebitda).toBeNull();
     expect(report.ebitdaIndisponivelMotivo).toMatch(/classificação insuficiente/);
+  });
+});
+
+/**
+ * Missão DRE (Validação Final) — "ausência de dado ≠ zero". Cobre explicitamente os 10 cenários
+ * pedidos: 1) receita+despesa presentes, 2) receita sem despesa, 3) despesa sem receita,
+ * 4) ambos realmente zero com dados válidos, 5) período anterior sem dados,
+ * 6) arrays vazios/nulos, 7) fonte sem nenhum lançamento (equivalente, nesta camada pura, a
+ * "nenhum dado"), 8) margem sem denominador válido, 9) comparação percentual com base zero,
+ * 10) drill-down (soma dos itens) sempre reconciliando com o total do grupo.
+ */
+describe("Ausência de dado ≠ zero — regra obrigatória da DRE", () => {
+  it("1) receita presente + custos diretos presentes + despesas operacionais presentes -> resultado calculável normalmente", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({ categoryName: "Produtos e insumos", originalAmount: 100 }), makeAP({ id: "ap-2", originalAmount: 200 })],
+      accountsReceivable: [makeAR({ expectedAmount: 900 })],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(900);
+    expect(report.margemContribuicao).toBe(800); // 900 - 100 (custo direto)
+    expect(report.resultadoOperacional).toBe(600); // 800 - 200 (despesa operacional)
+    expect(report.resultadoOperacionalIndisponivelMotivo).toBeNull();
+  });
+
+  it("2) receita presente + nenhuma despesa cadastrada -> resultado NÃO calculável (nunca 'receita - 0')", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [makeAR({ expectedAmount: 900 })],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(900); // receita em si é real e calculável
+    expect(report.margemContribuicao).toBeNull(); // sem custo direto real registrado
+    expect(report.resultadoOperacional).toBeNull(); // sem despesa operacional real registrada
+    expect(report.resultadoOperacionalIndisponivelMotivo).toMatch(/custo direto/i);
+  });
+
+  it("3) despesas presentes + receita ausente -> resultado NÃO calculável (nunca '0 - despesa')", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({})],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBeNull();
+    expect(report.resultadoOperacional).toBeNull();
+    expect(report.resultadoOperacionalIndisponivelMotivo).toMatch(/receita/i);
+  });
+
+  it("4) receita E despesa com lançamento real de valor zero -> resultado calculável e realmente 0 (não é 'sem dado')", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({ categoryName: "Produtos e insumos", originalAmount: 0 }), makeAP({ id: "ap-2", originalAmount: 0 })],
+      accountsReceivable: [makeAR({ expectedAmount: 0 })],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(0);
+    expect(report.receitaBrutaIndisponivelMotivo).toBeNull();
+    expect(report.margemContribuicao).toBe(0);
+    expect(report.resultadoOperacional).toBe(0);
+    expect(report.resultadoOperacionalIndisponivelMotivo).toBeNull();
+  });
+
+  it("5) período atual calculável + período anterior sem dados -> nenhuma variação percentual é mostrada", () => {
+    expect(computeDreVariationPercent(1000, null)).toBeNull();
+  });
+
+  it("6) valores nulos (nenhum lançamento em nenhuma fonte) -> todo total derivado sai null, nunca 0 fabricado", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBeNull();
+    expect(report.receitaLiquida).toBeNull();
+    expect(report.margemContribuicao).toBeNull();
+    expect(report.resultadoOperacional).toBeNull();
+    expect(report.resultadoAntesTributos).toBeNull();
+    expect(report.resultadoLiquido).toBeNull();
+    expect(report.margemContribuicaoPercentual).toBeNull();
+    expect(report.margemOperacionalPercentual).toBeNull();
+    expect(report.margemLiquidaPercentual).toBeNull();
+  });
+
+  it("7) fonte sem nenhum lançamento no regime de caixa -> mesmo tratamento (não calculável, nunca 0)", () => {
+    const report = computeDreReport({
+      regime: "caixa",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({})],
+      accountsReceivable: [makeAR({})],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBeNull();
+    expect(report.receitaBrutaIndisponivelMotivo).toMatch(/Movimentações de Caixa/);
+  });
+
+  it("8) margem percentual sem denominador válido (receita bruta real, mas zero) -> percentual null, não Infinity/NaN", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({ categoryName: "Produtos e insumos", originalAmount: 50 })],
+      accountsReceivable: [makeAR({ expectedAmount: 0 })],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(0);
+    expect(report.margemContribuicao).toBe(-50); // valor real calculável
+    expect(report.margemContribuicaoPercentual).toBeNull(); // mas percentual sobre receita 0 é indefinido, nunca Infinity
+  });
+
+  it("9) comparação percentual nunca calculada quando a base anterior é literalmente zero", () => {
+    expect(computeDreVariationPercent(500, 0)).toBeNull();
+    expect(computeDreVariationPercent(0, 0)).toBeNull();
+  });
+
+  it("9b) comparação percentual normal quando os dois lados são calculáveis e a base não é zero", () => {
+    expect(computeDreVariationPercent(1200, 1000)).toBe(20);
+    expect(computeDreVariationPercent(800, 1000)).toBe(-20);
+  });
+
+  it("10) drill-down sempre reconcilia com o total: soma dos itens do grupo === amount do grupo", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [makeAP({ id: "a1", originalAmount: 500 }), makeAP({ id: "a2", originalAmount: 250, categoryName: "Energia" })],
+      accountsReceivable: [makeAR({})],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    const sumOfItems = Math.round(report.despesasOperacionais.items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    expect(sumOfItems).toBe(report.despesasOperacionais.amount);
+    expect(report.despesasOperacionais.items).toHaveLength(2);
   });
 });

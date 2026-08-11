@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
+import { computeDreVariationPercent } from "@/lib/finance/dre";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import type { AccountingAlert } from "@/lib/finance/service";
 import type { DreCostCenterGroup, DreGroupTotal, DreRegime, DreReport } from "@/lib/finance/types";
@@ -127,9 +128,9 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <IndicatorCard label="Margem de contribuição" value={report.margemContribuicaoPercentual} />
-        <IndicatorCard label="Margem operacional" value={report.margemOperacionalPercentual} />
-        <IndicatorCard label="Margem líquida" value={report.margemLiquidaPercentual} />
+        <IndicatorCard label="Margem de contribuição" value={report.margemContribuicaoPercentual} textOverride={report.margemContribuicaoPercentual === null ? (report.margemContribuicaoIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
+        <IndicatorCard label="Margem operacional" value={report.margemOperacionalPercentual} textOverride={report.margemOperacionalPercentual === null ? (report.resultadoOperacionalIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
+        <IndicatorCard label="Margem líquida" value={report.margemLiquidaPercentual} textOverride={report.margemLiquidaPercentual === null ? (report.resultadoOperacionalIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
         <IndicatorCard label="Participação Estética" value={report.participacaoEsteticaReceita} />
         <IndicatorCard label="Participação Estacionamento" value={report.participacaoEstacionamentoReceita} />
         <IndicatorCard label="EBITDA" value={null} textOverride={report.ebitdaIndisponivelMotivo ?? undefined} />
@@ -150,17 +151,17 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
           <DreRow label="Receita da Estética Automotiva" group={report.receitaBrutaEstetica} />
           <DreRow label="Receita do Estacionamento" group={report.receitaBrutaEstacionamento} />
           <DreRow label="Outras receitas operacionais" group={report.receitaBrutaOutras} />
-          <TotalRow label="RECEITA BRUTA" value={report.receitaBruta} previous={previous?.receitaBruta} emphasis />
+          <TotalRow label="RECEITA BRUTA" value={report.receitaBruta} previous={previous?.receitaBruta} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Deduções da receita" group={report.deducoes} negative />
-          <TotalRow label="RECEITA LÍQUIDA" value={report.receitaLiquida} previous={previous?.receitaLiquida} emphasis />
+          <TotalRow label="RECEITA LÍQUIDA" value={report.receitaLiquida} previous={previous?.receitaLiquida} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Custos diretos dos serviços" group={report.custosDiretos} negative />
-          <TotalRow label="MARGEM DE CONTRIBUIÇÃO" value={report.margemContribuicao} previous={previous?.margemContribuicao} emphasis />
+          <TotalRow label="MARGEM DE CONTRIBUIÇÃO" value={report.margemContribuicao} previous={previous?.margemContribuicao} motivo={report.margemContribuicaoIndisponivelMotivo} emphasis />
           <DreRow label="(-) Despesas operacionais" group={report.despesasOperacionais} negative />
-          <TotalRow label="RESULTADO OPERACIONAL" value={report.resultadoOperacional} previous={previous?.resultadoOperacional} emphasis />
+          <TotalRow label="RESULTADO OPERACIONAL" value={report.resultadoOperacional} previous={previous?.resultadoOperacional} motivo={report.resultadoOperacionalIndisponivelMotivo} emphasis />
           <DreRow label="(+/-) Resultado financeiro" group={report.resultadoFinanceiro} />
-          <TotalRow label="RESULTADO ANTES DOS TRIBUTOS" value={report.resultadoAntesTributos} />
+          <TotalRow label="RESULTADO ANTES DOS TRIBUTOS" value={report.resultadoAntesTributos} motivo={report.resultadoOperacionalIndisponivelMotivo} />
           <DreRow label="(-) Tributos" group={report.tributos} negative />
-          <TotalRow label="RESULTADO LÍQUIDO GERENCIAL" value={report.resultadoLiquido} previous={previous?.resultadoLiquido} emphasis final />
+          <TotalRow label="RESULTADO LÍQUIDO GERENCIAL" value={report.resultadoLiquido} previous={previous?.resultadoLiquido} motivo={report.resultadoOperacionalIndisponivelMotivo} emphasis final />
         </CardContent>
       </Card>
 
@@ -191,15 +192,20 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {(Object.keys(byCostCenter) as DreCostCenterGroup[]).map((group) => (
-              <div key={group} className="rounded-lg border border-border bg-background-elevated p-3">
-                <p className="text-xs text-foreground-subtle">{costCenterGroupLabels[group]}</p>
-                <p className={`mt-1 text-lg font-semibold ${byCostCenter[group].resultadoOperacional < 0 ? "text-critical" : "text-foreground"}`}>
-                  {formatCurrency(byCostCenter[group].resultadoOperacional)}
-                </p>
-                <p className="text-xs text-foreground-subtle">Resultado operacional</p>
-              </div>
-            ))}
+            {(Object.keys(byCostCenter) as DreCostCenterGroup[]).map((group) => {
+              const resultado = byCostCenter[group].resultadoOperacional;
+              return (
+                <div key={group} className="rounded-lg border border-border bg-background-elevated p-3">
+                  <p className="text-xs text-foreground-subtle">{costCenterGroupLabels[group]}</p>
+                  {resultado === null ? (
+                    <p className="mt-1 text-sm font-normal text-foreground-subtle">Não calculável — {byCostCenter[group].resultadoOperacionalIndisponivelMotivo}</p>
+                  ) : (
+                    <p className={`mt-1 text-lg font-semibold ${resultado < 0 ? "text-critical" : "text-foreground"}`}>{formatCurrency(resultado)}</p>
+                  )}
+                  <p className="text-xs text-foreground-subtle">Resultado operacional</p>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
@@ -212,18 +218,25 @@ function IndicatorCard({ label, value, textOverride }: { label: string; value: n
     <div className="rounded-lg border border-border bg-background-elevated p-3">
       <p className="text-xs text-foreground-subtle">{label}</p>
       <p className="mt-1 text-lg font-semibold text-foreground">
-        {textOverride ? <span className="text-sm font-normal text-foreground-subtle">Informação indisponível — classificação insuficiente.</span> : value !== null ? `${value}%` : "—"}
+        {textOverride ? <span className="text-sm font-normal text-foreground-subtle">Não calculável — {textOverride}</span> : value !== null ? `${value}%` : "—"}
       </p>
     </div>
   );
 }
 
+/**
+ * Sempre mostra a contagem real de lançamentos, mesmo quando é 0 — "Despesas operacionais (0)"
+ * deixa explícito que é uma CONTAGEM real de zero lançamentos, nunca escondida atrás de um valor
+ * em R$ que pareceria uma confirmação de "gasto zero".
+ */
 function DreRow({ label, group, negative }: { label: string; group: DreGroupTotal; negative?: boolean }) {
   const [open, setOpen] = useState(false);
-  if (group.items.length === 0 && group.amount === 0) {
+  if (group.items.length === 0) {
     return (
       <div className="flex items-center justify-between py-1 text-sm text-foreground-subtle">
-        <span>{label}</span>
+        <span>
+          {label} <span className="text-xs">(0 lançamentos)</span>
+        </span>
         <span>{formatCurrency(0)}</span>
       </div>
     );
@@ -263,8 +276,21 @@ function DreRow({ label, group, negative }: { label: string; group: DreGroupTota
   );
 }
 
-function TotalRow({ label, value, previous, emphasis, final }: { label: string; value: number; previous?: number; emphasis?: boolean; final?: boolean }) {
-  const variation = previous !== undefined && previous !== 0 ? Math.round(((value - previous) / Math.abs(previous)) * 1000) / 10 : null;
+/**
+ * `value`/`previous` nulos = "não calculável" (ausência de dado, nunca R$ 0,00 fabricado) — mostra
+ * o motivo real em vez de moeda, e nunca calcula variação percentual quando qualquer um dos dois
+ * lados não é calculável (via `computeDreVariationPercent`, mesma regra testada em dre.test.ts).
+ */
+function TotalRow({ label, value, previous, motivo, emphasis, final }: { label: string; value: number | null; previous?: number | null; motivo?: string | null; emphasis?: boolean; final?: boolean }) {
+  const variation = previous !== undefined ? computeDreVariationPercent(value, previous) : null;
+  if (value === null) {
+    return (
+      <div className={`flex items-center justify-between border-t border-border-subtle py-2 ${emphasis ? "font-semibold" : ""}`}>
+        <span className={final ? "text-base text-foreground" : "text-sm text-foreground"}>{label}</span>
+        <span className="max-w-[60%] text-right text-xs font-normal text-foreground-subtle">Não calculável{motivo ? ` — ${motivo}` : ""}</span>
+      </div>
+    );
+  }
   return (
     <div className={`flex items-center justify-between border-t border-border-subtle py-2 ${emphasis ? "font-semibold" : ""}`}>
       <span className={final ? "text-base text-foreground" : "text-sm text-foreground"}>{label}</span>

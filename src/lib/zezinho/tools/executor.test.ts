@@ -61,8 +61,10 @@ describe("executeTool — todo resultado carrega status/collectedAt/limitations 
   it("ferramentas sobre Neon/estoque em modo memória (sem DATABASE_URL) respondem ok, nunca lançam", async () => {
     const cash = await executeTool(call("cash_ledger_totals", { periodA: PERIOD }));
     expect(cash.status).toBe("ok");
+    // DRE sem nenhum lançamento real de receita/despesa (modo memória) -> "no_data", nunca "ok" com resultado fabricado (ausência de dado ≠ zero).
     const dre = await executeTool(call("dre_result", { periodA: PERIOD }));
-    expect(dre.status).toBe("ok");
+    expect(dre.status).toBe("no_data");
+    expect(dre.limitations.length).toBeGreaterThan(0);
     const inventory = await executeTool(call("inventory_overview"));
     expect(inventory.status).toBe("ok");
     const alerts = await executeTool(call("central_alerts"));
