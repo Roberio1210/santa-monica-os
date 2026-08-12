@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# dados de importação — planilhas originais e extrações contêm dados reais de clientes (nome,
+# placa) e nunca devem ser versionados; os arquivos já foram importados para o Neon
+dados-importacao/

@@ -13,3 +13,4 @@ export * from "./stone";
 export * from "./attendance";
 export * from "./managerAssistant";
 export * from "./planning";
+export * from "./historicalSpreadsheet";
