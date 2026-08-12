@@ -8,6 +8,7 @@ import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { listServiceMappings } from "@/lib/jumppark-orders/service-mapping";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { isJumpParkOfficialPeriod, isSpreadsheetOfficialPeriod, DATA_CORTE_JUMPPARK } from "@/lib/config/historical-source-precedence";
+import { fetchProductConsumptionStartDates } from "@/lib/inventory/product-consumption-start-date";
 import type { OrderVehicleCategory, ServiceMapping } from "@/lib/jumppark-orders/types";
 import type { Recipe } from "@/lib/recipes/types";
 
@@ -72,12 +73,22 @@ export function aggregateLinesByItemAndStep(lines: TheoreticalConsumptionLine[])
  */
 export const FALLBACK_RECIPE_CATEGORY = "sedan";
 
+/**
+ * Missão do Marco Confiável do Histórico de Estoque — Etapa 3: nenhum produto pode gerar
+ * consumo antes de `DATA_INICIO_CONSUMO_PRODUTO = MAX(DATA_INICIO_HISTORICO_ESTOQUE, primeira
+ * evidência real do produto)`. `productStartDates` traz essa data já calculada por item
+ * (`fetchProductConsumptionStartDates`); `null`/ausente no mapa significa "nenhuma evidência
+ * real ainda" — a linha é descartada, nunca inventada. A existência de um serviço nunca prova,
+ * sozinha, qual produto foi usado nele.
+ */
 export function computeTheoreticalConsumptionForOrder(
   serviceDescriptions: string[],
   vehicleCategory: OrderVehicleCategory,
+  orderDate: string,
   mappings: Map<string, Pick<ServiceMapping, "canonicalServiceId" | "canonicalServiceName" | "status">>,
   recipesByServiceCategory: Map<string, Recipe[]>,
   itemCostById: Map<string, number | null>,
+  productStartDates: Map<string, string | null>,
 ): TheoreticalConsumptionResult {
   const lines: TheoreticalConsumptionLine[] = [];
   const matchedServiceIds: string[] = [];
@@ -96,6 +107,9 @@ export function computeTheoreticalConsumptionForOrder(
     for (const recipe of recipes) {
       const reference = pickRecipeReference(recipe);
       if (!reference) continue;
+
+      const productStartDate = productStartDates.get(recipe.itemId);
+      if (!productStartDate || orderDate < productStartDate) continue; // sem evidência real ainda, ou data anterior à disponibilidade do produto
 
       const multiplier = getVehicleSizeMultiplier(vehicleCategory, recipe.processStep);
       const quantity = round(reference.value * multiplier, 3);
@@ -184,12 +198,13 @@ export async function processHistoricalTheoreticalConsumption(fromDate: string, 
     return { ordersEvaluated: 0, ordersWithMatchedService: 0, ordersUnmapped: 0, linesWritten: 0, linesAlreadyExisted: 0, serviceCounts: {}, fromDate, toDate };
   }
 
-  const [orders, mappingRows, allRecipes, allItems, allServices] = await Promise.all([
+  const [orders, mappingRows, allRecipes, allItems, allServices, productStartDates] = await Promise.all([
     fetchHistoricalOrders(fromDate, toDate),
     listServiceMappings(),
     getRecipeRepository().listRecipes(),
     getInventoryRepository().listItems(),
     db.select({ id: services.id, name: services.name }).from(services),
+    fetchProductConsumptionStartDates(),
   ]);
 
   const mappings = new Map(mappingRows.map((m) => [m.jumpparkServiceName, { canonicalServiceId: m.canonicalServiceId, canonicalServiceName: m.canonicalServiceName, status: m.status }]));
@@ -218,7 +233,7 @@ export async function processHistoricalTheoreticalConsumption(fromDate: string, 
     // um fromDate/toDate mais amplo por engano.
     if (!isJumpParkOfficialPeriod(order.orderDate)) continue;
 
-    const result = computeTheoreticalConsumptionForOrder(order.descriptions, vehicleCategory, mappings, recipesByServiceCategory, itemCostById);
+    const result = computeTheoreticalConsumptionForOrder(order.descriptions, vehicleCategory, order.orderDate, mappings, recipesByServiceCategory, itemCostById, productStartDates);
 
     if (result.matchedServiceIds.length > 0) ordersWithMatchedService += 1;
     if (result.unmappedDescriptions.length > 0) ordersUnmapped += 1;
@@ -294,11 +309,12 @@ export async function processHistoricalTheoreticalConsumptionFromSpreadsheet(): 
     return { recordsEvaluated: 0, recordsWithMatchedService: 0, recordsPending: 0, recordsWithoutRecipe: 0, linesWritten: 0, linesAlreadyExisted: 0, serviceCounts: {} };
   }
 
-  const [washRecords, allRecipes, allItems, allServices] = await Promise.all([
+  const [washRecords, allRecipes, allItems, allServices, productStartDates] = await Promise.all([
     db.select().from(historicalSpreadsheetWashRecords).where(eq(historicalSpreadsheetWashRecords.active, true)),
     getRecipeRepository().listRecipes(),
     getInventoryRepository().listItems(),
     db.select({ id: services.id, name: services.name }).from(services),
+    fetchProductConsumptionStartDates(),
   ]);
 
   const itemCostById = new Map(allItems.map((i) => [i.id, i.unitCost]));
@@ -336,7 +352,7 @@ export async function processHistoricalTheoreticalConsumptionFromSpreadsheet(): 
     const pseudoDescription = record.serviceTypeRaw ?? record.canonicalServiceId;
     const mappings = new Map([[pseudoDescription, { canonicalServiceId: record.canonicalServiceId, canonicalServiceName: serviceName, status: "mapeado" as const }]]);
 
-    const result = computeTheoreticalConsumptionForOrder([pseudoDescription], vehicleCategory, mappings, recipesByServiceCategory, itemCostById);
+    const result = computeTheoreticalConsumptionForOrder([pseudoDescription], vehicleCategory, record.recordDate, mappings, recipesByServiceCategory, itemCostById, productStartDates);
     if (result.lines.length === 0) {
       recordsWithoutRecipe += 1;
       continue; // serviço mapeado, mas sem nenhuma receita técnica configurada para ele ainda

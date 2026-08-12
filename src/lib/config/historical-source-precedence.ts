@@ -34,3 +34,19 @@ export function isJumpParkOfficialPeriod(dateIso: string): boolean {
 export function officialHistoricalSource(dateIso: string): HistoricalDataSource {
   return isJumpParkOfficialPeriod(dateIso) ? "jumppark" : "historical_spreadsheet";
 }
+
+/**
+ * Missão de Marco Confiável do Histórico de Estoque — decisão de negócio DEFINITIVA (aprovada
+ * em 12/08/2026, após auditoria completa não ter encontrado NENHUMA evidência real de estoque
+ * antes desta data — nem em `inventory_movements`, nem em compras/notas/contagens; a tabela
+ * inteira de movimentações só começa em 10/07/2026). Marca o início do período em que existe
+ * qualquer evidência real de estoque no sistema — NÃO significa que todo produto existia nesta
+ * data (ver `DATA_INICIO_CONSUMO_PRODUTO`/`fetchProductConsumptionStartDates` em
+ * src/lib/inventory/product-consumption-start-date.ts, que aplica a regra por produto:
+ * MAX(DATA_INICIO_HISTORICO_ESTOQUE, primeira evidência real daquele produto específico)).
+ *
+ * Histórico operacional (serviços/clientes/faturamento/estacionamento) de antes desta data
+ * continua intacto e consultável — só deixa de poder gerar consumo teórico de produto, por
+ * nunca termos evidência real de qual produto existia/foi usado naquele momento.
+ */
+export const DATA_INICIO_HISTORICO_ESTOQUE = "2026-07-10";

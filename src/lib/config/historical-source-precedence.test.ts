@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DATA_CORTE_JUMPPARK, isJumpParkOfficialPeriod, isSpreadsheetOfficialPeriod, officialHistoricalSource } from "@/lib/config/historical-source-precedence";
+import { DATA_CORTE_JUMPPARK, DATA_INICIO_HISTORICO_ESTOQUE, isJumpParkOfficialPeriod, isSpreadsheetOfficialPeriod, officialHistoricalSource } from "@/lib/config/historical-source-precedence";
 
 describe("regra de precedência histórica — Missão de Consolidação do Histórico 2026", () => {
   it("DATA_CORTE_JUMPPARK é 2026-05-01, conforme confirmado pelo gestor", () => {
@@ -26,5 +26,9 @@ describe("regra de precedência histórica — Missão de Consolidação do Hist
     for (const date of ["2026-01-01", "2026-04-30", "2026-05-01", "2026-05-02", "2026-08-11"]) {
       expect(isSpreadsheetOfficialPeriod(date)).toBe(!isJumpParkOfficialPeriod(date));
     }
+  });
+
+  it("DATA_INICIO_HISTORICO_ESTOQUE é 2026-07-10, conforme decisão de negócio aprovada", () => {
+    expect(DATA_INICIO_HISTORICO_ESTOQUE).toBe("2026-07-10");
   });
 });
