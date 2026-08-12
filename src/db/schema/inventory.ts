@@ -432,13 +432,27 @@ export const inventoryConsumptionLines = pgTable("inventory_consumption_lines", 
 });
 
 /**
- * Consumo teórico HISTÓRICO (Missão de Histórico Retroativo) — deliberadamente uma tabela
- * separada de `inventory_consumption_lines`/`inventory_movements`: nunca representa uma baixa
- * real de estoque, só a estimativa de quanto uma ordem histórica real teria consumido segundo a
- * receita técnica vigente no momento do processamento. Nunca altera `inventory_items.
- * current_quantity`, nunca gera `inventory_movements`. Ao contrário do consumo automático real
- * (que só usa receita "aprovada"), este cálculo usa a melhor referência disponível — aprovada >
- * em calibração > técnica — porque é só análise, nunca escreve saldo.
+ * Missão de Consolidação do Histórico 2026 — de onde veio o registro-fonte de um cálculo de
+ * consumo teórico. Estrutural (não texto livre em `source`) para que consultas de auditoria
+ * ("jan-abr só planilha, mai+ só JumpPark") sejam confiáveis, nunca dependam de parsing de texto.
+ */
+export const historicalConsumptionSourceTypeEnum = pgEnum("historical_consumption_source_type", ["jumppark", "historical_spreadsheet"]);
+
+/**
+ * Consumo teórico HISTÓRICO (Missão de Histórico Retroativo, renomeada/estendida na Missão de
+ * Consolidação do Histórico 2026 para aceitar as duas fontes oficiais por período) —
+ * deliberadamente uma tabela separada de `inventory_consumption_lines`/`inventory_movements`:
+ * nunca representa uma baixa real de estoque, só a estimativa de quanto um serviço histórico
+ * real teria consumido segundo a receita técnica vigente no momento do processamento. Nunca
+ * altera `inventory_items.current_quantity`, nunca gera `inventory_movements`. Ao contrário do
+ * consumo automático real (que só usa receita "aprovada"), este cálculo usa a melhor referência
+ * disponível — aprovada > em calibração > técnica — porque é só análise, nunca escreve saldo.
+ *
+ * `jumpparkOrderExternalId` (nome de coluna mantido por simplicidade de migração — na prática é
+ * um id de registro-fonte genérico) é `jumppark_service_orders.external_id` quando
+ * `sourceRecordType='jumppark'`, ou `historical_spreadsheet_wash_records.external_id` quando
+ * `sourceRecordType='historical_spreadsheet'` — nunca as duas fontes para a mesma data (ver
+ * `officialHistoricalSource` em src/lib/config/historical-source-precedence.ts).
  *
  * `externalId` (aqui com UNIQUE de verdade, ao contrário do bug corrigido em
  * `service_consumption_rules` na missão anterior) é `hist:{jumpparkOrderExternalId}:{itemId}:
@@ -447,6 +461,7 @@ export const inventoryConsumptionLines = pgTable("inventory_consumption_lines", 
 export const historicalTheoreticalConsumption = pgTable("historical_theoretical_consumption", {
   id: id(),
   jumpparkOrderExternalId: text("jumppark_order_external_id").notNull(),
+  sourceRecordType: historicalConsumptionSourceTypeEnum("source_record_type").notNull(),
   orderDate: date("order_date").notNull(),
   itemId: uuid("item_id")
     .notNull()

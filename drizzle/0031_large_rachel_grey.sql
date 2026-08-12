@@ -1,0 +1,2 @@
+CREATE TYPE "public"."historical_consumption_source_type" AS ENUM('jumppark', 'historical_spreadsheet');--> statement-breakpoint
+ALTER TABLE "historical_theoretical_consumption" ADD COLUMN "source_record_type" "historical_consumption_source_type" NOT NULL;
