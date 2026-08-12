@@ -12,3 +12,4 @@
 | 2026-07-09 | Componentes de UI escritos manualmente no padrão shadcn (sem CLI) | Evitar dependência de rede/interatividade da CLI em execução autônoma |
 | 2026-07-09 | Uso prioritário de ferramentas e planos gratuitos | Requisito explícito do projeto nesta fase |
 | 2026-07-09 | Segurança das câmeras (RTSP/ONVIF) tratada como fase futura, sem exposição na internet | Risco de segurança de rede; depende de ponte local |
+| 2026-08-11 | DATA_CORTE_JUMPPARK = 2026-05-01 — planilha histórica é fonte oficial antes disso, JumpPark exclusivo a partir daí (nunca somados) | Auditoria dia a dia de maio/2026 no Neon (30/31 dias com uso, sem padrão de rampa) confirmada pelo gestor; março/abril têm registros `source='jumppark'` mas não são a operação real. Ver `docs/historical-data-precedence.md` |
