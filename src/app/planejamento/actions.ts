@@ -7,6 +7,8 @@ import type { AppointmentStatus } from "@/lib/planning/types";
 
 export interface ActionResult {
   error: string | null;
+  /** Missão CRM V2 Fase 1 — aviso informativo de possível duplicidade (nunca bloqueia, nunca funde). */
+  duplicateWarning?: string | null;
 }
 
 /** Resolve cliente/veículo (reaproveita por telefone/placa quando já existem) e cria o agendamento. */
@@ -14,8 +16,13 @@ export async function createAppointmentAction(
   registerInput: QuickRegisterInput,
   appointmentInput: { serviceId: string; scheduledAt: string; expectedDurationMinutes: number | null; notes: string | null },
 ): Promise<ActionResult> {
+  let duplicateWarning: string | null = null;
   try {
-    const { customer, vehicle } = await registerQuickCustomerAndVehicle(registerInput);
+    const { customer, vehicle, possibleDuplicateCustomers, possibleDuplicateVehicles } = await registerQuickCustomerAndVehicle(registerInput);
+    const parts: string[] = [];
+    if (possibleDuplicateCustomers.length > 0) parts.push(`possível cliente já cadastrado (${possibleDuplicateCustomers.map((c) => c.name).join(", ")})`);
+    if (possibleDuplicateVehicles.length > 0) parts.push(`possível veículo já cadastrado em outro cliente (${possibleDuplicateVehicles.map((v) => v.plate).join(", ")})`);
+    duplicateWarning = parts.length > 0 ? parts.join("; ") : null;
     await createAppointment({
       customerId: customer.id,
       vehicleId: vehicle.id,
@@ -28,7 +35,7 @@ export async function createAppointmentAction(
     return { error: err instanceof Error ? err.message : "Falha ao criar o agendamento." };
   }
   revalidatePath("/planejamento");
-  return { error: null };
+  return { error: null, duplicateWarning };
 }
 
 export async function updateAppointmentStatusAction(id: string, status: AppointmentStatus): Promise<ActionResult> {

@@ -42,6 +42,13 @@ export type IdentityConfidence = "confirmado" | "provavel" | "provisorio" | "amb
 export interface AggregatedCustomer {
   externalId: string;
   name: string;
+  /**
+   * Missão CRM V2 Fase 1 — telefone da ordem mais recente do grupo que tiver um valor (mesmo
+   * critério "mais recente" já usado para `name`). Guarda exatamente o que está em
+   * `clientPhoneMasked` nas ordens agregadas — completo para ordens sincronizadas após a Missão
+   * CRM V2 Fase 1, ainda mascarado para ordens antigas (nunca reconstruído/backfillado aqui).
+   */
+  phone: string | null;
   firstVisitAt: string;
   lastVisitAt: string;
   visitCount: number;
@@ -55,6 +62,8 @@ export interface AggregatedCustomer {
 
 export interface AggregatedVehicle {
   externalId: string;
+  /** Missão CRM V2 Fase 1 — mesmo valor usado para agrupar o veículo (a chave de `externalId`, sem o prefixo `plate:`). Completo quando a(s) ordem(ns) do veículo já vieram sem mascaramento. */
+  plate: string;
   model: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
@@ -254,9 +263,20 @@ export function aggregateJumpParkCustomersAndVehicles(orders: OrderForAggregatio
     const distinctPlates = new Set(sorted.map((o) => plateKeyOf(o.plateMasked)).filter((p): p is string => p !== null));
     const { confidence, reason } = computeIdentityConfidence(name, distinctPlates.size);
 
+    // Telefone da ordem mais recente do grupo que efetivamente tiver um valor — mesmo critério
+    // "mais recente com dado" já usado para resolver o dono de um veículo, abaixo.
+    let phone: string | null = null;
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      if (sorted[i].clientPhoneMasked) {
+        phone = sorted[i].clientPhoneMasked;
+        break;
+      }
+    }
+
     customers.push({
       externalId,
       name,
+      phone,
       firstVisitAt: sorted[0].orderDate,
       lastVisitAt: sorted[sorted.length - 1].orderDate,
       visitCount,
@@ -289,6 +309,7 @@ export function aggregateJumpParkCustomersAndVehicles(orders: OrderForAggregatio
 
     vehicles.push({
       externalId: `plate:${externalId}`,
+      plate: externalId,
       model: mostRecent.vehicleModel,
       firstSeenAt: sorted[0].orderDate,
       lastSeenAt: mostRecent.orderDate,

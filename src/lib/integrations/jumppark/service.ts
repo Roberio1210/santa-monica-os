@@ -260,10 +260,24 @@ function toNullableString(value: string | number | null | undefined): string | n
   return str.length > 0 ? str : null;
 }
 
-/** `maskPlate` retorna o texto "Não informado" (pensado para exibição) — para persistência, ausência de placa deve virar `null`, nunca esse texto. */
-function maskPlateForPersistence(plate?: string | null): string | null {
-  if (!plate?.trim()) return null;
-  return maskPlate(plate);
+/**
+ * Missão CRM V2 Fase 1 (13/08/2026) — a auditoria de recuperabilidade confirmou, com evidência
+ * documentada (`docs/jumppark-sync-strategy.md`, `docs/jumppark-data-map.md`) e teste real, que a
+ * API da JumpPark entrega placa e telefone COMPLETOS; o mascaramento sempre foi uma escolha deste
+ * arquivo, nunca uma limitação da origem. Decisão do gestor: parar de mascarar na PERSISTÊNCIA a
+ * partir de agora — `PersistableServiceOrder.plateMasked`/`clientPhoneMasked` passam a guardar o
+ * valor COMPLETO (só aparado de espaços), quando a JumpPark efetivamente o fornecer. Os NOMES dos
+ * campos continuam "…Masked" por não termos alterado o schema/tipo para isso (mudança de nome
+ * pura, sem ganho, fora do escopo desta missão) — o valor real a partir de agora é completo, não
+ * mascarado; documentado aqui para nunca gerar confusão futura.
+ *
+ * `maskPlate`/`maskPhone` NÃO foram removidos — continuam em uso legítimo em `mapOperationOrders`
+ * (a tela "Movimentações de Hoje", que é EXIBIÇÃO, não persistência) e ficam disponíveis para
+ * qualquer necessidade futura de mascaramento visual, que é uma preocupação separada desta.
+ */
+function trimmedOrNull(value?: string | null): string | null {
+  if (!value?.trim()) return null;
+  return value.trim();
 }
 
 /**
@@ -289,11 +303,11 @@ export function mapServiceOrderForPersistence(order: JumpParkServiceOrder): Pers
     entryTime: formatTime(order.entryDateTime),
     exitTime: formatTime(order.exitDateTime),
     orderDate: dateSource ? dateSource.split(" ")[0] : "",
-    plateMasked: maskPlateForPersistence(order.plate),
+    plateMasked: trimmedOrNull(order.plate),
     vehicleModel: order.vehicleModel ?? null,
     vehicleColor: order.vehicleColor ?? null,
     clientName: order.clientName ?? null,
-    clientPhoneMasked: maskPhone(order.clientPhone),
+    clientPhoneMasked: trimmedOrNull(order.clientPhone),
     clientEmail: order.clientEmail ?? null,
     parkingAmount: Number(order.amount ?? 0),
     servicesAmount: Number(order.amountServices ?? 0),

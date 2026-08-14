@@ -34,6 +34,7 @@ import {
 import { nextStatus } from "@/lib/attendance/status";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import { fetchActiveGoal } from "@/lib/goals/service";
+import { resolveCustomerIdentity, resolveVehicleIdentity } from "@/lib/crm/identityResolution";
 
 /**
  * Orquestração do Atendimento Inteligente — único ponto de I/O do módulo. Toda lógica pura
@@ -128,27 +129,95 @@ export interface QuickRegisterInput {
   vehicleColor?: string | null;
 }
 
-/** Cadastro rápido — nunca duplica cliente/veículo já existente por telefone/placa. */
-export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput): Promise<{ customer: Customer; vehicle: Vehicle }> {
+export interface QuickRegisterResult {
+  customer: Customer;
+  vehicle: Vehicle;
+  /**
+   * Missão CRM V2 Final (Parte 6) — clientes já cadastrados que o motor de identidade da Fase 2
+   * (`resolveCustomerIdentity`) classificou como HIGH_CONFIDENCE ou REVIEW contra o novo cadastro.
+   * Só preenchido quando um cliente NOVO foi criado (telefone completo batendo continua
+   * reaproveitando direto via EXACT, sem aviso — mesmo comportamento de antes). INSUFFICIENT e
+   * CONFLICT nunca aparecem aqui: insuficiente não tem o que mostrar, e conflito nunca deve
+   * sugerir fusão (regra explícita da missão). Puramente informativo: nunca bloqueia o cadastro,
+   * nunca funde, não exige autorização do gestor.
+   */
+  possibleDuplicateCustomers: Customer[];
+  /** Mesmo espírito, para veículo, via `resolveVehicleIdentity`. */
+  possibleDuplicateVehicles: Vehicle[];
+}
+
+/**
+ * Filtra candidatos de possível duplicidade de CLIENTE pela classificação do motor da Fase 2 —
+ * só HIGH_CONFIDENCE/REVIEW viram aviso (nunca INSUFFICIENT, nunca CONFLICT). `linkedVehiclePlate`
+ * fica de fora aqui deliberadamente: no momento do cadastro rápido o veículo do candidato ainda
+ * não foi carregado (custaria uma consulta extra por candidato) e nome+telefone já bastam para as
+ * classificações que importam para este aviso.
+ */
+function filterCustomerCandidatesByEngine(target: { name: string; phone: string }, candidates: Customer[]): Customer[] {
+  if (candidates.length === 0) return [];
+  const result = resolveCustomerIdentity(
+    { id: "novo", name: target.name, phone: target.phone },
+    candidates.map((c) => ({ id: c.id, name: c.name, phone: c.phone })),
+  );
+  if (result.classification !== "HIGH_CONFIDENCE" && result.classification !== "REVIEW") return [];
+  const idsToShow = new Set(result.evidenceByCandidate.map((e) => e.candidateId));
+  return candidates.filter((c) => idsToShow.has(c.id));
+}
+
+/** Mesmo espírito de `filterCustomerCandidatesByEngine`, para VEÍCULO via `resolveVehicleIdentity`. */
+function filterVehicleCandidatesByEngine(target: { plate: string; model: string | null }, candidates: Vehicle[]): Vehicle[] {
+  if (candidates.length === 0) return [];
+  const result = resolveVehicleIdentity(
+    { id: "novo", plate: target.plate, model: target.model },
+    candidates.map((v) => ({ id: v.id, plate: v.plate, model: v.model })),
+  );
+  if (result.classification !== "HIGH_CONFIDENCE" && result.classification !== "REVIEW") return [];
+  const idsToShow = new Set(result.evidenceByCandidate.map((e) => e.candidateId));
+  return candidates.filter((v) => idsToShow.has(v.id));
+}
+
+/** Cadastro rápido — nunca duplica cliente/veículo já existente por telefone/placa; quando cria um registro novo, avisa (sem bloquear) se o motor de identidade classificar algum candidato como HIGH_CONFIDENCE/REVIEW. */
+export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput): Promise<QuickRegisterResult> {
   const repo = getAttendanceRepository();
 
   const existingCustomer = await repo.findCustomerByPhone(input.customerPhone);
-  const customer = existingCustomer ?? (await repo.createCustomer({ name: input.customerName, phone: input.customerPhone, cpf: input.customerCpf ?? null }));
+  let possibleDuplicateCustomers: Customer[] = [];
+  let customer: Customer;
+  if (existingCustomer) {
+    customer = existingCustomer;
+  } else {
+    const [byPhone, byName] = await Promise.all([
+      repo.findCustomersByNormalizedPhone(input.customerPhone),
+      repo.findCustomersByNormalizedName(input.customerName),
+    ]);
+    const seen = new Map<string, Customer>();
+    for (const c of [...byPhone, ...byName]) seen.set(c.id, c);
+    possibleDuplicateCustomers = filterCustomerCandidatesByEngine({ name: input.customerName, phone: input.customerPhone }, Array.from(seen.values()));
+    customer = await repo.createCustomer({ name: input.customerName, phone: input.customerPhone, cpf: input.customerCpf ?? null });
+  }
 
   const existingVehicle = await repo.findVehicleByPlate(input.vehiclePlate);
-  const vehicle =
-    existingVehicle && existingVehicle.customerId === customer.id
-      ? existingVehicle
-      : await repo.createVehicle({
-          customerId: customer.id,
-          plate: input.vehiclePlate,
-          brand: input.vehicleBrand ?? null,
-          model: input.vehicleModel ?? null,
-          year: input.vehicleYear ?? null,
-          color: input.vehicleColor ?? null,
-        });
+  let possibleDuplicateVehicles: Vehicle[] = [];
+  let vehicle: Vehicle;
+  if (existingVehicle && existingVehicle.customerId === customer.id) {
+    vehicle = existingVehicle;
+  } else {
+    // Placa já cadastrada em outro cliente é, ela própria, o sinal de aviso (o motor confirmaria
+    // EXACT/HIGH_CONFIDENCE de qualquer forma — evita uma chamada redundante ao motor aqui).
+    possibleDuplicateVehicles = existingVehicle
+      ? [existingVehicle]
+      : filterVehicleCandidatesByEngine({ plate: input.vehiclePlate, model: input.vehicleModel ?? null }, await repo.findVehiclesByNormalizedPlate(input.vehiclePlate));
+    vehicle = await repo.createVehicle({
+      customerId: customer.id,
+      plate: input.vehiclePlate,
+      brand: input.vehicleBrand ?? null,
+      model: input.vehicleModel ?? null,
+      year: input.vehicleYear ?? null,
+      color: input.vehicleColor ?? null,
+    });
+  }
 
-  return { customer, vehicle };
+  return { customer, vehicle, possibleDuplicateCustomers, possibleDuplicateVehicles };
 }
 
 export async function startAttendance(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<ServiceVisit> {

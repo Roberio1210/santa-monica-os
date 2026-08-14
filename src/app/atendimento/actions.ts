@@ -48,12 +48,34 @@ export async function startVisitAction(customerId: string, vehicleId: string, mi
   return { visitId: visit.id, orderId: order.id };
 }
 
+/**
+ * Missão CRM V2 Fase 1 (seção 9/10) — mensagem só informativa sobre possíveis duplicidades
+ * encontradas no cadastro rápido. Nunca impede o cadastro (a visita já foi criada quando isto
+ * roda) e nunca decide fundir nada — só dá ao atendente o que precisa para revisar depois, se
+ * quiser, na tela de Clientes.
+ */
+function buildDuplicateWarning(customer: Awaited<ReturnType<typeof registerQuickCustomerAndVehicle>>): string | null {
+  const parts: string[] = [];
+  if (customer.possibleDuplicateCustomers.length > 0) {
+    const names = customer.possibleDuplicateCustomers.map((c) => c.name).join(", ");
+    parts.push(`possível cliente já cadastrado (${names})`);
+  }
+  if (customer.possibleDuplicateVehicles.length > 0) {
+    const plates = customer.possibleDuplicateVehicles.map((v) => v.plate).join(", ");
+    parts.push(`possível veículo já cadastrado em outro cliente (${plates})`);
+  }
+  return parts.length > 0 ? parts.join("; ") : null;
+}
+
 /** Cadastra cliente/veículo (reaproveitando por telefone/placa quando já existem) e já inicia o atendimento (visita + ordem em `recebido`) — usado na Etapa 2 do wizard para cliente novo ou veículo novo de cliente existente. */
-export async function registerVehicleAndStartVisitAction(input: QuickRegisterInput, mileageAtVisit: number | null): Promise<{ visitId: string; orderId: string }> {
-  const { customer, vehicle } = await registerQuickCustomerAndVehicle(input);
-  const visit = await startAttendance(customer.id, vehicle.id, mileageAtVisit);
+export async function registerVehicleAndStartVisitAction(
+  input: QuickRegisterInput,
+  mileageAtVisit: number | null,
+): Promise<{ visitId: string; orderId: string; duplicateWarning: string | null }> {
+  const result = await registerQuickCustomerAndVehicle(input);
+  const visit = await startAttendance(result.customer.id, result.vehicle.id, mileageAtVisit);
   const order = await startServiceOrder(visit.id);
-  return { visitId: visit.id, orderId: order.id };
+  return { visitId: visit.id, orderId: order.id, duplicateWarning: buildDuplicateWarning(result) };
 }
 
 /** `caption` sempre `null` — registra só a área da foto (estrutura preparada, sem upload real). */

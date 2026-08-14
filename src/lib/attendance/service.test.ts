@@ -25,6 +25,7 @@ import {
   startServiceOrder,
 } from "@/lib/attendance/service";
 import { emptyTechnicalDiagnostic, type TechnicalDiagnosticInput } from "@/lib/attendance/types";
+import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
 
 function saveEmptyDiagnostic(visitId: string, overrides: Partial<TechnicalDiagnosticInput> = {}, observations: string | null = null) {
   const d = { ...emptyTechnicalDiagnostic(), ...overrides };
@@ -61,6 +62,84 @@ describe("registerQuickCustomerAndVehicle", () => {
     const first = await registerQuickCustomerAndVehicle({ customerName: "Cliente B", customerPhone: "48999990003", vehiclePlate: "DDD4E44" });
     const second = await registerQuickCustomerAndVehicle({ customerName: "Cliente B", customerPhone: "48999990003", vehiclePlate: "DDD4E44" });
     expect(second.vehicle.id).toBe(first.vehicle.id);
+  });
+
+  it("sem coincidência nenhuma, não gera nenhum aviso de duplicidade", async () => {
+    const result = await registerQuickCustomerAndVehicle({ customerName: "Cliente Único", customerPhone: "48999990099", vehiclePlate: "ZZZ9Z99" });
+    expect(result.possibleDuplicateCustomers).toEqual([]);
+    expect(result.possibleDuplicateVehicles).toEqual([]);
+  });
+});
+
+describe("registerQuickCustomerAndVehicle — aviso de possível duplicidade (Missão CRM V2 Fase 1, motor da Fase 2 desde a Missão Final)", () => {
+  it("nome igual, mas TELEFONES COMPLETOS DIFERENTES: motor classifica CONFLICT — cria cliente novo (nunca funde por nome) e NÃO avisa, porque telefone completo contraditório é evidência forte de que são pessoas diferentes", async () => {
+    await registerQuickCustomerAndVehicle({ customerName: "Homônimo Teste", customerPhone: "48999991111", vehiclePlate: "HOM1A11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Homônimo Teste", customerPhone: "48999992222", vehiclePlate: "HOM2B22" });
+
+    expect(second.possibleDuplicateCustomers).toEqual([]);
+    // Aviso, nunca fusão: o cliente do segundo cadastro é um registro novo e distinto do primeiro.
+    expect(second.customer.phone).toBe("48999992222");
+  });
+
+  it("cliente antigo com telefone mascarado (ex.: origem JumpPark) retorna com nome igual + telefone completo cujo sufixo bate: motor classifica HIGH_CONFIDENCE — avisa (Missão CRM V2 Final, Parte 6)", async () => {
+    await registerQuickCustomerAndVehicle({ customerName: "Cliente Histórico Mascarado", customerPhone: "*******34", vehiclePlate: "MSK1A11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Cliente Histórico Mascarado", customerPhone: "48999990034", vehiclePlate: "MSK2B22" });
+
+    expect(second.possibleDuplicateCustomers).toHaveLength(1);
+    expect(second.possibleDuplicateCustomers[0]?.name).toBe("Cliente Histórico Mascarado");
+    // Aviso, nunca fusão automática: continua sendo um cadastro novo e distinto.
+    expect(second.customer.phone).toBe("48999990034");
+  });
+
+  it("placa já cadastrada em outro cliente: cria veículo novo mesmo assim (nunca funde por placa) e avisa", async () => {
+    const first = await registerQuickCustomerAndVehicle({ customerName: "Dono Original", customerPhone: "48999993333", vehiclePlate: "PLA1C11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Outro Cliente", customerPhone: "48999994444", vehiclePlate: "PLA1C11" });
+
+    expect(second.possibleDuplicateVehicles).toHaveLength(1);
+    expect(second.possibleDuplicateVehicles[0]?.customerId).toBe(first.customer.id);
+    // Aviso, nunca fusão: o veículo do segundo cadastro pertence ao segundo cliente, não ao primeiro.
+    expect(second.vehicle.customerId).toBe(second.customer.id);
+    expect(second.vehicle.id).not.toBe(first.vehicle.id);
+  });
+
+  it("reaproveitar cliente/veículo existentes (telefone e placa exatos) nunca gera aviso — não há duplicidade real", async () => {
+    const first = await registerQuickCustomerAndVehicle({ customerName: "Retorno Cliente", customerPhone: "48999995555", vehiclePlate: "RET1D11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Retorno Cliente", customerPhone: "48999995555", vehiclePlate: "RET1D11" });
+
+    expect(second.customer.id).toBe(first.customer.id);
+    expect(second.vehicle.id).toBe(first.vehicle.id);
+    expect(second.possibleDuplicateCustomers).toEqual([]);
+    expect(second.possibleDuplicateVehicles).toEqual([]);
+  });
+
+  it("Missão CRM V2 Final, cenário 12 — mesmo cliente com dois carros: ambos os veículos preservados, um nunca sobrescreve o outro", async () => {
+    const first = await registerQuickCustomerAndVehicle({ customerName: "Dois Carros", customerPhone: "48999990120", vehiclePlate: "DUO1A11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Dois Carros", customerPhone: "48999990120", vehiclePlate: "DUO2B22" });
+    expect(second.customer.id).toBe(first.customer.id);
+    expect(second.vehicle.id).not.toBe(first.vehicle.id);
+
+    const vehicles = await getAttendanceRepository().listVehiclesByCustomer(first.customer.id);
+    expect(vehicles.map((v) => v.plate).sort()).toEqual(["DUO1A11", "DUO2B22"]);
+  });
+
+  it("Missão CRM V2 Final, cenário 35 — cliente sem telefone nenhum continua pesquisável por nome/veículo", async () => {
+    await registerQuickCustomerAndVehicle({ customerName: "Cliente Sem Telefone Nenhum", customerPhone: "", vehiclePlate: "SFT1A11", vehicleModel: "Onix" });
+    const byName = await searchCustomersByText("Cliente Sem Telefone Nenhum");
+    expect(byName).toHaveLength(1);
+    const byModel = await searchCustomersByText("Onix");
+    expect(byModel.some((r) => r.customer.name === "Cliente Sem Telefone Nenhum")).toBe(true);
+  });
+
+  it("Missão CRM V2 Final, cenário 36 — histórico preservado: mesmo quando o motor aponta possível duplicidade, nenhum dado do registro anterior é alterado/apagado, e nenhuma fusão acontece", async () => {
+    const first = await registerQuickCustomerAndVehicle({ customerName: "Preserva Histórico", customerPhone: "*******99", vehiclePlate: "HIS1A11" });
+    const second = await registerQuickCustomerAndVehicle({ customerName: "Preserva Histórico", customerPhone: "48999990199", vehiclePlate: "HIS2B22" });
+
+    expect(second.possibleDuplicateCustomers).toHaveLength(1); // avisou...
+    expect(second.customer.id).not.toBe(first.customer.id); // ...mas nunca fundiu.
+
+    const originalStill = await getAttendanceRepository().getCustomer(first.customer.id);
+    expect(originalStill?.name).toBe("Preserva Histórico");
+    expect(originalStill?.phone).toBe("*******99"); // dado original intocado.
   });
 });
 

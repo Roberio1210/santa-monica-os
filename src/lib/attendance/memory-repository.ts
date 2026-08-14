@@ -17,7 +17,7 @@ import type {
   TechnicalRecommendation,
   Vehicle,
 } from "@/lib/attendance/types";
-import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
+import { normalizeName, normalizePhone, normalizePlate } from "@/lib/crm/normalize";
 import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import type { RecentVehicleEntry } from "@/lib/attendance/repository";
@@ -101,6 +101,18 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.customers.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   }
 
+  async findCustomersByNormalizedPhone(phone: string): Promise<Customer[]> {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return [];
+    return Array.from(this.customers.values()).filter((c) => normalizePhone(c.phone) === normalized);
+  }
+
+  async findCustomersByNormalizedName(name: string): Promise<Customer[]> {
+    const normalized = normalizeName(name);
+    if (!normalized) return [];
+    return Array.from(this.customers.values()).filter((c) => normalizeName(c.name)?.toLowerCase() === normalized.toLowerCase());
+  }
+
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
     const normalized = normalizePlate(plate);
     if (!normalized) return null;
@@ -108,6 +120,12 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       if (normalizePlate(v.plate) === normalized) return v;
     }
     return null;
+  }
+
+  async findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]> {
+    const normalized = normalizePlate(plate);
+    if (!normalized) return [];
+    return Array.from(this.vehicles.values()).filter((v) => normalizePlate(v.plate) === normalized);
   }
 
   async getVehicle(id: string): Promise<Vehicle | null> {

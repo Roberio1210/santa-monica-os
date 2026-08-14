@@ -43,11 +43,21 @@ export interface AttendanceRepository {
   searchCustomersByText(query: string): Promise<Customer[]>;
   /** Todos os clientes cadastrados (Missão 25) — usada pelas visões de carteira completa (Clientes sem retorno, Fidelização), nunca paginada implicitamente para não esconder registros. */
   listCustomers(): Promise<Customer[]>;
+  /**
+   * Missão CRM V2 Fase 1 (seção 9/10) — telefone normalizado (dígitos), comparado mesmo quando a
+   * formatação salva difere da digitada agora. Usado só para AVISAR de possível duplicidade antes
+   * de criar um cliente novo — nunca funde, nunca bloqueia o cadastro.
+   */
+  findCustomersByNormalizedPhone(phone: string): Promise<Customer[]>;
+  /** Mesmo espírito de `findCustomersByNormalizedPhone`, mas por nome normalizado — sinal fraco (nome não é identificador único), só para aviso. */
+  findCustomersByNormalizedName(name: string): Promise<Customer[]>;
 
   findVehicleByPlate(plate: string): Promise<Vehicle | null>;
   getVehicle(id: string): Promise<Vehicle | null>;
   listVehiclesByCustomer(customerId: string): Promise<Vehicle[]>;
   createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
+  /** Placa normalizada (maiúscula, sem espaço), comparada mesmo quando a formatação salva difere — só para aviso de possível duplicidade, nunca funde/bloqueia. */
+  findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]>;
 
   createServiceVisit(input: { customerId: string; vehicleId: string; mileageAtVisit: number | null }): Promise<ServiceVisit>;
   getServiceVisit(id: string): Promise<ServiceVisit | null>;

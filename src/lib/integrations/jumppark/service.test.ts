@@ -69,9 +69,11 @@ describe("mapServiceOrderForPersistence", () => {
     expect(result.externalId).toBe("abc-123");
     expect(result.vehicleColor).toBe("PRATA");
     expect(result.clientEmail).toBe("maria@example.com");
-    expect(result.plateMasked).not.toBe("ABC1D23");
-    expect(result.plateMasked).not.toBeNull();
-    expect(result.clientPhoneMasked).not.toBe("48999998888");
+    // Missão CRM V2 Fase 1 — decisão do gestor: a persistência para de mascarar (a auditoria
+    // confirmou que a origem já entrega o valor completo; o mascaramento sempre foi só do nosso
+    // código). `mapOperationOrders` (exibição, teste acima) continua mascarando normalmente.
+    expect(result.plateMasked).toBe("ABC1D23");
+    expect(result.clientPhoneMasked).toBe("48999998888");
     expect(result.situationId).toBe(2);
     expect(result.financialSituationId).toBe(3);
     expect(result.discountAmount).toBe(10);

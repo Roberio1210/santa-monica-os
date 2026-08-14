@@ -94,6 +94,7 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
   for (const c of aggregation.customers) {
     const values = {
       name: c.name,
+      phone: c.phone,
       totalSpent: String(c.totalSpent),
       lastVisit: c.lastVisitAt,
       firstVisitAt: c.firstVisitAt,
@@ -122,6 +123,7 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
     }
     const values = {
       customerId: ownerId,
+      plate: v.plate,
       model: v.model,
       firstSeenAt: v.firstSeenAt,
       lastSeenAt: v.lastSeenAt,

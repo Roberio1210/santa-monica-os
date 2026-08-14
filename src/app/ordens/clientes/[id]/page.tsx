@@ -8,6 +8,13 @@ import { fetchCustomerById } from "@/lib/integrations/jumppark/customersQuery";
 import { fetchCustomerServiceProfileById } from "@/lib/integrations/jumppark/customerServiceProfile";
 import { CUSTOMER_STATUS_LABEL } from "@/lib/crm-intelligente/types";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
+import { deriveCustomerIdentityBasis } from "@/lib/crm/identityEvidence";
+
+const identityBasisLabel: Record<string, string> = {
+  telefone: "Telefone",
+  veiculo_sem_telefone: "Veículo (sem telefone informado na origem)",
+  sem_evidencia: "Sem evidência forte — só nome",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +45,17 @@ const identityConfidenceVariant: Record<string, "outline" | "positive" | "warnin
 function maskedPlateFromExternalId(externalId: string | null): string | null {
   if (!externalId?.startsWith("plate:")) return null;
   return externalId.slice("plate:".length);
+}
+
+/**
+ * Missão CRM V2 Final (Parte 9) — prioriza a placa completa (`vehicles.plate`, populada só para
+ * sincronizações a partir da Missão CRM V2 Fase 1) sobre a mascarada histórica em `externalId`.
+ * Registros antigos (sem sincronização nova) continuam mostrando a máscara — nunca inventa o dado
+ * completo que a base ainda não tem.
+ */
+function displayPlate(plate: string | null, externalId: string | null): { value: string | null; isFull: boolean } {
+  if (plate) return { value: plate, isFull: true };
+  return { value: maskedPlateFromExternalId(externalId), isFull: false };
 }
 
 function Field({ label, value }: { label: string; value: string | null }) {
@@ -76,6 +94,8 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 pt-0 sm:grid-cols-3">
           <Field label="Nome" value={customer.name} />
+          <Field label="Telefone" value={customer.phone} />
+          <Field label="Identificação principal" value={identityBasisLabel[deriveCustomerIdentityBasis(customer.phone, vehicles.length > 0)]} />
           <div>
             <p className="text-xs text-foreground-subtle">Status</p>
             <Badge variant={statusVariant[status] ?? "outline"}>{CUSTOMER_STATUS_LABEL[status]}</Badge>
@@ -128,32 +148,38 @@ export default async function ClienteJumpParkDetailPage({ params }: { params: Pr
                 <thead>
                   <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
                     <th className="pb-2 pr-3 font-medium">Modelo</th>
-                    <th className="pb-2 pr-3 font-medium">Placa (mascarada)</th>
+                    <th className="pb-2 pr-3 font-medium">Placa</th>
                     <th className="pb-2 pr-3 font-medium">Visitas</th>
                     <th className="pb-2 pr-3 font-medium">Primeira vez</th>
                     <th className="pb-2 font-medium">Última vez</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {vehicles.map((v) => (
-                    <tr key={v.id} className="border-b border-border-subtle last:border-0">
-                      <td className="py-2 pr-3 text-foreground-muted">
-                        <Link href={`/ordens/veiculos/${v.id}`} className="hover:text-accent">
-                          {v.model ?? NOT_INFORMED}
-                        </Link>
-                      </td>
-                      <td className="py-2 pr-3 font-mono text-xs text-foreground-subtle">{maskedPlateFromExternalId(v.externalId) ?? "—"}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{v.visitCount ?? 0}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{v.firstSeenAt ? formatDateBR(v.firstSeenAt) : "—"}</td>
-                      <td className="py-2 text-foreground-muted">{v.lastSeenAt ? formatDateBR(v.lastSeenAt) : "—"}</td>
-                    </tr>
-                  ))}
+                  {vehicles.map((v) => {
+                    const plate = displayPlate(v.plate, v.externalId);
+                    return (
+                      <tr key={v.id} className="border-b border-border-subtle last:border-0">
+                        <td className="py-2 pr-3 text-foreground-muted">
+                          <Link href={`/ordens/veiculos/${v.id}`} className="hover:text-accent">
+                            {v.model ?? NOT_INFORMED}
+                          </Link>
+                        </td>
+                        <td className={`py-2 pr-3 font-mono text-xs ${plate.isFull ? "text-foreground" : "text-foreground-subtle"}`}>
+                          {plate.value ?? "—"}
+                          {!plate.isFull && plate.value ? <span className="ml-1 italic text-foreground-subtle">(mascarada, histórico)</span> : null}
+                        </td>
+                        <td className="py-2 pr-3 text-foreground-muted">{v.visitCount ?? 0}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{v.firstSeenAt ? formatDateBR(v.firstSeenAt) : "—"}</td>
+                        <td className="py-2 text-foreground-muted">{v.lastSeenAt ? formatDateBR(v.lastSeenAt) : "—"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
           <p className="mt-3 text-xs text-foreground-subtle">
-            A JumpPark só fornece a placa mascarada nesta integração — o identificador do veículo usa a máscara, nunca a placa completa.
+            Placa completa disponível a partir de sincronizações realizadas após a Missão CRM V2 Fase 1 — veículos ainda não ressincronizados continuam mostrando a máscara histórica (2 primeiros + 2 últimos caracteres).
           </p>
         </CardContent>
       </Card>

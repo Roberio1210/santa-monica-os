@@ -43,10 +43,13 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
   const [data, setData] = useState<WizardData>(INITIAL_DATA);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  /** Missão CRM V2 Fase 1 — aviso informativo de possível duplicidade (nunca bloqueia o fluxo). */
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const step: WizardStep = WIZARD_STEPS[stepIndex];
 
   function goBack() {
     setError(null);
+    setDuplicateWarning(null);
     if (stepIndex > 0) {
       setStepIndex((i) => i - 1);
     } else {
@@ -58,6 +61,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
     const customer = data.customer;
     if (!customer || !vehicle) return;
     setError(null);
+    setDuplicateWarning(null);
     startTransition(async () => {
       const mileageAtVisit = data.mileage.trim() ? Number(data.mileage.trim()) : null;
 
@@ -87,7 +91,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
       const customerCpf = customer.kind === "new" ? customer.cpf || null : null;
 
       try {
-        const { visitId, orderId } = await registerVehicleAndStartVisitAction(
+        const { visitId, orderId, duplicateWarning: warning } = await registerVehicleAndStartVisitAction(
           {
             customerName,
             customerPhone,
@@ -100,6 +104,7 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
           },
           mileageAtVisit,
         );
+        setDuplicateWarning(warning);
         setData((prev) => ({
           ...prev,
           vehicle,
@@ -157,6 +162,9 @@ export function NewAttendanceWizard({ initialCustomer, serviceCatalog }: { initi
 
       <div className="space-y-4 px-4 pb-24 pt-4">
         {error ? <p className="text-sm text-critical">{error}</p> : null}
+        {duplicateWarning ? (
+          <p className="rounded-lg bg-warning-bg px-3 py-2 text-sm text-warning">Atenção: {duplicateWarning}. Cadastro concluído normalmente — revise em Clientes se necessário.</p>
+        ) : null}
         {isPending && (step === "veiculo" || step === "diagnostico") ? <p className="text-sm text-foreground-subtle">Salvando...</p> : null}
 
         {step === "cliente" ? (

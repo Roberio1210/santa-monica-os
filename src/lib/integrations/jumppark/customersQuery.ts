@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, ilike, inArray, lte, sql as sqlOp } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql as sqlOp } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { customers, vehicles } from "@/db/schema/crm";
@@ -7,6 +7,7 @@ import { jumpParkServiceOrders } from "@/db/schema/jumppark";
 import { computeCustomerStatus, VIP_VISIT_THRESHOLD, RECORRENTE_VISIT_THRESHOLD, VIP_MAX_INACTIVITY_DAYS, AT_RISK_CUSTOMER_DAYS, LOST_CUSTOMER_DAYS } from "@/lib/crm-intelligente/profile";
 import type { CustomerStatus } from "@/lib/crm-intelligente/types";
 import { CUSTOMER_SEGMENT_KEYS, isReactivatedInPeriod, type CustomerSegmentKey } from "@/lib/integrations/jumppark/customerSegments";
+import { buildCustomerSearchTerms } from "@/lib/integrations/jumppark/customerSearch";
 import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
@@ -77,6 +78,10 @@ export interface CustomerListItem {
   /** Missão 28 — nível de confiança do vínculo de identidade (ver `src/db/schema/crm.ts`, `identityConfidenceEnum`). */
   identityConfidence: string;
   identityConfidenceReason: string | null;
+  /** Missão CRM V2 Final (Parte 9) — telefone completo quando disponível (nunca inventa/mascara aqui: mostra o que existe, `null` quando ausente). */
+  phone: string | null;
+  /** Placa do veículo mais recente do cliente — ajuda a diferenciar homônimos direto na listagem, sem abrir o detalhe. `null` quando o cliente não tem veículo. */
+  primaryVehiclePlate: string | null;
 }
 
 export interface CustomersQueryResult {
@@ -88,7 +93,7 @@ export interface CustomersQueryResult {
   databaseConfigured: boolean;
 }
 
-function toListItem(row: typeof customers.$inferSelect & { vehicleCount: number }, now: Date): CustomerListItem {
+function toListItem(row: typeof customers.$inferSelect & { vehicleCount: number; primaryVehiclePlate: string | null }, now: Date): CustomerListItem {
   const visitCount = row.visitCount ?? 0;
   const daysSinceLastVisit = row.lastVisit ? daysBetween(row.lastVisit, now) : null;
   const { status, reason } = computeCustomerStatus({ visitCount, daysSinceLastVisit });
@@ -108,6 +113,8 @@ function toListItem(row: typeof customers.$inferSelect & { vehicleCount: number 
     statusReason: reason,
     identityConfidence: row.identityConfidence,
     identityConfidenceReason: row.identityConfidenceReason,
+    phone: row.phone,
+    primaryVehiclePlate: row.primaryVehiclePlate,
   };
 }
 
@@ -154,6 +161,46 @@ function vehicleCountSql() {
   return sqlOp<number>`(select count(*)::int from "vehicles" "v" where "v"."customer_id" = "customers"."id")`;
 }
 
+/** Placa do veículo mais recentemente visto do cliente (Missão CRM V2 Final, Parte 9) — mesmo padrão de identificador em texto puro de `vehicleCountSql()`, mesmo motivo. */
+function primaryVehiclePlateSql() {
+  return sqlOp<string | null>`(select "pv"."plate" from "vehicles" "pv" where "pv"."customer_id" = "customers"."id" order by "pv"."last_seen_at" desc nulls last limit 1)`;
+}
+
+/**
+ * Missão CRM V2 Fase 1 — busca inteligente num único campo: nome (ILIKE), telefone completo/parcial
+ * (dígitos normalizados, comparados via `regexp_replace` — sem precisar de coluna normalizada
+ * persistida nem migration) e placa completa/parcial do(s) veículo(s) do cliente (idem, via
+ * `EXISTS` correlacionado). Nunca decide identidade — só amplia o que a busca encontra; a decisão
+ * de "é a mesma pessoa" continua sempre humana (ver `buildCustomerSearchTerms`).
+ *
+ * Identificadores em texto puro (mesmo padrão documentado em `vehicleCountSql()`, mesmo motivo:
+ * evitar o bug real e já comprovado de qualificador removido pelo Drizzle ao combinar subquery
+ * correlacionada com `getTableColumns(customers)` no mesmo `select()`).
+ */
+function buildCustomerSearchCondition(query: string) {
+  const terms = buildCustomerSearchTerms(query);
+  const parts = [sqlOp`"customers"."name" ilike ${`%${terms.raw}%`}`];
+
+  if (terms.phoneDigits) {
+    // '\\D' (barra dupla): dentro de um template literal JS, '\D' cru vira 'D' — a barra é
+    // descartada por ser um escape não reconhecido (comprovado empiricamente na Missão CRM V2
+    // Fase 2 rodando esta query contra o Postgres real: virava regexp_replace(..., 'D', ...),
+    // removendo a letra D em vez de dígitos não-numéricos). Barra dupla garante que o Postgres
+    // receba o regex `\D` de verdade.
+    parts.push(sqlOp`regexp_replace(coalesce("customers"."phone", ''), '\\D', '', 'g') like ${`%${terms.phoneDigits}%`}`);
+  }
+  if (terms.platePattern) {
+    parts.push(
+      sqlOp`exists (select 1 from "vehicles" "sv" where "sv"."customer_id" = "customers"."id" and upper(replace(replace(coalesce("sv"."plate", ''), ' ', ''), '-', '')) like ${`%${terms.platePattern}%`})`,
+    );
+  }
+  if (terms.raw) {
+    parts.push(sqlOp`exists (select 1 from "vehicles" "sm" where "sm"."customer_id" = "customers"."id" and coalesce("sm"."model", '') ilike ${`%${terms.raw}%`})`);
+  }
+
+  return sqlOp`(${sqlOp.join(parts, sqlOp` or `)})`;
+}
+
 export async function fetchCustomers(filters: CustomersQueryFilters): Promise<CustomersQueryResult> {
   if (!isDatabaseConfigured()) {
     return { items: [], total: 0, page: 1, pageSize: filters.pageSize, pageCount: 0, databaseConfigured: false };
@@ -162,7 +209,7 @@ export async function fetchCustomers(filters: CustomersQueryFilters): Promise<Cu
   if (!db) return { items: [], total: 0, page: 1, pageSize: filters.pageSize, pageCount: 0, databaseConfigured: false };
 
   const conditions = [eq(customers.source, "jumppark")];
-  if (filters.nameQuery) conditions.push(ilike(customers.name, `%${filters.nameQuery}%`));
+  if (filters.nameQuery) conditions.push(buildCustomerSearchCondition(filters.nameQuery));
 
   const today = saoPauloDateISO();
   switch (filters.segment) {
@@ -213,7 +260,7 @@ export async function fetchCustomers(filters: CustomersQueryFilters): Promise<Cu
 
   const [rows, totalRows] = await Promise.all([
     db
-      .select({ ...getTableColumns(customers), vehicleCount: vehicleCountSql() })
+      .select({ ...getTableColumns(customers), vehicleCount: vehicleCountSql(), primaryVehiclePlate: primaryVehiclePlateSql() })
       .from(customers)
       .where(where)
       .orderBy(orderFn(sortColumn))

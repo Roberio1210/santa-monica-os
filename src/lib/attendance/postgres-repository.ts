@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, ilike, inArray, ne, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { customers, diagnosticPhotos, diagnostics, serviceOrderItems, serviceOrders, serviceVisits, services, technicalRecommendations, vehicles } from "@/db/schema";
 import type { AttendanceRepository, ServiceCatalogEntry } from "@/lib/attendance/repository";
@@ -26,7 +26,7 @@ import type {
   Vehicle,
   WheelsAssessment,
 } from "@/lib/attendance/types";
-import { normalizePhone, normalizePlate } from "@/lib/crm/normalize";
+import { normalizeName, normalizePhone, normalizePlate } from "@/lib/crm/normalize";
 import { SEARCH_RESULT_LIMIT } from "@/lib/attendance/search";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import type { RecentVehicleEntry } from "@/lib/attendance/repository";
@@ -169,12 +169,55 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toCustomer);
   }
 
+  /**
+   * Compara telefone por dígitos direto no SQL — pega o caso em que a formatação salva difere da
+   * digitada agora (`eq()` de `findCustomerByPhone` não pega). Só aviso, nunca funde.
+   * `'\\D'` (barra dupla): dentro de um template literal JS, `'\D'` cru vira `'D'` — a barra é
+   * descartada por ser um escape não reconhecido (bug real, comprovado empiricamente na Missão
+   * CRM V2 Fase 2 ao rodar esta classe de query contra o Postgres real). Barra dupla garante que
+   * o Postgres receba o regex `\D` de verdade.
+   */
+  async findCustomersByNormalizedPhone(phone: string): Promise<Customer[]> {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return [];
+    const rows = await this.db()
+      .select()
+      .from(customers)
+      .where(sql`regexp_replace(coalesce(${customers.phone}, ''), '\\D', '', 'g') = ${normalized}`)
+      .limit(5);
+    return rows.map(toCustomer);
+  }
+
+  /** Nome normalizado (trim + espaços colapsados + minúsculo) — sinal fraco, só aviso; nome nunca funde cliente sozinho. Mesma barra dupla do método acima, mesmo motivo (`\\s`). */
+  async findCustomersByNormalizedName(name: string): Promise<Customer[]> {
+    const normalized = normalizeName(name);
+    if (!normalized) return [];
+    const rows = await this.db()
+      .select()
+      .from(customers)
+      .where(sql`lower(regexp_replace(trim(${customers.name}), '\\s+', ' ', 'g')) = ${normalized.toLowerCase()}`)
+      .limit(5);
+    return rows.map(toCustomer);
+  }
+
   async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
     const normalized = normalizePlate(plate);
     if (!normalized) return null;
     const rows = await this.db().select().from(vehicles).where(eq(vehicles.plate, plate)).limit(5);
     const match = rows.find((r) => normalizePlate(r.plate) === normalized);
     return match ? toVehicle(match) : null;
+  }
+
+  /** Placa normalizada direto no SQL — mesmo espírito de `findCustomersByNormalizedPhone`, só aviso. */
+  async findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]> {
+    const normalized = normalizePlate(plate);
+    if (!normalized) return [];
+    const rows = await this.db()
+      .select()
+      .from(vehicles)
+      .where(sql`upper(replace(coalesce(${vehicles.plate}, ''), ' ', '')) = ${normalized}`)
+      .limit(5);
+    return rows.map(toVehicle);
   }
 
   async getVehicle(id: string): Promise<Vehicle | null> {

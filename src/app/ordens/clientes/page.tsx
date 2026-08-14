@@ -173,6 +173,7 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                 <thead>
                   <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
                     <th className="pb-2 pr-3 font-medium">Cliente</th>
+                    <th className="pb-2 pr-3 font-medium">Telefone</th>
                     <th className="pb-2 pr-3 font-medium">Status</th>
                     <th className="pb-2 pr-3 font-medium">Identidade</th>
                     <th className="pb-2 pr-3 font-medium">
@@ -190,7 +191,6 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                         Última visita {filters.sortBy === "lastVisit" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
                       </Link>
                     </th>
-                    <th className="pb-2 pr-3 font-medium">Dias sem retornar</th>
                     <th className="pb-2 pr-3 font-medium">
                       <Link href={sortLink("totalSpent")} className="hover:text-accent">
                         Total gasto {filters.sortBy === "totalSpent" ? (filters.sortDir === "asc" ? "↑" : "↓") : ""}
@@ -211,6 +211,8 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                           {c.name ?? "Não informado pela fonte"}
                         </Link>
                       </td>
+                      {/* Missão CRM V2 Final (Parte 9) — telefone/placa ajudam a diferenciar homônimos direto na lista, sem abrir cada detalhe. */}
+                      <td className="py-2 pr-3 text-foreground-muted">{c.phone ?? "—"}</td>
                       <td className="py-2 pr-3">
                         <Badge variant={statusVariant[c.status] ?? "outline"}>{CUSTOMER_STATUS_LABEL[c.status]}</Badge>
                       </td>
@@ -218,9 +220,11 @@ export default async function ClientesJumpParkPage({ searchParams }: { searchPar
                         <Badge variant={identityConfidenceVariant[c.identityConfidence] ?? "outline"}>{identityConfidenceLabel[c.identityConfidence] ?? c.identityConfidence}</Badge>
                       </td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.visitCount}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{c.vehicleCount}</td>
+                      <td className="py-2 pr-3 text-foreground-muted">
+                        {c.vehicleCount}
+                        {c.primaryVehiclePlate ? <span className="text-foreground-subtle"> ({c.primaryVehiclePlate})</span> : null}
+                      </td>
                       <td className="py-2 pr-3 text-foreground-muted">{c.lastVisit ? formatDateBR(c.lastVisit) : "—"}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{c.daysSinceLastVisit ?? "—"}</td>
                       <td className="py-2 pr-3 font-medium text-foreground">{formatCurrency(c.totalSpent)}</td>
                       <td className="py-2 text-foreground-muted">{formatCurrency(c.averageTicket)}</td>
                     </tr>
