@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeItemYield } from "@/lib/inventory/yield";
+import { computeItemYield, computeManagerialYield, pickRecipeReference } from "@/lib/inventory/yield";
 import type { StockMovement } from "@/lib/inventory/types";
 import type { Recipe } from "@/lib/recipes/types";
 
@@ -45,6 +45,15 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
     notes: null,
     technicalReferenceQuantity: null,
     technicalReferenceSource: null,
+    usageType: null,
+    technicalFunction: null,
+    informationSource: null,
+    dilutionBasis: null,
+    managerialBaselineQuantity: null,
+    managerialTolerancePercentage: null,
+    managerialBaselineSource: null,
+    managerialBaselineSince: null,
+    managerialSizeAdjustmentApplicable: false,
     ...overrides,
   };
 }
@@ -109,5 +118,90 @@ describe("computeItemYield — rendimento de estoque (Automação JumpPark → C
     expect(result.consumption30d).toBe(300);
     expect(result.avgDailyConsumption).toBe(10);
     expect(result.forecastDays).toBe(60);
+  });
+});
+
+describe("pickRecipeReference — Missão do Modelo de Consumo Médio Gerencial V1 (tier 'gerencial')", () => {
+  it("gerencial quando há baseline gerencial mas nenhuma amostra real e nenhuma referência técnica", () => {
+    const result = pickRecipeReference(recipe({ managerialBaselineQuantity: 125, sampleCount: 0, technicalReferenceQuantity: null }));
+    expect(result).toEqual({ value: 125, confidence: "gerencial" });
+  });
+
+  it("gerencial vence tecnico quando os dois existem mas nenhuma calibração real existe", () => {
+    const result = pickRecipeReference(recipe({ managerialBaselineQuantity: 125, technicalReferenceQuantity: 50, sampleCount: 0 }));
+    expect(result).toEqual({ value: 125, confidence: "gerencial" });
+  });
+
+  it("em_calibracao vence gerencial quando há amostra real, mesmo que baseline gerencial também exista", () => {
+    const result = pickRecipeReference(recipe({ status: "em_calibracao", quantityPerService: 30, sampleCount: 3, managerialBaselineQuantity: 125, technicalReferenceQuantity: 50 }));
+    expect(result).toEqual({ value: 30, confidence: "em_calibracao" });
+  });
+
+  it("calibrado vence gerencial quando a receita está aprovada, mesmo que baseline gerencial também exista", () => {
+    const result = pickRecipeReference(recipe({ status: "aprovada", quantityPerService: 20, sampleCount: 8, managerialBaselineQuantity: 125, technicalReferenceQuantity: 50 }));
+    expect(result).toEqual({ value: 20, confidence: "calibrado" });
+  });
+
+  it("uma receita pode possuir technicalReferenceQuantity + managerialBaselineQuantity + quantityPerService simultaneamente — prioridade calibrado > em_calibracao > gerencial > tecnico, nenhum trilho é apagado pelos outros", () => {
+    const full = recipe({
+      status: "aprovada",
+      quantityPerService: 20,
+      sampleCount: 8,
+      managerialBaselineQuantity: 125,
+      managerialTolerancePercentage: 25,
+      technicalReferenceQuantity: 50,
+      technicalReferenceSource: "referência técnica antiga",
+    });
+    // os três trilhos continuam presentes no objeto — a função só ESCOLHE qual usar, nunca apaga os outros.
+    expect(full.technicalReferenceQuantity).toBe(50);
+    expect(full.managerialBaselineQuantity).toBe(125);
+    expect(full.quantityPerService).toBe(20);
+    expect(pickRecipeReference(full)).toEqual({ value: 20, confidence: "calibrado" });
+
+    // mesma receita, sem status aprovada nem amostra (simulando antes da calibração real chegar) — gerencial vence tecnico.
+    const semCalibracaoReal = recipe({ ...full, status: "rascunho", quantityPerService: null, sampleCount: 0 });
+    expect(pickRecipeReference(semCalibracaoReal)).toEqual({ value: 125, confidence: "gerencial" });
+  });
+
+  it("tecnico quando só há referência técnica, sem baseline gerencial e sem amostra real", () => {
+    const result = pickRecipeReference(recipe({ technicalReferenceQuantity: 50, sampleCount: 0, managerialBaselineQuantity: null }));
+    expect(result).toEqual({ value: 50, confidence: "tecnico" });
+  });
+
+  it("null quando a receita está suspensa, mesmo com baseline gerencial configurado", () => {
+    const result = pickRecipeReference(recipe({ status: "suspensa", managerialBaselineQuantity: 125 }));
+    expect(result).toBeNull();
+  });
+
+  it("computeItemYield usa o baseline gerencial (confidence='gerencial') quando é a melhor referência disponível", () => {
+    const result = computeItemYield({ currentQuantity: 500, unit: "ml" }, [], [recipe({ managerialBaselineQuantity: 10 })], TODAY);
+    expect(result.confidence).toBe("gerencial");
+    expect(result.technicalConsumption).toBe(10);
+    expect(result.estimatedServicesRemaining).toBe(50);
+  });
+});
+
+describe("computeManagerialYield — Missão do Modelo de Consumo Médio Gerencial V1, seção 6", () => {
+  it("exemplo da missão: V-Floc, embalagem de 500 ml e baseline de 10 ml/serviço → 50 serviços", () => {
+    const result = computeManagerialYield(500, 10);
+    expect(result.expectedServicesPerPackage).toBe(50);
+    expect(result.label).toBe("RENDIMENTO GERENCIAL ESTIMADO");
+  });
+
+  it("null quando packageCapacity é desconhecido — nunca inventa", () => {
+    const result = computeManagerialYield(null, 10);
+    expect(result.expectedServicesPerPackage).toBeNull();
+  });
+
+  it("null quando managerialBaselineQuantity é desconhecido — nunca inventa", () => {
+    const result = computeManagerialYield(500, null);
+    expect(result.expectedServicesPerPackage).toBeNull();
+  });
+
+  it("arredonda para baixo (rendimento nunca otimista)", () => {
+    const result = computeManagerialYield(100, 4);
+    expect(result.expectedServicesPerPackage).toBe(25);
+    const result2 = computeManagerialYield(100, 3);
+    expect(result2.expectedServicesPerPackage).toBe(33);
   });
 });

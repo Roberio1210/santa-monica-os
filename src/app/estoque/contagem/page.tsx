@@ -3,13 +3,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { CalculationNote } from "@/components/shared/calculation-note";
 import { StocktakeView } from "@/components/inventory/stocktake-view";
+import { QuickCountView, type QuickCountItem } from "@/components/inventory/quick-count-view";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { generateStocktakeReference } from "@/lib/inventory/stocktake";
 import { toItemView } from "@/lib/inventory/status";
 import { deriveStocktakeSessions } from "@/lib/inventory/stockAnalytics";
 import { fetchPeriodComparison, detectPersistentDeviation, type PeriodComparison } from "@/lib/inventory/calibration-comparison";
+import { groupReliableCountsByItem, classifyReliableCountStatus } from "@/lib/inventory/managerial-physical-count";
+import { fetchManagerialRecipesByItem } from "@/lib/inventory/managerial-consumption-analysis";
+import { countPendingPurchaseLines } from "@/lib/inventory/purchase-import-service";
 import { Badge } from "@/components/ui/badge";
 import { formatDateBR } from "@/lib/utils/format";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +22,34 @@ export const dynamic = "force-dynamic";
 const SESSIONS_WITH_COMPARISON = 5;
 
 export default async function ContagemPage() {
-  const [rawItems, allMovements] = await Promise.all([getInventoryRepository().listItems(), getInventoryRepository().listMovements()]);
+  const [rawItems, allMovements, { recipesByItem }, pendingPurchaseLines] = await Promise.all([
+    getInventoryRepository().listItems(),
+    getInventoryRepository().listMovements(),
+    fetchManagerialRecipesByItem(),
+    countPendingPurchaseLines(),
+  ]);
   const items = rawItems.map(toItemView).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const itemById = new Map(items.map((i) => [i.id, i]));
+
+  // Missão de UI Operacional de Contagem V1 — "prioritário" é resolvido pelos produtos reais que
+  // já têm baseline gerencial (Bronze/Silver/Gold), nunca por uma lista de nomes hardcoded.
+  const priorityItemIds = new Set(recipesByItem.keys());
+  const reliableCountsByItem = groupReliableCountsByItem(allMovements);
+  const today = saoPauloDateISO();
+
+  const quickCountItems: QuickCountItem[] = items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    brand: item.brand,
+    currentQuantity: item.currentQuantity,
+    unit: item.unit,
+    packageCapacity: item.packageCapacity,
+    classification: item.classification,
+    quantityStatus: item.quantityStatus,
+    category: item.category,
+    isPriority: priorityItemIds.has(item.id),
+    countStatus: classifyReliableCountStatus(reliableCountsByItem.get(item.id) ?? { latest: null, previous: null }),
+  }));
 
   const reference = generateStocktakeReference();
   const sessions = deriveStocktakeSessions(allMovements, itemById).filter((s) => s.type === "correcao_inventario");
@@ -57,6 +87,17 @@ export default async function ContagemPage() {
         title="Contagem física"
         description="Compare o saldo teórico com a contagem física real. Cada divergência confirmada vira uma movimentação de correção — o saldo nunca é sobrescrito diretamente."
       />
+
+      {pendingPurchaseLines > 0 ? (
+        <Card className="border-warning/30 bg-warning-bg/10">
+          <CardContent className="pt-6 text-sm text-foreground-muted">
+            Existem compras pendentes de classificação que podem afetar o estoque. Quantidade: <span className="font-medium text-foreground">{pendingPurchaseLines}</span>.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <QuickCountView items={quickCountItems} today={today} />
+
       <StocktakeView items={items} reference={reference} />
 
       <Card>

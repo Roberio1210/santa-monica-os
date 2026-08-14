@@ -140,9 +140,52 @@ export class PostgresInventoryRepository implements InventoryRepository {
     });
   }
 
+  /**
+   * Missão de Consolidação da Contagem de Estoque V1 — registra uma posição física confiável
+   * (movimento `correcao_inventario` absoluto + `currentQuantity`/`lastCountDate`/
+   * `quantityStatus` do item) numa ÚNICA transação. Existe porque `recordMovement` +
+   * `updateItemDetails`, chamados em sequência como duas operações separadas, deixavam uma janela
+   * real (ainda que estreita) em que o movimento poderia ser persistido e a atualização do item
+   * falhar depois — risco relatado explicitamente na missão anterior. Reaproveita o mesmo padrão
+   * `db.transaction` já usado em `recordMovement`, nunca um framework novo.
+   */
+  async recordPhysicalCount(input: { itemId: string; countedQuantity: number; date: string; responsible: string; reference: string | null; notes: string | null }): Promise<StockMovement> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, input.itemId)).limit(1);
+      if (!item) throw new Error(`Item de estoque não encontrado: ${input.itemId}`);
+
+      const previousBalance = Number(item.currentQuantity);
+      const newBalance = applyMovementDelta(previousBalance, "correcao_inventario", input.countedQuantity);
+
+      await tx
+        .update(inventoryItems)
+        .set({ currentQuantity: String(newBalance), lastCountDate: input.date, quantityStatus: "confirmed", updatedAt: new Date() })
+        .where(eq(inventoryItems.id, input.itemId));
+
+      const [inserted] = await tx
+        .insert(inventoryMovements)
+        .values({
+          itemId: input.itemId,
+          type: "correcao_inventario",
+          quantity: String(input.countedQuantity),
+          unit: item.unit as InventoryUnit,
+          date: input.date,
+          notes: input.notes,
+          responsible: input.responsible,
+          reference: input.reference,
+          previousBalance: String(previousBalance),
+          newBalance: String(newBalance),
+        })
+        .returning();
+
+      return toMovement(inserted);
+    });
+  }
+
   async updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
   ): Promise<InventoryItem> {
     const values: Partial<typeof inventoryItems.$inferInsert> = { updatedAt: new Date() };
     if ("supplier" in patch) values.supplier = patch.supplier ?? null;
@@ -156,6 +199,8 @@ export class PostgresInventoryRepository implements InventoryRepository {
     if ("name" in patch && patch.name !== undefined) values.name = patch.name;
     if ("brand" in patch && patch.brand !== undefined) values.brand = patch.brand;
     if ("category" in patch && patch.category !== undefined) values.category = patch.category;
+    if ("lastCountDate" in patch && patch.lastCountDate !== undefined) values.lastCountDate = patch.lastCountDate;
+    if ("quantityStatus" in patch && patch.quantityStatus !== undefined) values.quantityStatus = patch.quantityStatus;
 
     const [row] = await this.db().update(inventoryItems).set(values).where(eq(inventoryItems.id, id)).returning();
     if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);

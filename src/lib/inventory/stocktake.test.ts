@@ -3,7 +3,7 @@ import { confirmStocktake } from "@/lib/inventory/stocktake";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 
 describe("confirmStocktake (modo memória — 48 itens reais da contagem de 10/07/2026)", () => {
-  it("gera correcao_inventario só para itens com divergência real; sem divergência não gera nada", async () => {
+  it("Missão de Consolidação da Contagem de Estoque V1, seção 4 — gera correcao_inventario para TODO item efetivamente contado, mesmo sem divergência (uma contagem sem diferença ainda é uma posição física confiável)", async () => {
     const repo = getInventoryRepository();
     const unchanged = await repo.getItem("makker-vonixx");
     if (!unchanged) throw new Error("fixture ausente");
@@ -13,10 +13,12 @@ describe("confirmStocktake (modo memória — 48 itens reais da contagem de 10/0
       { itemId: "sio2-pro-vonixx", physicalQuantity: 999, notFound: false, measurementPending: false, observation: "divergência de teste" },
     ]);
 
-    expect(result.unchangedCount).toBe(1);
-    expect(result.movements).toHaveLength(1);
-    expect(result.movements[0].itemId).toBe("sio2-pro-vonixx");
-    expect(result.movements[0].newBalance).toBe(999);
+    expect(result.unchangedCount).toBe(1); // ainda contabilizado para o resumo, mas não significa mais "sem movimento"
+    expect(result.movements).toHaveLength(2);
+    const unchangedMovement = result.movements.find((m) => m.itemId === "makker-vonixx");
+    expect(unchangedMovement?.previousBalance).toBe(unchangedMovement?.newBalance);
+    const divergentMovement = result.movements.find((m) => m.itemId === "sio2-pro-vonixx");
+    expect(divergentMovement?.newBalance).toBe(999);
   });
 
   it("nunca gera movimento para 'não encontrado' ou 'medição pendente'", async () => {

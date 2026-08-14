@@ -25,13 +25,24 @@ export interface InventoryRepository {
    */
   recordMovement(movement: Omit<StockMovement, "id" | "previousBalance" | "newBalance">): Promise<StockMovement>;
   /**
+   * Missão de Consolidação da Contagem de Estoque V1 — núcleo canônico de UMA posição física
+   * confiável: registra o movimento `correcao_inventario` (absoluto) E atualiza
+   * `currentQuantity`/`lastCountDate`/`quantityStatus='confirmed'` do item, atomicamente (mesma
+   * transação na implementação real) — nunca as duas coisas como chamadas separadas, que
+   * deixariam uma janela onde o movimento existe mas o item não reflete a contagem. Único
+   * caminho usado tanto pela contagem rápida quanto pela confirmação em lote.
+   */
+  recordPhysicalCount(input: { itemId: string; countedQuantity: number; date: string; responsible: string; reference: string | null; notes: string | null }): Promise<StockMovement>;
+  /**
    * Atualiza só metadados complementares do item (Missão 22) — nunca quantidade/saldo, que só
    * mudam via `recordMovement`. Usada tanto pela edição manual (fornecedor/localização/estoque
    * mínimo/estoque ideal) quanto pela atualização automática do custo médio após uma entrada.
+   * `lastCountDate`/`quantityStatus` (Missão de Estoque Gerencial V2) — metadados SOBRE uma
+   * contagem já registrada via `recordMovement`, nunca uma via alternativa de alterar saldo.
    */
   updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
   ): Promise<InventoryItem>;
   /**
    * Missão 23 — usada para desativar um item incorporado numa consolidação. Reaproveitada na

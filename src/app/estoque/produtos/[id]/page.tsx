@@ -19,6 +19,7 @@ import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
 
 const YIELD_CONFIDENCE_LABEL: Record<YieldConfidence, string> = {
   tecnico: "Técnico (referência inicial, ainda sem amostra real)",
+  gerencial: "Gerencial (estimativa administrativa, não é medição física comprovada)",
   em_calibracao: "Em calibração (amostras reais, abaixo do mínimo para aprovação)",
   calibrado: "Calibrado (receita aprovada)",
 };

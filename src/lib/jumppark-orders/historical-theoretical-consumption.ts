@@ -134,7 +134,7 @@ export function computeTheoreticalConsumptionForOrder(
   return { lines, matchedServiceIds, unmappedDescriptions };
 }
 
-interface HistoricalOrderRow {
+export interface HistoricalOrderRow {
   externalId: string;
   orderDate: string;
   descriptions: string[];
@@ -146,8 +146,12 @@ interface HistoricalOrderRow {
  * `docs/jumppark-sync-strategy.md`). Por isso a categoria de veículo é sempre "desconhecida"
  * neste processamento em lote — limitação documentada, sem efeito real hoje porque
  * `vehicle_category_assignments` ainda não tem nenhuma placa confirmada de qualquer forma.
+ *
+ * Exportada (Missão de Wiring do Consumo Gerencial V1) para reuso por
+ * `getManagerialServicesRealized` — mesma fonte de "ordem finalizada" (`exitTime` não nulo),
+ * nunca uma segunda query paralela para o mesmo dado.
  */
-async function fetchHistoricalOrders(fromDate: string, toDate: string): Promise<HistoricalOrderRow[]> {
+export async function fetchHistoricalOrders(fromDate: string, toDate: string): Promise<HistoricalOrderRow[]> {
   const db = getDb();
   if (!db) return [];
 

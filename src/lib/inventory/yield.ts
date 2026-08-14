@@ -3,7 +3,13 @@ import { addDaysIso } from "@/lib/utils/timezone";
 import type { InventoryItem, InventoryUnit, StockMovement } from "@/lib/inventory/types";
 import type { Recipe } from "@/lib/recipes/types";
 
-export type YieldConfidence = "tecnico" | "em_calibracao" | "calibrado";
+/**
+ * Missão do Modelo de Consumo Médio Gerencial V1 — "gerencial" inserido entre "em_calibracao" e
+ * "tecnico": uma média gerencial derivada de volume de compra/operação real é mais confiável que
+ * uma referência técnica nunca verificada operacionalmente, mas menos confiável que qualquer
+ * amostra física real (mesmo que ainda não aprovada).
+ */
+export type YieldConfidence = "tecnico" | "em_calibracao" | "gerencial" | "calibrado";
 
 export interface ItemYieldEstimate {
   currentQuantity: number;
@@ -34,10 +40,14 @@ export interface RecipeReference {
 /**
  * Nível de confiança do valor de UMA receita: aprovada com mediana real ("calibrado") >
  * qualquer receita ativa com mediana real de pelo menos 1 amostra ("em_calibracao") >
- * referência técnica inicial sem nenhuma amostra ("tecnico"). Nunca inventa um valor — null
- * quando a receita não tem nenhum dos três. Reaproveitada tanto pelo rendimento de estoque
- * quanto pelo cálculo de consumo teórico histórico (Missão de Histórico Retroativo) — a mesma
- * regra de confiança nos dois lugares, nunca duas heurísticas divergentes.
+ * baseline gerencial administrativo ("gerencial", Missão do Modelo de Consumo Médio Gerencial
+ * V1) > referência técnica inicial sem nenhuma amostra ("tecnico"). Nunca inventa um valor —
+ * null quando a receita não tem nenhum dos quatro. Reaproveitada tanto pelo rendimento de
+ * estoque quanto pelo cálculo de consumo teórico histórico (Missão de Histórico Retroativo) —
+ * a mesma regra de confiança nos dois lugares, nunca duas heurísticas divergentes. Uma receita
+ * pode ter os três trilhos (`technicalReferenceQuantity`, `managerialBaselineQuantity`,
+ * `quantityPerService`) preenchidos simultaneamente — nenhum é apagado pelos outros; esta
+ * função só escolhe qual usar, na ordem de prioridade acima.
  */
 export function pickRecipeReference(recipe: Recipe): RecipeReference | null {
   if (recipe.status === "suspensa") return null;
@@ -46,6 +56,9 @@ export function pickRecipeReference(recipe: Recipe): RecipeReference | null {
   }
   if (recipe.sampleCount > 0 && recipe.quantityPerService !== null && recipe.quantityPerService > 0) {
     return { value: recipe.quantityPerService, confidence: "em_calibracao" };
+  }
+  if (recipe.managerialBaselineQuantity !== null && recipe.managerialBaselineQuantity > 0) {
+    return { value: recipe.managerialBaselineQuantity, confidence: "gerencial" };
   }
   if (recipe.sampleCount === 0 && recipe.technicalReferenceQuantity !== null && recipe.technicalReferenceQuantity > 0) {
     return { value: recipe.technicalReferenceQuantity, confidence: "tecnico" };
@@ -56,7 +69,7 @@ export function pickRecipeReference(recipe: Recipe): RecipeReference | null {
 /** Prioriza por NÍVEL de confiança em todas as receitas do item (não pela ordem do array) — um "aprovada" sempre vence um "em_calibracao", mesmo que apareça depois. */
 function pickReference(itemRecipes: Recipe[], unit: InventoryUnit): RecipeReference | null {
   const candidates = itemRecipes.filter((r) => r.unit === unit).map(pickRecipeReference).filter((r): r is RecipeReference => r !== null);
-  const order: YieldConfidence[] = ["calibrado", "em_calibracao", "tecnico"];
+  const order: YieldConfidence[] = ["calibrado", "em_calibracao", "gerencial", "tecnico"];
   for (const tier of order) {
     const match = candidates.find((c) => c.confidence === tier);
     if (match) return match;
@@ -97,4 +110,23 @@ export function computeItemYield(item: Pick<InventoryItem, "currentQuantity" | "
     avgDailyConsumption,
     forecastDays,
   };
+}
+
+export interface ManagerialYieldEstimate {
+  /** floor(packageCapacity / managerialBaselineQuantity) — null quando faltar qualquer um dos dois, ou quando managerialBaselineQuantity <= 0. Nunca uma promessa exata. */
+  expectedServicesPerPackage: number | null;
+  /** Rótulo fixo para uso em qualquer interface/relatório — nunca "rendimento real"/"garantido"/"comprovado" (Missão do Modelo de Consumo Médio Gerencial V1, seção 6). */
+  label: "RENDIMENTO GERENCIAL ESTIMADO";
+}
+
+/**
+ * Missão do Modelo de Consumo Médio Gerencial V1, seção 6/7 — estimativa administrativa de
+ * quantos serviços uma embalagem deveria render, a partir do baseline gerencial (nunca de
+ * `quantityPerService`/calibração real, que tem seu próprio conceito de rendimento via
+ * `computeItemYield`/`estimatedServicesRemaining`). Pura, sem I/O — nunca inventa `packageCapacity`
+ * nem `managerialBaselineQuantity`; ambos vêm de quem chama.
+ */
+export function computeManagerialYield(packageCapacity: number | null, managerialBaselineQuantity: number | null): ManagerialYieldEstimate {
+  const expectedServicesPerPackage = packageCapacity !== null && managerialBaselineQuantity !== null && managerialBaselineQuantity > 0 ? Math.floor(packageCapacity / managerialBaselineQuantity) : null;
+  return { expectedServicesPerPackage, label: "RENDIMENTO GERENCIAL ESTIMADO" };
 }

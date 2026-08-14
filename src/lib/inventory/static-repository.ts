@@ -69,9 +69,42 @@ export class StaticInventoryRepository implements InventoryRepository {
     return { ...recorded };
   }
 
+  /** Missão de Consolidação da Contagem de Estoque V1 — equivalente em memória de `recordPhysicalCount`; mutações sequenciais já são atômicas de fato (single-thread), sem necessidade de transação explícita aqui. */
+  async recordPhysicalCount(input: { itemId: string; countedQuantity: number; date: string; responsible: string; reference: string | null; notes: string | null }): Promise<StockMovement> {
+    const item = this.items.find((i) => i.id === input.itemId);
+    if (!item) throw new Error(`Item de estoque não encontrado: ${input.itemId}`);
+
+    const previousBalance = item.currentQuantity;
+    const newBalance = applyMovementDelta(previousBalance, "correcao_inventario", input.countedQuantity);
+
+    const recorded: StockMovement = {
+      id: String(this.nextMovementId++),
+      itemId: input.itemId,
+      type: "correcao_inventario",
+      quantity: input.countedQuantity,
+      unit: item.unit,
+      date: input.date,
+      notes: input.notes,
+      responsible: input.responsible,
+      reference: input.reference,
+      supplier: null,
+      unitPricePaid: null,
+      externalId: null,
+      previousBalance,
+      newBalance,
+    };
+    this.movements.push(recorded);
+
+    item.currentQuantity = newBalance;
+    item.lastCountDate = input.date;
+    item.quantityStatus = "confirmed";
+
+    return { ...recorded };
+  }
+
   async updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category">>,
+    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
   ): Promise<InventoryItem> {
     const item = this.items.find((i) => i.id === id);
     if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);

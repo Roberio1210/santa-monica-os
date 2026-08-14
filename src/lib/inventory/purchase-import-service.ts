@@ -173,6 +173,18 @@ export async function listPurchaseImports(): Promise<(typeof purchaseImports.$in
   return db.select().from(purchaseImports);
 }
 
+/**
+ * Missão de UI Operacional de Contagem de Estoque V1, seção 19 — quantas linhas de compra ainda
+ * aguardam classificação humana (nunca viram `inventory_movements` até serem confirmadas
+ * individualmente via `confirmPurchaseImportLine`). Só conta, nunca decide pelo gestor.
+ */
+export async function countPendingPurchaseLines(): Promise<number> {
+  const db = getDb();
+  if (!db) return 0;
+  const rows = await db.select({ id: purchaseImportLines.id }).from(purchaseImportLines).where(eq(purchaseImportLines.status, "pendente"));
+  return rows.length;
+}
+
 export interface ConfirmPurchaseLineInput {
   lineId: string;
   decision: PurchaseLineDecision;

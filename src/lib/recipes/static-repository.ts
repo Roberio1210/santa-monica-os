@@ -1,6 +1,7 @@
 import "server-only";
 import type { RecipeRepository } from "@/lib/recipes/repository";
-import type { CalibrationSample, NewRecipeInput, NewSampleInput, ProcessStep, Recipe, RecipePatch, SamplePatch, VehicleCategory } from "@/lib/recipes/types";
+import type { CalibrationSample, NewRecipeInput, NewSampleInput, ProcessStep, Recipe, RecipePatch, SamplePatch, SharedRecipeMatch, VehicleCategory } from "@/lib/recipes/types";
+import type { InventoryUnit } from "@/lib/inventory/types";
 
 /**
  * Implementação em memória — usada automaticamente quando DATABASE_URL não está configurada
@@ -13,8 +14,11 @@ import type { CalibrationSample, NewRecipeInput, NewSampleInput, ProcessStep, Re
 export class StaticRecipeRepository implements RecipeRepository {
   private recipes: Recipe[] = [];
   private samples: CalibrationSample[] = [];
+  private operationalSteps: { serviceId: string; processStep: ProcessStep; externalId: string | null }[] = [];
+  private sharedRecipes: SharedRecipeMatch[] = [];
   private nextRecipeId = 1;
   private nextSampleId = 1;
+  private nextSharedRecipeId = 1;
 
   async listRecipes(): Promise<Recipe[]> {
     return this.recipes.map((r) => ({ ...r }));
@@ -52,6 +56,15 @@ export class StaticRecipeRepository implements RecipeRepository {
       notes: input.notes,
       technicalReferenceQuantity: input.technicalReferenceQuantity ?? null,
       technicalReferenceSource: input.technicalReferenceSource ?? null,
+      usageType: null,
+      technicalFunction: null,
+      informationSource: null,
+      dilutionBasis: null,
+      managerialBaselineQuantity: null,
+      managerialTolerancePercentage: null,
+      managerialBaselineSource: null,
+      managerialBaselineSince: null,
+      managerialSizeAdjustmentApplicable: false,
     };
     this.recipes.push(recipe);
     return { ...recipe };
@@ -84,5 +97,48 @@ export class StaticRecipeRepository implements RecipeRepository {
     if (!sample) throw new Error(`Amostra não encontrada: ${id}`);
     Object.assign(sample, patch);
     return { ...sample };
+  }
+
+  async serviceUsesOperationalStep(serviceId: string, processStep: ProcessStep): Promise<boolean> {
+    return this.operationalSteps.some((s) => s.serviceId === serviceId && s.processStep === processStep);
+  }
+
+  async declareOperationalStep(input: { serviceId: string; processStep: ProcessStep; externalId?: string | null; notes?: string | null }): Promise<{ created: boolean }> {
+    const exists = this.operationalSteps.some((s) => s.serviceId === input.serviceId && s.processStep === input.processStep);
+    if (exists) return { created: false };
+    this.operationalSteps.push({ serviceId: input.serviceId, processStep: input.processStep, externalId: input.externalId ?? null });
+    return { created: true };
+  }
+
+  async findSharedRecipe(vehicleCategory: VehicleCategory, processStep: ProcessStep, itemId: string): Promise<SharedRecipeMatch | null> {
+    const recipe = this.sharedRecipes.find((r) => r.vehicleCategory === vehicleCategory && r.processStep === processStep && r.itemId === itemId);
+    return recipe ? { ...recipe } : null;
+  }
+
+  async createSharedRecipe(input: {
+    itemId: string;
+    vehicleCategory: VehicleCategory;
+    processStep: ProcessStep;
+    unit: InventoryUnit;
+    quantityPerService?: number | null;
+    technicalReferenceQuantity?: number | null;
+    technicalReferenceSource?: string | null;
+    dilutionRatio?: number | null;
+  }): Promise<SharedRecipeMatch> {
+    const recipe: SharedRecipeMatch = {
+      id: `shared-${this.nextSharedRecipeId++}`,
+      itemId: input.itemId,
+      vehicleCategory: input.vehicleCategory,
+      processStep: input.processStep,
+      unit: input.unit,
+      quantityPerService: input.quantityPerService ?? null,
+      technicalReferenceQuantity: input.technicalReferenceQuantity ?? null,
+      technicalReferenceSource: input.technicalReferenceSource ?? null,
+      dilutionRatio: input.dilutionRatio ?? null,
+      status: "rascunho",
+      sampleCount: 0,
+    };
+    this.sharedRecipes.push(recipe);
+    return { ...recipe };
   }
 }

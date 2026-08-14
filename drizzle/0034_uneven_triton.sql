@@ -1,0 +1,1 @@
+ALTER TYPE "public"."recipe_confidence_tier" ADD VALUE 'gerencial' BEFORE 'calibrado';

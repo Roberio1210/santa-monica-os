@@ -23,6 +23,15 @@ function recipe(overrides: Partial<Recipe> = {}): Recipe {
     notes: null,
     technicalReferenceQuantity: 50,
     technicalReferenceSource: "teste",
+    usageType: null,
+    technicalFunction: null,
+    informationSource: null,
+    dilutionBasis: null,
+    managerialBaselineQuantity: null,
+    managerialTolerancePercentage: null,
+    managerialBaselineSource: null,
+    managerialBaselineSince: null,
+    managerialSizeAdjustmentApplicable: false,
     ...overrides,
   };
 }

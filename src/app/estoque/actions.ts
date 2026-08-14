@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { MANUAL_MOVEMENT_TYPES, recordManualMovement } from "@/lib/inventory/manual-movement";
 import { confirmStocktake, type StocktakeLineInput } from "@/lib/inventory/stocktake";
+import { registerPhysicalInventoryCount } from "@/lib/inventory/managerial-physical-count";
+import { getProductManagerialInventorySummary, type ProductManagerialInventorySummary } from "@/lib/inventory/managerial-count-reconciliation";
 import { recordManualEntry } from "@/lib/inventory/manual-entry";
 import { EXIT_REASONS, recordManualExit, type ExitReason } from "@/lib/inventory/manual-exit";
 import { updateItemDetails } from "@/lib/inventory/item-details";
@@ -86,11 +88,89 @@ export async function confirmStocktakeAction(_prevState: StocktakeActionState, f
     revalidatePath("/estoque/produtos");
     return {
       error: null,
-      success: `Contagem confirmada: ${result.movements.length} ajuste(s) gerado(s), ${result.unchangedCount} sem divergência, ${result.notFoundCount} não encontrado(s), ${result.measurementPendingCount} com medição pendente.`,
+      success: `Contagem confirmada: ${result.movements.length} posição(ões) física(s) confirmada(s) (${result.unchangedCount} sem divergência de saldo), ${result.notFoundCount} não encontrado(s), ${result.measurementPendingCount} com medição pendente.`,
       movementsCreated: result.movements.length,
     };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha ao confirmar contagem.", success: null, movementsCreated: 0 };
+  }
+}
+
+export interface QuickCountActionState {
+  error: string | null;
+  success: boolean;
+  itemId: string | null;
+  previousBalance: number | null;
+  countedQuantity: number | null;
+  difference: number | null;
+  unit: string | null;
+  resolvedMeasurementPending: boolean;
+}
+
+const initialQuickCountActionState: QuickCountActionState = {
+  error: null,
+  success: false,
+  itemId: null,
+  previousBalance: null,
+  countedQuantity: null,
+  difference: null,
+  unit: null,
+  resolvedMeasurementPending: false,
+};
+
+/**
+ * Missão de UI Operacional de Contagem de Estoque V1 — contagem rápida de UM produto por vez
+ * (distinta de `confirmStocktakeAction`, que confirma uma sessão em lote). Reaproveita
+ * `registerPhysicalInventoryCount` sem duplicar lógica — o valor já chega convertido para a
+ * unidade-base do item (conversão feita no cliente, `convertToBaseUnit`).
+ */
+export async function registerPhysicalCountAction(_prevState: QuickCountActionState, formData: FormData): Promise<QuickCountActionState> {
+  const itemId = String(formData.get("itemId") ?? "");
+  const countedQuantityRaw = String(formData.get("countedQuantity") ?? "");
+  const countedAt = String(formData.get("countedAt") ?? "");
+  const source = String(formData.get("source") ?? "");
+  const notes = parseOptionalString(formData.get("notes"));
+
+  if (!itemId) return { ...initialQuickCountActionState, error: "Produto não identificado." };
+  const countedQuantity = Number(countedQuantityRaw);
+  if (!Number.isFinite(countedQuantity) || countedQuantity < 0) return { ...initialQuickCountActionState, error: "Quantidade contada inválida." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(countedAt)) return { ...initialQuickCountActionState, error: "Data da contagem inválida." };
+  if (!source.trim()) return { ...initialQuickCountActionState, error: "Informe quem realizou a contagem." };
+
+  try {
+    const result = await registerPhysicalInventoryCount({ itemId, countedQuantity, countedAt, source: source.trim(), notes });
+    revalidatePath("/estoque/movimentacoes");
+    revalidatePath("/estoque");
+    revalidatePath("/estoque/produtos");
+    revalidatePath(`/estoque/produtos/${itemId}`);
+    revalidatePath("/estoque/contagem");
+    revalidatePath("/estoque/consumo-gerencial");
+    return {
+      error: null,
+      success: true,
+      itemId,
+      previousBalance: result.previousBalance,
+      countedQuantity: result.countedQuantity,
+      difference: result.difference,
+      unit: result.movement.unit,
+      resolvedMeasurementPending: result.resolvedMeasurementPending,
+    };
+  } catch (err) {
+    return { ...initialQuickCountActionState, error: err instanceof Error ? err.message : "Falha ao registrar a contagem." };
+  }
+}
+
+/**
+ * Consulta (não é mutação, mas precisa ser Server Action para rodar sob demanda a partir de um
+ * Client Component) do resumo gerencial de um produto — usada ao expandir o histórico de um
+ * item na tela de contagem (Missão de UI Operacional de Contagem V1, seção 14). Nunca recalcula
+ * matemática aqui: só repassa `getProductManagerialInventorySummary`.
+ */
+export async function fetchProductManagerialSummaryAction(itemId: string): Promise<ProductManagerialInventorySummary | { error: string }> {
+  try {
+    return await getProductManagerialInventorySummary(itemId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao carregar o resumo gerencial do produto." };
   }
 }
 

@@ -1,12 +1,9 @@
 import "server-only";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import { generateStocktakeReference, registerPhysicalInventoryCount } from "@/lib/inventory/managerial-physical-count";
 import type { StockMovement } from "@/lib/inventory/types";
 
-/** Referência única de uma sessão de contagem — gerada uma vez por carregamento da página (Server Component), nunca no cliente. */
-export function generateStocktakeReference(): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return `CONTAGEM-${today}-${Math.random().toString(36).slice(2, 8)}`;
-}
+export { generateStocktakeReference };
 
 export interface StocktakeLineInput {
   itemId: string;
@@ -20,17 +17,27 @@ export interface StocktakeLineInput {
 export interface StocktakeResult {
   reference: string;
   movements: StockMovement[];
-  /** Itens contados sem divergência em relação ao saldo teórico — nenhuma movimentação foi necessária. */
+  /**
+   * Missão de Consolidação da Contagem de Estoque V1 — itens contados SEM divergência em relação
+   * ao saldo do sistema ainda geram uma posição física confiável (uma contagem sem diferença
+   * prova "em tal data existiam X unidades", nunca é descartada). `unchangedCount` continua
+   * contando quantos desses casos ocorreram, só para informar o resumo — não significa mais
+   * "nenhuma movimentação foi criada".
+   */
   unchangedCount: number;
   notFoundCount: number;
   measurementPendingCount: number;
 }
 
 /**
- * Confirma uma contagem física em lote — nunca sobrescreve o saldo diretamente: cada divergência
- * vira uma movimentação "correcao_inventario" própria, preservando o histórico. Bloqueia
- * confirmação duplicada: uma `reference` só pode ser confirmada uma única vez (mesma ideia dos
- * seeds idempotentes de external_id, aplicada aqui à referência da contagem).
+ * Confirma uma contagem física em lote — mesmo núcleo canônico da contagem rápida individual
+ * (`registerPhysicalInventoryCount`), nunca uma segunda regra de negócio para o mesmo conceito
+ * (Missão de Consolidação da Contagem de Estoque V1, seção 5). Cada linha efetivamente contada
+ * (com quantidade física informada) vira uma posição física confiável própria, mesmo sem
+ * divergência de saldo. Bloqueia confirmação duplicada: uma `reference` só pode ser confirmada
+ * uma única vez (mesma ideia dos seeds idempotentes de external_id, aplicada aqui à referência
+ * da contagem) — todas as linhas de uma sessão compartilham a MESMA `reference`, preservando o
+ * agrupamento usado por `deriveStocktakeSessions`.
  */
 export async function confirmStocktake(reference: string, responsible: string, lines: StocktakeLineInput[]): Promise<StocktakeResult> {
   if (!reference.trim()) throw new Error("Referência da contagem é obrigatória.");
@@ -66,20 +73,17 @@ export async function confirmStocktake(reference: string, responsible: string, l
 
     if (Math.abs(item.currentQuantity - line.physicalQuantity) < 0.001) {
       unchangedCount += 1;
-      continue;
     }
 
-    const movement = await repo.recordMovement({
+    const result = await registerPhysicalInventoryCount({
       itemId: line.itemId,
-      type: "correcao_inventario",
-      quantity: line.physicalQuantity,
-      unit: item.unit,
-      date: today,
-      responsible: responsible.trim(),
-      reference,
+      countedQuantity: line.physicalQuantity,
+      countedAt: today,
+      source: responsible.trim(),
       notes: line.observation?.trim() || null,
+      reference,
     });
-    movements.push(movement);
+    movements.push(result.movement);
   }
 
   return { reference, movements, unchangedCount, notFoundCount, measurementPendingCount };

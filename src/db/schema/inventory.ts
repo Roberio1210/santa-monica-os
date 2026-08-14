@@ -1,4 +1,4 @@
-import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 
 /**
@@ -114,10 +114,107 @@ export const processStepEnum = pgEnum("process_step", [
 
 export const recipeStatusEnum = pgEnum("recipe_status", ["rascunho", "em_calibracao", "aprovada", "suspensa"]);
 
-/** Missão de Histórico Retroativo — nível de confiança do valor usado num cálculo teórico (espelha src/lib/inventory/yield.ts, YieldConfidence). */
-export const recipeConfidenceTierEnum = pgEnum("recipe_confidence_tier", ["tecnico", "em_calibracao", "calibrado"]);
+/**
+ * Missão de Histórico Retroativo — nível de confiança do valor usado num cálculo teórico (espelha
+ * src/lib/inventory/yield.ts, YieldConfidence). "gerencial" adicionado na Missão do Modelo de
+ * Consumo Médio Gerencial V1 — fica ENTRE "em_calibracao" e "tecnico" na hierarquia de prioridade
+ * (uma média gerencial derivada de volume de compra real é mais confiável que uma referência
+ * técnica nunca verificada operacionalmente, mas menos confiável que qualquer amostra física
+ * real). Valor aditivo via ALTER TYPE ... ADD VALUE — nunca reescreve as linhas históricas
+ * existentes de `historical_theoretical_consumption`, que continuam com os 3 valores antigos.
+ */
+export const recipeConfidenceTierEnum = pgEnum("recipe_confidence_tier", ["tecnico", "em_calibracao", "gerencial", "calibrado"]);
 
 export const calibrationSampleStatusEnum = pgEnum("calibration_sample_status", ["valida", "excluida"]);
+
+/**
+ * Missão do Catálogo Técnico Mestre — como um produto/receita participa de uma etapa
+ * operacional. Nunca aplicado automaticamente por nome; só quando o gestor confirma
+ * explicitamente (ver docs da missão para a justificativa de cada valor por produto).
+ */
+export const recipeUsageTypeEnum = pgEnum("recipe_usage_type", [
+  "standard", // produto padrão daquela etapa
+  "conditional", // só utilizado quando necessário
+  "alternative", // um entre vários produtos possíveis para a mesma etapa
+  "specific_service", // produto específico de determinado serviço
+  "operational", // consumido pela operação, não diretamente por um veículo
+  "durable", // material reutilizável, sem baixa por serviço
+]);
+
+/**
+ * Missão do Catálogo Técnico Mestre — função técnica do produto/receita, independente do
+ * serviço em que é usado (ex.: "Fast Cut" é CUT_COMPOUND tanto no Polimento Comercial quanto
+ * no Técnico). Vocabulário mantido em inglês por ser terminologia técnica de detailing,
+ * deliberadamente distinta do vocabulário operacional em português já usado em `process_step`.
+ * `PAINT_FINISHER` e `EXTERIOR_DRESSING` foram adicionados nesta missão (ver relatório) — todo
+ * o restante veio da lista original proposta pelo gestor.
+ */
+export const technicalFunctionEnum = pgEnum("technical_function", [
+  "pre_wash",
+  "shampoo",
+  "apc",
+  "degreaser",
+  "acid_cleaner",
+  "tire_cleaner",
+  "tire_dressing",
+  "glass_cleaner",
+  "glass_decontamination",
+  "glass_coating",
+  "interior_cleaner",
+  "upholstery_cleaner",
+  "sanitizer",
+  "leather_cleaner",
+  "leather_conditioner",
+  "plastic_dressing",
+  "exterior_dressing",
+  "tar_glue_remover",
+  "iron_remover",
+  "paint_decontamination",
+  "cut_compound",
+  "refinish_compound",
+  "finish_compound",
+  "polish_inspection",
+  "wax",
+  "sealant",
+  "paint_coating",
+  "plastic_coating",
+  "headlight_coating",
+  "coating_maintenance",
+  "engine_degreaser",
+  "engine_dressing",
+  "chassis_cleaner",
+  "metal_cleaner",
+  "microfiber_cleaner",
+  "pad",
+  "microfiber",
+  "sprayer",
+  "equipment",
+  "ppe",
+  "paint",
+  "paint_finisher",
+  /** Missão de Saneamento Final do Catálogo — produto que executa corte + refino + lustro no mesmo processo (ex.: "Polidor 3 em 1"), nunca reduzido artificialmente a CUT_COMPOUND sozinho. */
+  "multi_stage_polish",
+  /** Missão de Saneamento Final do Catálogo — cera com ação de limpeza/microabrasão leve além de proteção/brilho (ex.: Hard Cleaner Wax), distinta de WAX puro. */
+  "cleaner_wax",
+  "other",
+]);
+
+/**
+ * Missão do Catálogo Técnico Mestre — de onde vem a informação de uma receita/quantidade
+ * técnica. Distingue "o fabricante recomenda" de "é assim que a Santa Mônica utiliza" — nunca
+ * confundido, nunca usado para inventar um valor.
+ */
+export const recipeInformationSourceEnum = pgEnum("recipe_information_source", [
+  "manufacturer",
+  "technical_datasheet",
+  "specialized_source",
+  "purchase_document",
+  "santa_monica_operation",
+  "calibrated_real_usage",
+]);
+
+/** Missão do Catálogo Técnico Mestre — sobre o que a diluição de uma receita é medida. */
+export const recipeDilutionBasisEnum = pgEnum("recipe_dilution_basis", ["concentrate", "prepared_solution", "pure_product"]);
 
 export const inventoryItems = pgTable("inventory_items", {
   id: id(),
@@ -142,6 +239,15 @@ export const inventoryItems = pgTable("inventory_items", {
   location: text("location"),
   /** Missão 23 — classificação opcional (nunca inferida automaticamente para os 65 produtos existentes). */
   classification: itemClassificationEnum("classification"),
+  /**
+   * Missão do Catálogo Técnico Mestre — identidade técnica "de catálogo" do produto (o que ele
+   * é, independente de em qual serviço é usado). Distinto de `service_consumption_rules.technical_function`,
+   * que pode existir por receita específica quando o mesmo produto tiver papéis diferentes em
+   * contextos diferentes. Nunca inferido por nome — só populado quando o gestor confirma.
+   */
+  technicalFunction: technicalFunctionEnum("technical_function"),
+  /** Missão do Catálogo Técnico Mestre — tipo de utilização "de catálogo" do produto. Mesmo cuidado de `technicalFunction` acima: nunca inferido, só confirmado. */
+  usageType: recipeUsageTypeEnum("usage_type"),
   /**
    * Missão 23 — quando preenchido, este item foi incorporado a outro (o produto mestre) numa
    * consolidação. O item nunca é excluído: fica `active=false`, aponta para o mestre, e todo o
@@ -209,6 +315,37 @@ export const services = pgTable("services", {
 });
 
 /**
+ * Missão do Catálogo Técnico Mestre — desacopla ETAPA de SERVIÇO: declara que um serviço
+ * (Bronze/Silver/Gold/etc.) inclui uma determinada etapa operacional (`process_step`, mesmo
+ * enum já usado em `service_consumption_rules`). Existe para que, no futuro, uma receita possa
+ * ser escrita uma única vez por etapa (`service_consumption_rules.service_id = null`) e valer
+ * para todo serviço que declarar usar aquela etapa aqui — em vez de precisar de uma linha de
+ * receita duplicada por serviço, como hoje.
+ *
+ * Criada VAZIA nesta missão — nenhuma linha inserida. Popular Bronze/Silver/Gold é objeto de
+ * uma missão futura; até lá, o motor de consumo continua resolvendo exclusivamente pelo
+ * caminho antigo (receita presa a um `service_id` específico), sem nenhuma dependência desta
+ * tabela.
+ */
+export const serviceOperationalSteps = pgTable(
+  "service_operational_steps",
+  {
+    id: id(),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id),
+    processStep: processStepEnum("process_step").notNull(),
+    active: active(),
+    source: source(),
+    /** `${serviceExternalId}:${processStep}` — permite seed idempotente quando esta tabela começar a ser populada. */
+    externalId: text("external_id").unique(),
+    notes: notes(),
+    ...timestamps,
+  },
+  (table) => [unique().on(table.serviceId, table.processStep)],
+);
+
+/**
  * Receita técnica de consumo — serviço × categoria de veículo × etapa × produto (FASE B).
  * `quantityPerService` é a mediana das amostras válidas (null enquanto não houver amostras;
  * nunca preenchido manualmente com um valor inventado — ver src/lib/recipes/service.ts,
@@ -223,9 +360,15 @@ export const services = pgTable("services", {
  */
 export const serviceConsumptionRules = pgTable("service_consumption_rules", {
   id: id(),
-  serviceId: uuid("service_id")
-    .notNull()
-    .references(() => services.id),
+  /**
+   * Missão do Catálogo Técnico Mestre — tornado opcional para permitir, no futuro, receitas
+   * presas à ETAPA (`process_step`) em vez de a um serviço específico, reutilizáveis por vários
+   * serviços via `service_operational_steps`. Nesta missão nenhuma receita nova usa
+   * `service_id = null` — as 40 receitas existentes continuam com o serviço preenchido, e o
+   * motor de consumo continua resolvendo exclusivamente pelo caminho antigo (serviço
+   * específico). A resolução por etapa fica para a missão que configurar Bronze/Silver/Gold.
+   */
+  serviceId: uuid("service_id").references(() => services.id),
   itemId: uuid("item_id")
     .notNull()
     .references(() => inventoryItems.id),
@@ -256,6 +399,30 @@ export const serviceConsumptionRules = pgTable("service_consumption_rules", {
   /** Contagem de amostras válidas (status "valida") — recalculado a cada adição/exclusão. */
   sampleCount: integer("sample_count").notNull().default(0),
   lastCalibratedAt: date("last_calibrated_at"),
+  /** Missão do Catálogo Técnico Mestre — como esta receita específica participa da etapa (ver `recipeUsageTypeEnum`). Nullable: nenhuma receita existente foi classificada retroativamente nesta missão. */
+  usageType: recipeUsageTypeEnum("usage_type"),
+  /** Missão do Catálogo Técnico Mestre — função técnica desta receita específica (ver `technicalFunctionEnum`). Nullable pelo mesmo motivo. */
+  technicalFunction: technicalFunctionEnum("technical_function"),
+  /** Missão do Catálogo Técnico Mestre — categoria estruturada da fonte (ver `recipeInformationSourceEnum`), ao lado de `technicalReferenceSource` (texto livre da citação exata). */
+  informationSource: recipeInformationSourceEnum("information_source"),
+  /** Missão do Catálogo Técnico Mestre — sobre o que `dilutionRatio` é medido. Nullable: nunca inferido. */
+  dilutionBasis: recipeDilutionBasisEnum("dilution_basis"),
+  /**
+   * Missão do Modelo de Consumo Médio Gerencial V1 — trilho GERENCIAL, paralelo e independente
+   * dos trilhos técnico (`technicalReferenceQuantity`) e de calibração real (`quantityPerService`).
+   * Nunca escrito por `recalculateStatistics`/`addSample`/`approveRecipe`; nunca lido por
+   * `preview.ts`/`automatic-consumption.ts`/`resolution.ts`. Estimativa administrativa (não
+   * medição física) para previsão de consumo/compras — nunca "consumo comprovado".
+   */
+  managerialBaselineQuantity: numeric("managerial_baseline_quantity", { precision: 12, scale: 3 }),
+  /** Faixa de tolerância da estimativa gerencial, por receita — nunca uma tolerância universal. */
+  managerialTolerancePercentage: numeric("managerial_tolerance_percentage", { precision: 5, scale: 2 }),
+  /** Fonte estruturada do baseline gerencial (mesmo enum de `informationSource`, coluna própria). */
+  managerialBaselineSource: recipeInformationSourceEnum("managerial_baseline_source"),
+  /** Data em que este baseline passou a valer — nunca retroage para período anterior ao registro. */
+  managerialBaselineSince: date("managerial_baseline_since"),
+  /** Liga/desliga o multiplicador de porte (`getVehicleSizeMultiplier`) SÓ para a projeção gerencial desta receita — granularidade por produto, nunca reaproveita/altera `AREA_SENSITIVE_STEPS` (que é por etapa). */
+  managerialSizeAdjustmentApplicable: boolean("managerial_size_adjustment_applicable").notNull().default(false),
   active: active(),
   source: source(),
   externalId: externalId(),
