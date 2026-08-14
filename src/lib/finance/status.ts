@@ -147,6 +147,44 @@ export function computeAccountBalance(
   return Math.round((opening + cashDelta + transfersInTotal - transfersOutTotal) * 100) / 100;
 }
 
+export interface AccountPeriodSummary {
+  openingBalance: number;
+  totalIn: number;
+  totalOut: number;
+  closingBalance: number;
+}
+
+/**
+ * Missão Financeiro V2.1 (Fase E) — saldo inicial (tudo antes do período) + entradas do período -
+ * saídas do período = saldo final. "Entradas/saídas" aqui inclui transferências (elas movem
+ * dinheiro de fato desta conta), distinto da nature usada na DRE (que nunca conta transferência
+ * como receita/despesa) — os dois eixos são propositalmente independentes.
+ */
+export function computeAccountPeriodSummary(
+  fixedFundAmount: number | null,
+  cashMovements: { type: "entrada" | "saida"; amount: number; date: string }[],
+  transfersIn: { amount: number; date: string }[],
+  transfersOut: { amount: number; date: string }[],
+  periodFrom: string,
+  periodTo: string,
+): AccountPeriodSummary {
+  const before = (date: string) => date < periodFrom;
+  const inRange = (date: string) => date >= periodFrom && date <= periodTo;
+
+  const openingBalance = computeAccountBalance(fixedFundAmount, cashMovements.filter((m) => before(m.date)), transfersIn.filter((t) => before(t.date)), transfersOut.filter((t) => before(t.date)));
+
+  const periodCashIn = cashMovements.filter((m) => m.type === "entrada" && inRange(m.date)).reduce((sum, m) => sum + m.amount, 0);
+  const periodCashOut = cashMovements.filter((m) => m.type === "saida" && inRange(m.date)).reduce((sum, m) => sum + m.amount, 0);
+  const periodTransfersIn = transfersIn.filter((t) => inRange(t.date)).reduce((sum, t) => sum + t.amount, 0);
+  const periodTransfersOut = transfersOut.filter((t) => inRange(t.date)).reduce((sum, t) => sum + t.amount, 0);
+
+  const totalIn = Math.round((periodCashIn + periodTransfersIn) * 100) / 100;
+  const totalOut = Math.round((periodCashOut + periodTransfersOut) * 100) / 100;
+  const closingBalance = Math.round((openingBalance + totalIn - totalOut) * 100) / 100;
+
+  return { openingBalance, totalIn, totalOut, closingBalance };
+}
+
 /**
  * Quinto dia útil de uma competência (formato "YYYY-MM") — preparado para recorrências de
  * prestadores cujo vencimento é "5º dia útil", ainda não vinculado a nenhum modelo real. "Dia

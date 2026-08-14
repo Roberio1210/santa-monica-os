@@ -5,6 +5,7 @@ export * from "./inventory";
 export * from "./inventoryAudit";
 export * from "./jumppark";
 export * from "./finance";
+export * from "./bankStatement";
 export * from "./system";
 export * from "./accounting";
 export * from "./goals";

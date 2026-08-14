@@ -30,6 +30,8 @@ export interface StonePersistenceRepository {
   /** Upsert em lote por `externalKey` — nunca duplica, sempre atualiza o estado mais recente da parcela. */
   upsertNormalizedTransactions(records: StoneNormalizedTransactionRecord[]): Promise<void>;
   listNormalizedTransactionsByExpectedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
+  /** Missão Financeiro V2.1 — data real de liquidação (nunca a esperada), usada para conciliar o extrato bancário Stone. */
+  listNormalizedTransactionsBySettledDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
   /** Missão Financeiro V2 — busca pontual pela chave determinística da parcela (Z2, `identity.ts`), usada ao confirmar uma conciliação como recebível. */
   getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null>;
 

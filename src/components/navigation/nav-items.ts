@@ -75,6 +75,7 @@ export const navItems: NavItem[] = [
   { href: "/financeiro/classificacao", label: "Classificação Financeira", icon: Tags },
   { href: "/financeiro/fechamento", label: "Fechamento", icon: Lock },
   { href: "/financeiro/stone-conciliacao", label: "Stone Conciliação", icon: Landmark },
+  { href: "/financeiro/conta-stone", label: "Conta Stone (extrato)", icon: Wallet },
   { href: "/alertas", label: "Alertas", icon: BellRing },
   { href: "/marketing", label: "Marketing", icon: Megaphone },
   { href: "/estoque", label: "Estoque", icon: Boxes },

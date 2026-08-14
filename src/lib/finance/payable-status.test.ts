@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAccountBalance, computeAccountsPayableStatus, computeInstallments } from "@/lib/finance/status";
+import { computeAccountBalance, computeAccountPeriodSummary, computeAccountsPayableStatus, computeInstallments } from "@/lib/finance/status";
 
 describe("computeAccountsPayableStatus", () => {
   const base = { paidAmount: 0, outstandingAmount: 4750, dueDate: "2026-07-05" } as const;
@@ -96,5 +96,69 @@ describe("computeAccountBalance — saldo de conta financeira", () => {
     const belowThreshold = balance < fixedFundAmount;
     expect(balance).toBe(70);
     expect(belowThreshold).toBe(true);
+  });
+});
+
+describe("computeAccountPeriodSummary — saldo inicial/entradas/saídas/saldo final por período (Missão Financeiro V2.1, Fase E)", () => {
+  it("sem movimento nenhum, saldo inicial e final são iguais ao fundo fixo", () => {
+    const summary = computeAccountPeriodSummary(null, [], [], [], "2026-08-01", "2026-08-14");
+    expect(summary).toEqual({ openingBalance: 0, totalIn: 0, totalOut: 0, closingBalance: 0 });
+  });
+
+  it("movimento ANTES do período entra no saldo inicial, nunca nas entradas/saídas do período", () => {
+    const summary = computeAccountPeriodSummary(
+      null,
+      [{ type: "entrada", amount: 500, date: "2026-07-15" }],
+      [],
+      [],
+      "2026-08-01",
+      "2026-08-14",
+    );
+    expect(summary.openingBalance).toBe(500);
+    expect(summary.totalIn).toBe(0);
+  });
+
+  it("movimento DENTRO do período soma em entradas/saídas, saldo final reflete a soma", () => {
+    const summary = computeAccountPeriodSummary(
+      null,
+      [
+        { type: "entrada", amount: 5000, date: "2026-08-01" },
+        { type: "saida", amount: 300, date: "2026-08-02" },
+      ],
+      [],
+      [],
+      "2026-08-01",
+      "2026-08-14",
+    );
+    expect(summary.openingBalance).toBe(0);
+    expect(summary.totalIn).toBe(5000);
+    expect(summary.totalOut).toBe(300);
+    expect(summary.closingBalance).toBe(4700);
+  });
+
+  it("movimento DEPOIS do período nunca entra no saldo final do período", () => {
+    const summary = computeAccountPeriodSummary(
+      null,
+      [{ type: "entrada", amount: 999, date: "2026-09-01" }],
+      [],
+      [],
+      "2026-08-01",
+      "2026-08-14",
+    );
+    expect(summary.closingBalance).toBe(0);
+  });
+
+  it("transferências dentro do período contam como entrada/saída de caixa, mesmo nunca contando como receita/despesa na DRE", () => {
+    const summary = computeAccountPeriodSummary(
+      null,
+      [],
+      [{ amount: 1000, date: "2026-08-05" }],
+      [{ amount: 200, date: "2026-08-06" }],
+      "2026-08-01",
+      "2026-08-14",
+    );
+    expect(summary.totalIn).toBe(1000);
+    expect(summary.totalOut).toBe(200);
+    expect(summary.closingBalance).toBe(800);
   });
 });

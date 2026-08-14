@@ -293,6 +293,14 @@ export class StonePostgresRepository implements StonePersistenceRepository {
     return rows.map(toNormalizedTransaction);
   }
 
+  async listNormalizedTransactionsBySettledDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]> {
+    const rows = await this.db()
+      .select()
+      .from(stoneNormalizedTransactionsTable)
+      .where(and(gte(stoneNormalizedTransactionsTable.settledPaymentDate, fromDate), lte(stoneNormalizedTransactionsTable.settledPaymentDate, toDate)));
+    return rows.map(toNormalizedTransaction);
+  }
+
   async getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null> {
     const rows = await this.db().select().from(stoneNormalizedTransactionsTable).where(eq(stoneNormalizedTransactionsTable.externalKey, externalKey)).limit(1);
     return rows[0] ? toNormalizedTransaction(rows[0]) : null;

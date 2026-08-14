@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, CreditCard, DollarSign, FileClock, Handshake, PiggyBank, TrendingUp, Wallet, Wifi } from "lucide-react";
+import { AlertTriangle, ArrowRight, CreditCard, DollarSign, FileClock, Handshake, PiggyBank, TrendingDown, TrendingUp, Wallet, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Unavailable } from "@/components/shared/unavailable";
 import { StatCard } from "@/components/cards/stat-card";
@@ -41,9 +41,17 @@ export default async function FinanceiroPage() {
   const financialAccounts = await fetchFinancialAccounts();
   const stoneSchedule = await buildFinancialScheduleForToday(asOfDate);
 
+  const currentMonth = asOfDate.slice(0, 7);
+
   const todaysCashIn = cashMovements
     .filter((m) => m.type === "entrada" && m.date === asOfDate)
     .reduce((sum, m) => sum + m.amount, 0);
+
+  const monthPayments = cashMovements
+    .filter((m) => m.type === "saida" && m.date.slice(0, 7) === currentMonth)
+    .reduce((sum, m) => sum + m.amount, 0);
+
+  const totalBalanceAllAccounts = financialAccounts.reduce((sum, a) => sum + a.currentBalance, 0);
 
   const caixaFisico = financialAccounts.find((a) => a.name.toLowerCase().includes("caixa"));
   const stoneMonthCurve = stoneSchedule.status === "ok" ? (stoneSchedule.schedule?.curves.find((c) => c.label === "mes_atual") ?? null) : null;
@@ -123,6 +131,12 @@ export default async function FinanceiroPage() {
         />
       </div>
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Pagamentos do mês" value={formatCurrency(monthPayments)} icon={TrendingDown} hint="saídas de caixa efetivas no mês, qualquer competência" />
+        <StatCard label="Contas a pagar pendentes" value={formatCurrency(payableSummary.totalPending)} icon={FileClock} hint={`${payableSummary.count} conta(s)`} />
+        <StatCard label="Saldo total (todas as contas)" value={formatCurrency(totalBalanceAllAccounts)} icon={Wallet} hint="Stone + Ailos + Caixa físico" />
+      </div>
+
       <Card>
         <CardContent className="pt-4 text-xs text-foreground-subtle">
           <p>
@@ -131,7 +145,10 @@ export default async function FinanceiroPage() {
             efetivamente entrou naquela data, podendo se referir a uma competência diferente (ex.: o recebimento de
             R$ 900,00 da IESA/Nissan em 10/07/2026 é uma entrada de caixa desse dia e a baixa de uma conta a receber
             de competência junho/2026 — nunca um serviço prestado em 10/07/2026). Os dois números acima nunca são
-            somados entre si.
+            somados entre si. <strong className="text-foreground-muted">Transferências entre contas e aportes de sócios</strong>{" "}
+            nunca entram em nenhum dos números acima (nem receita, nem despesa, nem faturamento) — ficam só no saldo
+            de cada conta. Ver <Link href="/financeiro/conta-stone" className="text-accent hover:underline">Conta Stone</Link> para o extrato
+            bancário reconciliado.
           </p>
         </CardContent>
       </Card>
