@@ -10,12 +10,12 @@ import type { NextRequest } from "next/server";
  * src/lib/auth/roles.ts e docs/database-and-auth-setup-guide.md). É uma trava simples de
  * Basic Auth para impedir acesso público enquanto a autenticação completa não está pronta.
  *
- * Caminhos que permanecem públicos mesmo com o gate ativado: /api/health (sem dado nenhum) e
- * /api/jumppark/sync (Missão 27 — tem autenticação própria por `CRON_SECRET`, verificada dentro
- * da própria rota; precisa ficar acessível sem Basic Auth para o cron diário da Vercel conseguir
- * chamá-la).
+ * Caminhos que permanecem públicos mesmo com o gate ativado: /api/health (sem dado nenhum),
+ * /api/jumppark/sync e /api/stone/sync (Missão 27 / Missão Financeiro V2 — ambos têm
+ * autenticação própria por `CRON_SECRET`, verificada dentro da própria rota; precisam ficar
+ * acessíveis sem Basic Auth para o cron diário da Vercel conseguir chamá-los).
  */
-const PUBLIC_PATHS = ["/api/health", "/api/jumppark/sync"];
+const PUBLIC_PATHS = ["/api/health", "/api/jumppark/sync", "/api/stone/sync"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));

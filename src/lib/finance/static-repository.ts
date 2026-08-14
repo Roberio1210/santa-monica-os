@@ -19,6 +19,8 @@ import type {
   CreateAllocationRuleInput,
   CreateCashMovementInput,
   CreateClassificationRuleInput,
+  CreateContractInput,
+  CreatePartnerInput,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialCategory,
@@ -70,6 +72,7 @@ export interface StaticFinanceRepositorySeed {
   accountsReceivable?: AccountsReceivable[];
   cashMovements?: CashMovement[];
   contracts?: Contract[];
+  partners?: Partner[];
   suppliers?: Supplier[];
   financialAccounts?: FinancialAccount[];
   accountTransfers?: AccountTransfer[];
@@ -86,6 +89,7 @@ export class StaticFinanceRepository implements FinanceRepository {
   private accountsReceivable: AccountsReceivable[];
   private cashMovements: CashMovement[];
   private contracts: Contract[];
+  private partners: Partner[];
   private suppliers: Supplier[];
   private financialAccounts: FinancialAccount[];
   private accountTransfers: AccountTransfer[];
@@ -104,6 +108,7 @@ export class StaticFinanceRepository implements FinanceRepository {
     this.accountsReceivable = (seed.accountsReceivable ?? initialAccountsReceivable).map((item) => ({ ...item }));
     this.cashMovements = (seed.cashMovements ?? initialCashMovements).map((item) => ({ ...item }));
     this.contracts = (seed.contracts ?? initialContracts).map((item) => ({ ...item }));
+    this.partners = (seed.partners ?? initialPartners).map((item) => ({ ...item }));
     this.suppliers = (seed.suppliers ?? initialSuppliers).map((item) => ({ ...item }));
     this.financialAccounts = (seed.financialAccounts ?? initialFinancialAccounts).map((item) => ({ ...item }));
     this.accountTransfers = (seed.accountTransfers ?? initialAccountTransfers).map((item) => ({ ...item }));
@@ -117,6 +122,11 @@ export class StaticFinanceRepository implements FinanceRepository {
 
   async getAccountsReceivable(id: string): Promise<AccountsReceivable | null> {
     const item = this.accountsReceivable.find((i) => i.id === id);
+    return item ? { ...item } : null;
+  }
+
+  async getAccountsReceivableByExternalId(externalId: string): Promise<AccountsReceivable | null> {
+    const item = this.accountsReceivable.find((i) => i.externalId === externalId);
     return item ? { ...item } : null;
   }
 
@@ -135,13 +145,18 @@ export class StaticFinanceRepository implements FinanceRepository {
   }
 
   async createAccountsReceivable(input: CreateAccountsReceivableInput): Promise<AccountsReceivable[]> {
+    if (input.externalId) {
+      const existing = this.accountsReceivable.find((i) => i.externalId === input.externalId);
+      if (existing) return [{ ...existing }];
+    }
+
     const now = new Date().toISOString();
     const category = input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId) : undefined;
     const costCenter = input.costCenterId ? initialCostCenters.find((c) => c.id === input.costCenterId) : undefined;
     const financialAccount = input.financialAccountId
       ? this.financialAccounts.find((a) => a.id === input.financialAccountId)
       : undefined;
-    const partyName = (input.partnerId ? initialPartners.find((p) => p.id === input.partnerId)?.name : undefined) ?? "Não informado";
+    const partyName = (input.partnerId ? this.partners.find((p) => p.id === input.partnerId)?.name : undefined) ?? "Não informado";
 
     const installmentTotal = input.installmentTotal && input.installmentTotal > 1 ? input.installmentTotal : 1;
     const installmentGroupId = installmentTotal > 1 ? generateId("parcelamento-receita") : null;
@@ -180,7 +195,7 @@ export class StaticFinanceRepository implements FinanceRepository {
         responsibleName: input.responsibleName ?? null,
         approverName: input.approverName ?? null,
         source: "manual",
-        externalId: null,
+        externalId: installmentTotal === 1 ? (input.externalId ?? null) : null,
         notes: input.notes ?? null,
         createdAt: now,
         updatedAt: now,
@@ -336,7 +351,7 @@ export class StaticFinanceRepository implements FinanceRepository {
   }
 
   private resolveCashMovementPartyName(customerId: string | null, partnerId: string | null, supplierId: string | null): string | null {
-    if (partnerId) return initialPartners.find((p) => p.id === partnerId)?.name ?? null;
+    if (partnerId) return this.partners.find((p) => p.id === partnerId)?.name ?? null;
     if (customerId) return null; // sem seed de customers em memória — nunca inventado
     if (supplierId) return this.suppliers.find((s) => s.id === supplierId)?.name ?? null;
     return null;
@@ -415,7 +430,49 @@ export class StaticFinanceRepository implements FinanceRepository {
   }
 
   async listPartners(): Promise<Partner[]> {
-    return initialPartners.map((item) => ({ ...item }));
+    return this.partners.map((item) => ({ ...item }));
+  }
+
+  /** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo parceiro/mensalista real. */
+  async createPartner(input: CreatePartnerInput): Promise<Partner> {
+    const created: Partner = { id: generateId("partner"), name: input.name, type: input.type };
+    this.partners.push(created);
+    return { ...created };
+  }
+
+  /** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo contrato real (mensalista/parceria). */
+  async createContract(input: CreateContractInput): Promise<Contract> {
+    const partnerName = this.partners.find((p) => p.id === input.partnerId)?.name ?? "Não informado";
+    const created: Contract = {
+      id: generateId("contract"),
+      partnerId: input.partnerId,
+      partnerName,
+      title: input.title,
+      type: input.type,
+      status: input.status ?? "ativo",
+      startDate: input.startDate ?? null,
+      endDate: input.endDate ?? null,
+      billingClosingDay: input.billingClosingDay ?? null,
+      dueDay: input.dueDay ?? null,
+      baseValue: input.baseValue ?? null,
+      notes: input.notes ?? null,
+      valuePeriods: [],
+      benefits: input.benefit
+        ? [
+            {
+              id: generateId("contract-benefit"),
+              contractId: "",
+              description: input.benefit.description,
+              quantityPerPeriod: input.benefit.quantityPerPeriod ?? null,
+              periodType: input.benefit.periodType ?? "mensal",
+              cumulative: input.benefit.cumulative ?? false,
+            },
+          ]
+        : [],
+    };
+    created.benefits.forEach((b) => (b.contractId = created.id));
+    this.contracts.push(created);
+    return { ...created };
   }
 
   async listSuppliers(): Promise<Supplier[]> {
@@ -501,6 +558,11 @@ export class StaticFinanceRepository implements FinanceRepository {
 
   async getAccountsPayable(id: string): Promise<AccountsPayable | null> {
     const item = this.accountsPayable.find((i) => i.id === id);
+    return item ? { ...item } : null;
+  }
+
+  async getAccountsPayableByExternalId(externalId: string): Promise<AccountsPayable | null> {
+    const item = this.accountsPayable.find((i) => i.externalId === externalId);
     return item ? { ...item } : null;
   }
 
@@ -758,7 +820,7 @@ export class StaticFinanceRepository implements FinanceRepository {
         supplierId: input.createRule.supplierId ?? null,
         supplierName: input.createRule.supplierId ? this.suppliers.find((s) => s.id === input.createRule!.supplierId)?.name ?? null : null,
         partnerId: input.createRule.partnerId ?? null,
-        partnerName: input.createRule.partnerId ? initialPartners.find((p) => p.id === input.createRule!.partnerId)?.name ?? null : null,
+        partnerName: input.createRule.partnerId ? this.partners.find((p) => p.id === input.createRule!.partnerId)?.name ?? null : null,
         categoryId: input.createRule.categoryId ?? null,
         categoryName: input.createRule.categoryId ? initialFinancialCategories.find((c) => c.id === input.createRule!.categoryId)?.name ?? null : null,
         keyword: input.createRule.keyword ?? null,
@@ -787,7 +849,7 @@ export class StaticFinanceRepository implements FinanceRepository {
       supplierId: input.supplierId ?? null,
       supplierName: input.supplierId ? this.suppliers.find((s) => s.id === input.supplierId)?.name ?? null : null,
       partnerId: input.partnerId ?? null,
-      partnerName: input.partnerId ? initialPartners.find((p) => p.id === input.partnerId)?.name ?? null : null,
+      partnerName: input.partnerId ? this.partners.find((p) => p.id === input.partnerId)?.name ?? null : null,
       categoryId: input.categoryId ?? null,
       categoryName: input.categoryId ? initialFinancialCategories.find((c) => c.id === input.categoryId)?.name ?? null : null,
       keyword: input.keyword ?? null,

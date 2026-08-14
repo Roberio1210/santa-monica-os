@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 
 type BadgeVariant = "default" | "positive" | "critical" | "warning" | "info" | "outline";
 import { Button } from "@/components/ui/button";
-import { syncStoneAction, reprocessStoneDayAction, updateDivergenceReviewAction, updateReconciliationReviewAction } from "@/app/financeiro/stone-conciliacao/actions";
+import { syncStoneAction, reprocessStoneDayAction, updateDivergenceReviewAction, updateReconciliationReviewAction, confirmReconciliationReceivableAction } from "@/app/financeiro/stone-conciliacao/actions";
 import type { StoneConciliacaoPageData } from "@/lib/integrations/stone/pageData";
 import type { StoneIntegrationHealth } from "@/lib/integrations/stone/healthStatus";
 import type { StoneSyncStatusReport, StoneSyncVisualStatus } from "@/lib/integrations/stone/syncStatus";
@@ -263,7 +263,7 @@ function scheduleUnavailableMessage(status: string): string {
 }
 
 function ReconciliationCard({ results }: { results: StoneReconciliationResultRow[] }) {
-  const reviewable = results.filter((r) => r.matchType === "ambiguous" || r.matchType === "probable_match" || r.reviewStatus !== "open");
+  const reviewable = results.filter((r) => r.matchType === "ambiguous" || r.matchType === "probable_match" || r.matchType === "exact_match" || r.reviewStatus !== "open");
   const counts = results.reduce<Record<string, number>>((acc, r) => { acc[r.matchType] = (acc[r.matchType] ?? 0) + 1; return acc; }, {});
 
   return (
@@ -289,8 +289,12 @@ function ReconciliationCard({ results }: { results: StoneReconciliationResultRow
   );
 }
 
+const RECEIVABLE_ELIGIBLE_MATCH_TYPES = new Set(["exact_match", "probable_match"]);
+
 function ReconciliationRow({ result }: { result: StoneReconciliationResultRow }) {
   const [state, action, pending] = useActionState(updateReconciliationReviewAction, { error: null });
+  const [receivableState, receivableAction, receivablePending] = useActionState(confirmReconciliationReceivableAction, { error: null });
+  const eligibleForReceivable = RECEIVABLE_ELIGIBLE_MATCH_TYPES.has(result.matchType);
   return (
     <div className="rounded-lg border border-border-subtle p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -306,6 +310,16 @@ function ReconciliationRow({ result }: { result: StoneReconciliationResultRow })
         <Button type="submit" size="sm" variant="outline" disabled={pending}>{pending ? "Salvando..." : "Atualizar"}</Button>
       </form>
       {state.error ? <p className="mt-1 text-xs text-critical">{state.error}</p> : null}
+      {eligibleForReceivable ? (
+        <form action={receivableAction} className="mt-2 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-2">
+          <input type="hidden" name="id" value={result.id} />
+          <input name="performedBy" type="text" placeholder="Seu nome" required className="h-8 w-32 rounded-lg border border-border bg-background-elevated px-2 text-xs" aria-label="Responsável pela confirmação" />
+          <Button type="submit" size="sm" disabled={receivablePending}>{receivablePending ? "Confirmando..." : "Confirmar recebimento"}</Button>
+          <span className="text-xs text-foreground-subtle">Cria a conta a receber (e a baixa, se a Stone já confirmou a liquidação) — nunca automático.</span>
+        </form>
+      ) : null}
+      {receivableState.error ? <p className="mt-1 text-xs text-critical">{receivableState.error}</p> : null}
+      {receivableState.success ? <p className="mt-1 text-xs text-positive">{receivableState.success}</p> : null}
     </div>
   );
 }

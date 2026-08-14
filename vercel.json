@@ -3,6 +3,10 @@
     {
       "path": "/api/jumppark/sync",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/stone/sync",
+      "schedule": "0 10 * * *"
     }
   ]
 }

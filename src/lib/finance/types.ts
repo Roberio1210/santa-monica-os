@@ -100,6 +100,8 @@ export interface CreateAccountsReceivableInput {
   approverName?: string | null;
   /** Quando > 1, gera N parcelas de expectedAmount/installmentTotal, vencendo em meses seguintes. */
   installmentTotal?: number;
+  /** Slug estável para idempotência (mesmo padrão de CreateAccountsPayableInput.externalId, Missão Financeiro V2) — reprocessar a mesma origem nunca cria um segundo recebível. Só aplicado quando installmentTotal <= 1. */
+  externalId?: string | null;
 }
 
 export interface UpdateAccountsReceivableInput {
@@ -219,6 +221,40 @@ export interface Partner {
   id: string;
   name: string;
   type: "parceria_pos_paga" | "contrato_mensal" | "outro";
+}
+
+export interface CreatePartnerInput {
+  name: string;
+  type: Partner["type"];
+  contactName?: string | null;
+  contactPhone?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Missão Financeiro V2 (Prioridade 4) — capacidade operacional de registrar um contrato real
+ * (mensalista/parceria). O benefício é opcional e único aqui de propósito: cobre o caso comum
+ * (ex.: "6 lavações/mês, não cumulativas") sem construir uma UI de múltiplos benefícios que
+ * nenhum contrato real hoje precisa — pode ser estendido quando um caso real exigir mais de um.
+ */
+export interface CreateContractInput {
+  partnerId: string;
+  title: string;
+  type: ContractType;
+  status?: ContractStatus;
+  startDate?: string | null;
+  endDate?: string | null;
+  billingClosingDay?: number | null;
+  dueDay?: number | null;
+  /** Valor fixo do contrato. Null quando variável — nunca inventado. */
+  baseValue?: number | null;
+  notes?: string | null;
+  benefit?: {
+    description: string;
+    quantityPerPeriod?: number | null;
+    periodType?: string;
+    cumulative?: boolean;
+  } | null;
 }
 
 export interface ContractValuePeriod {

@@ -97,6 +97,18 @@ describe("Recebimento parcial e total, com taxa", () => {
     expect(updated.netAmount).toBe(1200);
     expect(updated.feeAmount).toBeNull();
   });
+
+  it("Pix recebido na conta Ailos nunca é roteado automaticamente para a conta Stone — forma de pagamento e conta de destino são escolhas independentes (Missão Financeiro V2, Prioridade 7)", async () => {
+    const repo = new StaticFinanceRepository({ accountsReceivable: [] });
+    const [created] = await repo.createAccountsReceivable(baseInput);
+
+    await repo.recordReceivablePayment({ accountsReceivableId: created.id, amount: 1200, paidAt: "2026-08-10", method: "pix", financialAccountId: "conta-ailos-credcrea" });
+
+    const settlements = await repo.listReceivableSettlements(created.id);
+    expect(settlements).toHaveLength(1);
+    expect(settlements[0].method).toBe("pix");
+    expect(settlements[0].financialAccountId).toBe("conta-ailos-credcrea");
+  });
 });
 
 describe("Impedimento de recebimento acima do saldo", () => {

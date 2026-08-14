@@ -293,6 +293,11 @@ export class StonePostgresRepository implements StonePersistenceRepository {
     return rows.map(toNormalizedTransaction);
   }
 
+  async getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null> {
+    const rows = await this.db().select().from(stoneNormalizedTransactionsTable).where(eq(stoneNormalizedTransactionsTable.externalKey, externalKey)).limit(1);
+    return rows[0] ? toNormalizedTransaction(rows[0]) : null;
+  }
+
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {
     if (records.length === 0) return;
     const db = this.db();
@@ -346,6 +351,11 @@ export class StonePostgresRepository implements StonePersistenceRepository {
       .returning();
     if (!row) throw new Error(`Resultado de conciliação não encontrado: ${id}`);
     return toReconciliationResultRow(row);
+  }
+
+  async getReconciliationResultById(id: string): Promise<StoneReconciliationResultRow | null> {
+    const rows = await this.db().select().from(stoneReconciliationResultsTable).where(eq(stoneReconciliationResultsTable.id, id)).limit(1);
+    return rows[0] ? toReconciliationResultRow(rows[0]) : null;
   }
 
   async upsertDivergences(records: StoneDivergenceRecord[]): Promise<void> {

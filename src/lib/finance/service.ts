@@ -18,6 +18,8 @@ import type {
   ClassificationRule,
   Contract,
   CostCenter,
+  CreateContractInput,
+  CreatePartnerInput,
   DreCostCenterGroup,
   DreRegime,
   DreReport,
@@ -264,6 +266,16 @@ export async function fetchRevenueCategories(): Promise<FinancialCategory[]> {
 
 export async function fetchPartners(): Promise<Partner[]> {
   return getFinanceRepository().listPartners();
+}
+
+/** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo parceiro/mensalista real. */
+export async function createPartner(input: CreatePartnerInput): Promise<Partner> {
+  return getFinanceRepository().createPartner(input);
+}
+
+/** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo contrato real (mensalista/parceria). */
+export async function createContract(input: CreateContractInput): Promise<Contract> {
+  return getFinanceRepository().createContract(input);
 }
 
 // --- Contas a Pagar ---

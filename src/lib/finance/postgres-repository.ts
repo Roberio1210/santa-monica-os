@@ -53,6 +53,8 @@ import type {
   CreateAllocationRuleInput,
   CreateCashMovementInput,
   CreateClassificationRuleInput,
+  CreateContractInput,
+  CreatePartnerInput,
   CreateRecurringBillTemplateInput,
   DreLine,
   FinancePaymentMethod,
@@ -232,6 +234,12 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return this.toAccountsReceivable(rows[0]);
   }
 
+  async getAccountsReceivableByExternalId(externalId: string): Promise<AccountsReceivable | null> {
+    const rows = await this.db().select().from(accountsReceivableTable).where(eq(accountsReceivableTable.externalId, externalId)).limit(1);
+    if (!rows[0]) return null;
+    return this.toAccountsReceivable(rows[0]);
+  }
+
   async recordPayment(input: RecordPaymentInput): Promise<AccountsReceivable> {
     const db = this.db();
     return db.transaction(async (tx) => {
@@ -273,6 +281,13 @@ export class PostgresFinanceRepository implements FinanceRepository {
     const installmentGroupId = installmentTotal > 1 ? crypto.randomUUID() : null;
 
     return db.transaction(async (tx) => {
+      // Idempotência (Missão Financeiro V2) — mesmo padrão já usado em createAccountsPayable:
+      // reprocessar a mesma origem com o mesmo externalId nunca cria um segundo recebível.
+      if (input.externalId) {
+        const [existing] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.externalId, input.externalId)).limit(1);
+        if (existing) return [await this.toAccountsReceivable(existing, tx)];
+      }
+
       const created: AccountsReceivable[] = [];
       for (const installment of installments) {
         const [row] = await tx
@@ -301,6 +316,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
             responsibleName: input.responsibleName ?? null,
             approverName: input.approverName ?? null,
             source: "manual",
+            externalId: installmentTotal === 1 ? (input.externalId ?? null) : null,
             notes: input.notes ?? null,
           })
           .returning();
@@ -682,6 +698,86 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return rows.map((r) => ({ id: r.id, name: r.name, type: r.type as Partner["type"] }));
   }
 
+  /** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo parceiro/mensalista real. */
+  async createPartner(input: CreatePartnerInput): Promise<Partner> {
+    const [row] = await this.db()
+      .insert(partnersTable)
+      .values({
+        name: input.name,
+        type: input.type,
+        contactName: input.contactName ?? null,
+        contactPhone: input.contactPhone ?? null,
+        source: "manual",
+        notes: input.notes ?? null,
+      })
+      .returning();
+    return { id: row.id, name: row.name, type: row.type as Partner["type"] };
+  }
+
+  /**
+   * Missão Financeiro V2 (Prioridade 4) — cadastro de um novo contrato real (mensalista/parceria).
+   * Nunca gera nenhuma conta a receber sozinho — só cria o contrato; o fechamento/cobrança
+   * continua exigindo confirmação explícita (ex.: `generateIesaClosingReceivable` para parceria
+   * pós-paga, ou a baixa manual de uma conta a receber para mensalidade).
+   */
+  async createContract(input: CreateContractInput): Promise<Contract> {
+    const db = this.db();
+    const [row] = await db
+      .insert(contractsTable)
+      .values({
+        partnerId: input.partnerId,
+        title: input.title,
+        type: input.type,
+        status: input.status ?? "ativo",
+        startDate: input.startDate ?? null,
+        endDate: input.endDate ?? null,
+        billingClosingDay: input.billingClosingDay ?? null,
+        dueDay: input.dueDay ?? null,
+        baseValue: input.baseValue !== null && input.baseValue !== undefined ? String(input.baseValue) : null,
+        source: "manual",
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    if (input.benefit) {
+      await db.insert(contractBenefitsTable).values({
+        contractId: row.id,
+        description: input.benefit.description,
+        quantityPerPeriod: input.benefit.quantityPerPeriod ?? null,
+        periodType: input.benefit.periodType ?? "mensal",
+        cumulative: input.benefit.cumulative ?? false,
+        source: "manual",
+      });
+    }
+
+    const [partnerRow] = await db.select().from(partnersTable).where(eq(partnersTable.id, row.partnerId)).limit(1);
+    const benefitRows = await db.select().from(contractBenefitsTable).where(eq(contractBenefitsTable.contractId, row.id));
+
+    return {
+      id: row.id,
+      partnerId: row.partnerId,
+      partnerName: partnerRow?.name ?? "Não informado",
+      title: row.title,
+      type: row.type as ContractType,
+      status: row.status as ContractStatus,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      billingClosingDay: row.billingClosingDay,
+      dueDay: row.dueDay,
+      baseValue: row.baseValue !== null ? Number(row.baseValue) : null,
+      notes: row.notes,
+      valuePeriods: [],
+      benefits: benefitRows.map((b) => ({
+        id: b.id,
+        contractId: b.contractId,
+        description: b.description,
+        quantityPerPeriod: b.quantityPerPeriod,
+        periodType: b.periodType,
+        cumulative: b.cumulative,
+      })),
+    };
+  }
+
   private async resolvePartyName(customerId: string | null, partnerId: string | null, runner: DbOrTx = this.db()): Promise<string> {
     const db = runner;
     if (partnerId) {
@@ -1056,6 +1152,12 @@ export class PostgresFinanceRepository implements FinanceRepository {
 
   async getAccountsPayable(id: string): Promise<AccountsPayable | null> {
     const rows = await this.db().select().from(accountsPayableTable).where(eq(accountsPayableTable.id, id)).limit(1);
+    if (!rows[0]) return null;
+    return this.toAccountsPayable(rows[0]);
+  }
+
+  async getAccountsPayableByExternalId(externalId: string): Promise<AccountsPayable | null> {
+    const rows = await this.db().select().from(accountsPayableTable).where(eq(accountsPayableTable.externalId, externalId)).limit(1);
     if (!rows[0]) return null;
     return this.toAccountsPayable(rows[0]);
   }

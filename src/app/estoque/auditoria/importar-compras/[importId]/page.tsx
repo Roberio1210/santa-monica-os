@@ -2,20 +2,29 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ImportLineRow } from "@/components/inventory/audit/import-line-row";
+import { PurchaseImportExpenseCard } from "@/components/inventory/purchase-import-expense-card";
 import { fetchPurchaseImportPreview } from "@/lib/inventory/purchase-import-service";
+import { getPurchaseImportExpenseLinkStatus } from "@/lib/inventory/purchase-expense-link";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import { fetchFinancialAccounts } from "@/lib/finance/service";
 
 export const dynamic = "force-dynamic";
 
 export default async function ImportarComprasDetalhePage({ params }: { params: Promise<{ importId: string }> }) {
   const { importId } = await params;
-  const [preview, allItems] = await Promise.all([fetchPurchaseImportPreview(importId), getInventoryRepository().listItems()]);
+  const [preview, allItems, expenseLinkStatus, financialAccounts] = await Promise.all([
+    fetchPurchaseImportPreview(importId),
+    getInventoryRepository().listItems(),
+    getPurchaseImportExpenseLinkStatus(importId),
+    fetchFinancialAccounts(),
+  ]);
   const items = allItems.filter((i) => i.canonicalItemId === null).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 
   const pending = preview.lines.filter((l) => l.status === "pendente" && l.valid);
   const invalid = preview.lines.filter((l) => !l.valid);
   const duplicated = preview.lines.filter((l) => l.status === "duplicado");
   const confirmed = preview.lines.filter((l) => l.status === "confirmado" || l.status === "ignorado");
+  const fullyResolved = pending.length === 0 && invalid.length === 0 && confirmed.length > 0;
 
   return (
     <div className="space-y-6">
@@ -97,6 +106,15 @@ export default async function ImportarComprasDetalhePage({ params }: { params: P
           </CardContent>
         </Card>
       )}
+
+      {fullyResolved ? (
+        <PurchaseImportExpenseCard
+          purchaseImportId={importId}
+          existingExpense={expenseLinkStatus.existingExpense}
+          suggestedSupplierName={expenseLinkStatus.suggestedSupplierName}
+          financialAccounts={financialAccounts}
+        />
+      ) : null}
     </div>
   );
 }

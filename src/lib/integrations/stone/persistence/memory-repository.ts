@@ -113,6 +113,10 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     return [...this.normalizedTransactions.values()].filter((r) => r.expectedPaymentDate !== null && r.expectedPaymentDate >= fromDate && r.expectedPaymentDate <= toDate);
   }
 
+  async getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null> {
+    return this.normalizedTransactions.get(externalKey) ?? null;
+  }
+
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {
     const now = new Date().toISOString();
     for (const record of records) {
@@ -138,6 +142,10 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     const updated: StoneReconciliationResultRow = { ...row, reviewStatus: status, updatedAt: new Date().toISOString() };
     this.reconciliationResults.set(key, updated);
     return updated;
+  }
+
+  async getReconciliationResultById(id: string): Promise<StoneReconciliationResultRow | null> {
+    return [...this.reconciliationResults.values()].find((r) => r.id === id) ?? null;
   }
 
   async upsertDivergences(records: StoneDivergenceRecord[]): Promise<void> {

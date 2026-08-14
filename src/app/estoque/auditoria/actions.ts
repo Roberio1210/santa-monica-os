@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { recordDuplicateDecision, type DuplicatePairDecision } from "@/lib/inventory/duplicate-decisions";
 import { consolidateItems, type ConsolidationOverrides } from "@/lib/inventory/consolidation";
 import { createPurchaseImportPreview, confirmPurchaseImportLine } from "@/lib/inventory/purchase-import-service";
+import { linkPurchaseImportToExpense } from "@/lib/inventory/purchase-expense-link";
 import { STOCK_CONSUMABLE_CLASSIFICATIONS, type InventoryCategory, type InventoryUnit, type ItemClassification, type PurchaseLineDecision } from "@/lib/inventory/types";
+import type { FinancePaymentMethod } from "@/lib/finance/types";
 
 export interface FormActionState {
   error: string | null;
@@ -152,4 +154,42 @@ export async function confirmImportLineAction(_prevState: ConfirmLineState, form
   revalidatePath("/estoque/produtos");
   revalidatePath("/estoque");
   return { error: null, success: "Linha confirmada." };
+}
+
+/**
+ * Missão Financeiro V2 (Prioridade 8) — ponte Compra de Estoque → Conta a Pagar. Só chamada
+ * explicitamente pelo usuário na tela de detalhe da importação; nunca lança despesa automática
+ * para compras antigas. Idempotente via `linkPurchaseImportToExpense` (externalId
+ * `purchase-import:{id}`) — reenviar o formulário nunca duplica.
+ */
+export async function linkPurchaseImportToExpenseAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const purchaseImportId = String(formData.get("purchaseImportId") ?? "");
+  const supplierText = String(formData.get("supplierText") ?? "").trim();
+  const dueDate = String(formData.get("dueDate") ?? "");
+  const paymentMethod = String(formData.get("paymentMethod") ?? "desconhecido") as FinancePaymentMethod;
+  const financialAccountId = parseOptionalString(formData.get("financialAccountId"));
+  const installmentTotalRaw = parseOptionalNumber(formData.get("installmentTotal"));
+  const notes = parseOptionalString(formData.get("notes"));
+
+  if (!purchaseImportId) return { error: "Compra inválida.", success: null };
+  if (!supplierText) return { error: "Informe o fornecedor.", success: null };
+  if (!dueDate) return { error: "Informe o vencimento.", success: null };
+
+  try {
+    const created = await linkPurchaseImportToExpense({
+      purchaseImportId,
+      supplierText,
+      dueDate,
+      paymentMethod,
+      financialAccountId,
+      installmentTotal: installmentTotalRaw ?? undefined,
+      notes,
+    });
+    revalidatePath(`/estoque/auditoria/importar-compras/${purchaseImportId}`);
+    revalidatePath("/financeiro/contas-a-pagar");
+    revalidatePath("/financeiro");
+    return { error: null, success: `Despesa lançada: R$ ${created.originalAmount.toFixed(2)} — vencimento ${created.dueDate}.` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao lançar a despesa.", success: null };
+  }
 }

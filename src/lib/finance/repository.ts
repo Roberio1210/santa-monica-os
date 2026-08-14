@@ -16,6 +16,8 @@ import type {
   CreateAllocationRuleInput,
   CreateCashMovementInput,
   CreateClassificationRuleInput,
+  CreateContractInput,
+  CreatePartnerInput,
   CreateRecurringBillTemplateInput,
   FinancialAccountBalance,
   FinancialCategory,
@@ -44,6 +46,8 @@ import type {
 export interface FinanceRepository {
   listAccountsReceivable(): Promise<AccountsReceivable[]>;
   getAccountsReceivable(id: string): Promise<AccountsReceivable | null>;
+  /** Missão Financeiro V2 — busca idempotente por origem (ex.: conciliação Stone confirmada, fechamento IESA). */
+  getAccountsReceivableByExternalId(externalId: string): Promise<AccountsReceivable | null>;
   /**
    * Registra um recebimento (total ou parcial) e atualiza receivedAmount/outstandingAmount do
    * registro correspondente. Método legado, preservado por compatibilidade — não gera
@@ -68,6 +72,10 @@ export interface FinanceRepository {
   deleteAccountsReceivable(id: string): Promise<void>;
   /** Todos os clientes/parceiros cadastrados (inclusive os sem contrato, ex.: WeCharge). */
   listPartners(): Promise<Partner[]>;
+  /** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo parceiro/mensalista real. */
+  createPartner(input: CreatePartnerInput): Promise<Partner>;
+  /** Missão Financeiro V2 (Prioridade 4) — cadastro de um novo contrato real (mensalista/parceria). */
+  createContract(input: CreateContractInput): Promise<Contract>;
 
   // --- Fundação (fornecedores, contas financeiras, recorrências, plano de contas) ---
   listSuppliers(): Promise<Supplier[]>;
@@ -88,6 +96,8 @@ export interface FinanceRepository {
   // --- Contas a Pagar ---
   listAccountsPayable(): Promise<AccountsPayable[]>;
   getAccountsPayable(id: string): Promise<AccountsPayable | null>;
+  /** Missão Financeiro V2 (Prioridade 8) — busca idempotente por origem (ex.: compra de estoque já lançada). */
+  getAccountsPayableByExternalId(externalId: string): Promise<AccountsPayable | null>;
   /** Retorna mais de um registro quando installmentTotal > 1 (parcelas vinculadas). */
   createAccountsPayable(input: CreateAccountsPayableInput): Promise<AccountsPayable[]>;
   updateAccountsPayable(input: UpdateAccountsPayableInput): Promise<AccountsPayable>;

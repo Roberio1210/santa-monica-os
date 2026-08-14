@@ -15,3 +15,8 @@ export function getFinanceRepository(): FinanceRepository {
   cached = getStorageMode() === "postgres" ? new PostgresFinanceRepository() : new StaticFinanceRepository();
   return cached;
 }
+
+/** Só para testes — força a próxima chamada a criar uma instância nova (limpa o estado em memória). Mesmo padrão de `stone/persistence/repository-factory.ts`. */
+export function resetFinanceRepositoryForTests(): void {
+  cached = null;
+}

@@ -30,11 +30,15 @@ export interface StonePersistenceRepository {
   /** Upsert em lote por `externalKey` — nunca duplica, sempre atualiza o estado mais recente da parcela. */
   upsertNormalizedTransactions(records: StoneNormalizedTransactionRecord[]): Promise<void>;
   listNormalizedTransactionsByExpectedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
+  /** Missão Financeiro V2 — busca pontual pela chave determinística da parcela (Z2, `identity.ts`), usada ao confirmar uma conciliação como recebível. */
+  getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null>;
 
   /** Upsert em lote por `naturalKey` — reprocessar o mesmo período nunca duplica um resultado. */
   upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void>;
   listReconciliationResults(periodFrom: string, periodTo: string): Promise<StoneReconciliationResultRow[]>;
   updateReconciliationReviewStatus(id: string, status: StoneReviewStatus): Promise<StoneReconciliationResultRow>;
+  /** Missão Financeiro V2 — busca pontual por id, usada ao confirmar manualmente uma conciliação como recebível (nunca em lote/automático). */
+  getReconciliationResultById(id: string): Promise<StoneReconciliationResultRow | null>;
 
   /**
    * Upsert em lote por `naturalKey` — só atualiza os campos factuais (evidência, impacto,

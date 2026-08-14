@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { syncStonePeriod } from "@/lib/integrations/stone/persistence/importRun";
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
 import type { StoneReviewStatus } from "@/lib/integrations/stone/persistence/types";
+import { confirmReconciliationAsReceivable } from "@/lib/integrations/stone/persistence/receivableFromMatch";
 import { saoPauloDateISO, addDaysIso, isValidIsoDate } from "@/lib/utils/timezone";
 
 /**
@@ -91,6 +92,32 @@ export async function updateDivergenceReviewAction(_prevState: FormActionState, 
 
   revalidatePath("/financeiro/stone-conciliacao");
   return { error: null, success: "Revisão atualizada." };
+}
+
+/**
+ * Missão Financeiro V2 (Prioridade 1) — confirma UM resultado de conciliação (exact_match ou
+ * probable_match) como recebível real, sempre por clique explícito do operador nesta linha.
+ * Nunca chamada em lote, nunca automática a partir do sync.
+ */
+export async function confirmReconciliationReceivableAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const id = String(formData.get("id") ?? "");
+  const performedBy = String(formData.get("performedBy") ?? "").trim();
+  if (!id) return { error: "Resultado de conciliação inválido." };
+  if (!performedBy) return { error: "Informe seu nome para confirmar o recebimento." };
+
+  try {
+    const result = await confirmReconciliationAsReceivable(id, performedBy);
+    if (result.status === "not_eligible") return { error: result.reason ?? "Esta conciliação não pode virar recebível." };
+
+    revalidatePath("/financeiro/stone-conciliacao");
+    revalidatePath("/financeiro/contas-a-receber");
+    revalidatePath("/financeiro");
+
+    if (result.status === "already_exists") return { error: null, success: "Este recebível já havia sido registrado — nenhuma duplicata criada." };
+    return { error: null, success: result.settled ? "Recebível criado e já baixado (Stone já confirmava a liquidação)." : "Recebível criado, em aberto." };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao registrar o recebível." };
+  }
 }
 
 export async function updateReconciliationReviewAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {

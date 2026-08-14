@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, DollarSign, FileClock, Handshake, TrendingUp, Wallet, Wifi } from "lucide-react";
+import { AlertTriangle, ArrowRight, CreditCard, DollarSign, FileClock, Handshake, PiggyBank, TrendingUp, Wallet, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Unavailable } from "@/components/shared/unavailable";
 import { StatCard } from "@/components/cards/stat-card";
@@ -8,8 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils/format";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
-import { fetchAccountsPayableOverview, fetchAccountsReceivableOverview, fetchCashMovements, fetchContracts } from "@/lib/finance/service";
+import { fetchAccountsPayableOverview, fetchAccountsReceivableOverview, fetchCashMovements, fetchContracts, fetchFinancialAccounts } from "@/lib/finance/service";
 import { resolveContractValue } from "@/lib/finance/status";
+import { fetchIesaMonthlyClosings } from "@/lib/finance/iesaClosing";
+import { IesaClosingCard } from "@/components/finance/iesa-closing-card";
+import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financialScheduleService";
 
 // Evita que dados do JumpPark e das contas a receber fiquem congelados no HTML estático.
 export const dynamic = "force-dynamic";
@@ -34,10 +37,19 @@ export default async function FinanceiroPage() {
   const { summary: payableSummary } = await fetchAccountsPayableOverview(asOfDate);
   const cashMovements = await fetchCashMovements();
   const contracts = await fetchContracts();
+  const iesaClosings = await fetchIesaMonthlyClosings();
+  const financialAccounts = await fetchFinancialAccounts();
+  const stoneSchedule = await buildFinancialScheduleForToday(asOfDate);
 
   const todaysCashIn = cashMovements
     .filter((m) => m.type === "entrada" && m.date === asOfDate)
     .reduce((sum, m) => sum + m.amount, 0);
+
+  const caixaFisico = financialAccounts.find((a) => a.name.toLowerCase().includes("caixa"));
+  const stoneMonthCurve = stoneSchedule.status === "ok" ? (stoneSchedule.schedule?.curves.find((c) => c.label === "mes_atual") ?? null) : null;
+  const iesaReceivableOpen = iesaClosings
+    .filter((c) => c.outstandingAmount !== null && c.billingStatus !== "paid" && c.billingStatus !== "cancelled")
+    .reduce((sum, c) => sum + (c.outstandingAmount ?? 0), 0);
 
   const recentEntries = cashMovements
     .filter((m) => m.type === "entrada")
@@ -82,6 +94,32 @@ export default async function FinanceiroPage() {
           label="Valores vencidos"
           value={formatCurrency(receivableSummary.totalOverdue)}
           icon={AlertTriangle}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          label="Posição do caixa físico"
+          value={caixaFisico ? formatCurrency(caixaFisico.currentBalance) : "Dados insuficientes"}
+          icon={PiggyBank}
+          hint={caixaFisico?.informedBalanceAt ? `conferido em ${caixaFisico.informedBalanceAt.slice(0, 10)}` : "saldo calculado, nunca conferido ainda"}
+        />
+        <StatCard
+          label="Valor líquido Stone (mês)"
+          value={stoneMonthCurve ? formatCurrency(stoneMonthCurve.netAmountExpected) : "Dados insuficientes"}
+          icon={CreditCard}
+          hint={stoneMonthCurve ? `bruto ${formatCurrency(stoneMonthCurve.grossAmountExpected)}` : "Stone não configurado ou sem dado no período"}
+        />
+        <StatCard
+          label="Taxas Stone (mês)"
+          value={stoneMonthCurve ? formatCurrency(stoneMonthCurve.feesExpected) : "Dados insuficientes"}
+          icon={CreditCard}
+        />
+        <StatCard
+          label="IESA a receber"
+          value={formatCurrency(iesaReceivableOpen)}
+          icon={Handshake}
+          hint={`${iesaClosings.filter((c) => c.billingStatus !== "paid" && c.billingStatus !== "cancelled").length} competência(s) em aberto`}
         />
       </div>
 
@@ -157,8 +195,11 @@ export default async function FinanceiroPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Contratos recorrentes</CardTitle>
+          <Link href="/financeiro/contratos/novo" className="flex items-center gap-1 text-xs text-accent hover:underline">
+            Novo contrato <ArrowRight className="h-3 w-3" />
+          </Link>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="overflow-x-auto">
@@ -195,6 +236,8 @@ export default async function FinanceiroPage() {
           </div>
         </CardContent>
       </Card>
+
+      <IesaClosingCard closings={iesaClosings} />
 
       <Card>
         <CardHeader>
