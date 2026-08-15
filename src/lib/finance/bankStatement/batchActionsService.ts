@@ -20,6 +20,8 @@ export interface ConfirmGroupInput {
   partnerId?: string | null;
   counterAccountId?: string | null;
   performedBy: string;
+  /** Contexto adicional gravado no movimento real (ex.: "recebido por engano, devolvido no mesmo dia") — nunca obrigatório, sempre auditável quando informado. */
+  notes?: string | null;
   /** Fase V — aprendizado controlado: cria uma regra determinística a partir deste grupo. */
   createRule?: { criteriaDirection?: "entrada" | "saida" | null; criteriaCounterpartyPattern?: string | null; criteriaDescriptionKeyword?: string | null };
 }
@@ -51,6 +53,7 @@ export async function confirmGroup(input: ConfirmGroupInput, financialAccountId:
           supplierId: input.supplierId ?? null,
           partnerId: input.partnerId ?? null,
           counterAccountId: input.counterAccountId ?? null,
+          notes: input.notes ?? null,
         },
         financialAccountId,
       );

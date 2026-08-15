@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { confirmBankStatementImport } from "@/lib/finance/bankStatement/importService";
-import { attemptStoneSettlementReconciliation, markBankStatementLineIgnored, processBankStatementLine } from "@/lib/finance/bankStatement/lineProcessingService";
+import { attemptStoneSettlementReconciliation, correctLineType, markBankStatementLineIgnored, processBankStatementLine } from "@/lib/finance/bankStatement/lineProcessingService";
 import { getBankStatementRepository, resetBankStatementRepositoryForTests } from "@/lib/finance/bankStatement/repository-factory";
 import { getFinanceRepository, resetFinanceRepositoryForTests } from "@/lib/finance/repository-factory";
 import { getStonePersistenceRepository, resetStonePersistenceRepositoryForTests } from "@/lib/integrations/stone/persistence/repository-factory";
@@ -249,5 +249,42 @@ describe("markBankStatementLineIgnored — só com justificativa explícita e au
   it("sem justificativa, lança erro — nunca ignora silenciosamente", async () => {
     const lineId = await seedLine('data,descricao,valor,tipo\n2026-08-02,Lançamento diverso,"5,00",saida');
     await expect(markBankStatementLineIgnored(lineId, "", "Gestor")).rejects.toThrow(/justificativa/i);
+  });
+});
+
+describe("correctLineType — Missão Financeiro V2.2 (Fase D/G item 7D), correção evidenciada de erro do parser/classificador", () => {
+  it("corrige o tipo e reseta o status para o inicial do novo tipo, grava auditoria", async () => {
+    const lineId = await seedLine('data,descricao,valor,tipo\n2026-04-16,Maestro | Débito / STYLUS CONTABILIDADE,"59,33",entrada');
+    const updated = await correctLineType({
+      lineId,
+      correctedType: "recebimento_venda_stone",
+      reason: "Linha vizinha 794 já é o pagamento real da Stylus; rótulo Maestro|Débito confirma venda Stone, nome da Stylus vazou da linha anterior.",
+      performedBy: "Roberio Rocha Filho",
+    });
+    expect(updated.type).toBe("recebimento_venda_stone");
+    expect(updated.status).toBe("nao_conciliado"); // initialStatusForType para recebimento_venda_stone
+
+    const audit = await getFinanceRepository().listAuditLog("bank_statement_line", lineId);
+    expect(audit.some((a) => a.action === "correct_line_type")).toBe(true);
+  });
+
+  it("linha corrigida para recebimento_venda_stone some do motor de classificação geral (nunca mistura com conciliação Stone)", async () => {
+    const lineId = await seedLine('data,descricao,valor,tipo\n2026-04-16,Maestro | Débito / STYLUS CONTABILIDADE,"59,33",entrada');
+    await correctLineType({ lineId, correctedType: "recebimento_venda_stone", reason: "Evidência de venda Stone, ver linha vizinha.", performedBy: "Gestor" });
+
+    const lines = await getBankStatementRepository().listLines({ financialAccountId: STONE_ACCOUNT_ID });
+    const corrected = lines.find((l) => l.id === lineId);
+    expect(corrected?.type).toBe("recebimento_venda_stone");
+  });
+
+  it("sem motivo/evidência, lança erro — nunca corrige silenciosamente", async () => {
+    const lineId = await seedLine('data,descricao,valor,tipo\n2026-04-16,Maestro | Débito / X,"10,00",entrada');
+    await expect(correctLineType({ lineId, correctedType: "recebimento_venda_stone", reason: "", performedBy: "Gestor" })).rejects.toThrow(/evidência/i);
+  });
+
+  it("linha já processada (virou movimento real) nunca pode ser corrigida silenciosamente", async () => {
+    const lineId = await seedLine('data,descricao,valor,tipo\n2026-04-16,Tarifa,"1,00",saida');
+    await processBankStatementLine({ lineId, resultingType: "tarifa", performedBy: "Gestor" }, STONE_ACCOUNT_ID);
+    await expect(correctLineType({ lineId, correctedType: "outro", reason: "teste", performedBy: "Gestor" })).rejects.toThrow(/já virou um movimento real/i);
   });
 });

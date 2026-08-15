@@ -46,6 +46,15 @@ describe("inferBankStatementLineType — sugestão inicial, nunca decisão final
     expect(inferBankStatementLineType("Pix recebido - Sócio Carlos", "entrada")).toBe("pix_recebido");
     expect(inferBankStatementLineType("Transferência recebida - Sócio Carlos", "entrada")).toBe("transferencia_entrada");
   });
+
+  it("Missão Financeiro V2.2 (item 7D, caso real) — rótulo de bandeira de cartão em entrada -> recebimento_venda_stone, mesmo sem 'Recebimento vendas' explícito", () => {
+    expect(inferBankStatementLineType("Maestro | Débito / STYLUS CONTABILIDADE", "entrada")).toBe("recebimento_venda_stone");
+    expect(inferBankStatementLineType("Visa Electron | Débito / SUL AMERICA COMPANHIA DE", "entrada")).toBe("recebimento_venda_stone");
+  });
+
+  it("rótulo de bandeira em SAÍDA nunca é confundido com venda Stone (vendas são sempre entrada)", () => {
+    expect(inferBankStatementLineType("Maestro | Débito / ALGUEM", "saida")).not.toBe("recebimento_venda_stone");
+  });
 });
 
 describe("initialStatusForType", () => {

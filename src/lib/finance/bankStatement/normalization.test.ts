@@ -54,4 +54,19 @@ describe("counterpartyMatchesRegisteredName — nunca aproxima além de sufixo l
   it("string vazia nunca gera match falso-positivo", () => {
     expect(counterpartyMatchesRegisteredName("", "Celesc")).toBe("none");
   });
+
+  it("Missão Financeiro V2.2 (item 7A, caso real) — CASANOVA nunca bate com fornecedor CASAN (substring dentro de outra palavra)", () => {
+    expect(counterpartyMatchesRegisteredName("ELANA CASANOVA", "CASAN")).toBe("none");
+    expect(counterpartyMatchesRegisteredName("66.434.434 ELANA CASANOVA", "CASAN")).toBe("none");
+    expect(counterpartyMatchesRegisteredName("66.434.434 ELANA CASANOVA FACEBOOK SERVICOS ONLINE DO", "CASAN")).toBe("none");
+  });
+
+  it("mas CASAN continua batendo normalmente como palavra inteira (nunca quebra o caso legítimo)", () => {
+    expect(counterpartyMatchesRegisteredName("AGUAS E SANEAMENTO CASAN", "CASAN")).toBe("contains");
+    expect(counterpartyMatchesRegisteredName("CASAN", "CASAN")).toBe("exact");
+  });
+
+  it("nenhuma outra palavra-substring é confundida com o fornecedor (ex.: 'STONE' dentro de 'STONEHENGE' nunca bate)", () => {
+    expect(counterpartyMatchesRegisteredName("EMPRESA STONEHENGE LTDA", "Stone")).toBe("none");
+  });
 });

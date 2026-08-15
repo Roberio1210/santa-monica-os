@@ -71,12 +71,33 @@ export function extractCounterpartyKey(original: string): string {
   return withoutLoneNumbers || normalized;
 }
 
-/** Compara um nome de contraparte extraído contra um nome cadastrado (fornecedor/parceiro), tolerante a sufixo legal e acento/caixa — nunca aproxima além disso. */
+function tokenize(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+/** `needle` aparece em `haystack` como sequência de PALAVRAS INTEIRAS e contíguas — nunca como substring dentro de uma palavra maior (ex.: "CASAN" nunca "encontrado" dentro de "CASANOVA"). */
+function containsAsWordSequence(haystack: string[], needle: string[]): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  for (let i = 0; i <= haystack.length - needle.length; i++) {
+    if (needle.every((word, j) => haystack[i + j] === word)) return true;
+  }
+  return false;
+}
+
+/**
+ * Compara um nome de contraparte extraído contra um nome cadastrado (fornecedor/parceiro),
+ * tolerante a sufixo legal e acento/caixa — nunca aproxima além disso. Missão Financeiro V2.2
+ * (item 7A, caso real): "ELANA CASANOVA" NUNCA pode bater com o fornecedor "CASAN" só porque a
+ * substring "CASAN" aparece dentro da palavra "CASANOVA" — por isso a comparação de "contains" é
+ * sempre por PALAVRA INTEIRA (tokenizada), nunca por substring bruta de caracteres.
+ */
 export function counterpartyMatchesRegisteredName(counterpartyKey: string, registeredName: string): "exact" | "contains" | "none" {
   const a = normalizeAccents(stripLegalSuffixes(counterpartyKey)).toUpperCase().replace(/\s+/g, " ").trim();
   const b = normalizeAccents(stripLegalSuffixes(registeredName)).toUpperCase().replace(/\s+/g, " ").trim();
   if (!a || !b) return "none";
   if (a === b) return "exact";
-  if (a.includes(b) || b.includes(a)) return "contains";
+  const aTokens = tokenize(a);
+  const bTokens = tokenize(b);
+  if (containsAsWordSequence(aTokens, bTokens) || containsAsWordSequence(bTokens, aTokens)) return "contains";
   return "none";
 }

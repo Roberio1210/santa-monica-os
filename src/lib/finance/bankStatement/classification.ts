@@ -11,6 +11,13 @@ import type { BankStatementLineDirection, BankStatementLineType } from "@/lib/fi
  */
 const KEYWORD_RULES: { pattern: RegExp; type: BankStatementLineType; direction?: BankStatementLineDirection }[] = [
   { pattern: /recebimento.*venda|venda.*recebimento|pix maquininha|liquidação.*venda/i, type: "recebimento_venda_stone", direction: "entrada" },
+  // Missão Financeiro V2.2 (item 7D, caso real) — rótulo de bandeira/método de cartão
+  // ("Maestro | Débito", "Visa Electron | Débito" etc.) é a mesma estrutura usada em liquidações
+  // de venda Stone reais (ex.: "Recebimento vendas / Maestro | Débito"), só que às vezes sem o
+  // prefixo "Recebimento vendas" por causa da quebra de linha do PDF (ver csvFormat.ts/parser
+  // original) — nunca confundido com fornecedor de linha vizinha nem com Pix Maquininha (regra
+  // acima), só dispara em entrada, nunca em saída.
+  { pattern: /(maestro|visa electron|mastercard|elo)\s*\|\s*(d[eé]bito|cr[eé]dito)/i, type: "recebimento_venda_stone", direction: "entrada" },
   { pattern: /antecipa[cç][aã]o/i, type: "antecipacao_credito", direction: "entrada" },
   { pattern: /devolu[cç][aã]o|estorno|chargeback/i, type: "devolucao" },
   { pattern: /mensalidade.*stone|stone.*mensalidade|taxa de adesão/i, type: "mensalidade_stone", direction: "saida" },
