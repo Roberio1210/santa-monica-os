@@ -809,9 +809,17 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return rows.map((r) => ({ id: r.id, name: r.name }));
   }
 
-  /** Saldo real ao vivo de uma conta — nunca lido de balanceBefore/After (só uma fotografia histórica). */
-  private async getAccountCurrentBalance(accountId: string, fixedFundAmount: number | null): Promise<number> {
-    const db = this.db();
+  /**
+   * Saldo real ao vivo de uma conta — nunca lido de balanceBefore/After (só uma fotografia
+   * histórica). `runner` DEVE ser passado como o `tx` recebido quando chamado de dentro de uma
+   * transação em andamento (ex.: `createCashMovement`, `informAccountBalance`) — com o pool em
+   * `max: 1` (`db/client.ts`), uma consulta extra via `this.db()` enquanto essa transação está
+   * aberta trava para sempre esperando uma segunda conexão que nunca é liberada (bug real
+   * encontrado na Missão Financeiro V2.2, nunca disparado antes por falta de teste contra o Neon
+   * real).
+   */
+  private async getAccountCurrentBalance(accountId: string, fixedFundAmount: number | null, runner: DbOrTx = this.db()): Promise<number> {
+    const db = runner;
     const movements = await db
       .select()
       .from(cashMovementsTable)
@@ -918,7 +926,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
       if (!account) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);
 
       const fixedFundAmount = account.fixedFundAmount !== null ? Number(account.fixedFundAmount) : null;
-      const balanceBefore = await this.getAccountCurrentBalance(input.financialAccountId, fixedFundAmount);
+      const balanceBefore = await this.getAccountCurrentBalance(input.financialAccountId, fixedFundAmount, tx);
       const balanceAfter =
         Math.round((balanceBefore + (input.type === "entrada" ? input.amount : -input.amount)) * 100) / 100;
 
@@ -981,7 +989,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
       });
 
       const fixedFundAmount = updated.fixedFundAmount !== null ? Number(updated.fixedFundAmount) : null;
-      const currentBalance = await this.getAccountCurrentBalance(updated.id, fixedFundAmount);
+      const currentBalance = await this.getAccountCurrentBalance(updated.id, fixedFundAmount, tx);
 
       return {
         id: updated.id,
