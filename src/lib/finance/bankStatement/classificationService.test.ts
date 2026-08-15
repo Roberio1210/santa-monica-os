@@ -42,6 +42,49 @@ describe("classifyPendingLines — Missão Financeiro V2.2 (Fase C/D)", () => {
     const classified = await classifyPendingLines(STONE_ACCOUNT_ID);
     expect(classified).toHaveLength(0); // única linha é do tipo recebimento_venda_stone — excluída do motor geral, tratada só pela conciliação Stone dedicada.
   });
+
+  it("funde 2 grupos textuais diferentes que resolvem para o MESMO fornecedor real (caso real: 'Stylus Contabilidade Pagamento' x 'Stylus Contabilidade Stylus Contabilidade Pagamento')", async () => {
+    await seed(
+      [
+        "data,descricao,valor,tipo",
+        '2026-04-16,STYLUS CONTABILIDADE / Pagamento,"421,13",saida',
+        '2026-06-11,STYLUS CONTABILIDADE               STYLUS CONTABILIDADE / Pagamento,"412,07",saida',
+      ].join("\n"),
+    );
+
+    const classified = await classifyPendingLines(STONE_ACCOUNT_ID);
+    const stylusGroups = classified.filter((c) => c.evidence.suggestedSupplierId === "fornecedor-stylus-contabilidade");
+    expect(stylusGroups).toHaveLength(1); // as 2 linhas viraram um único grupo fundido
+    expect(stylusGroups[0].group.count).toBe(2);
+    expect(stylusGroups[0].group.totalAmount).toBe(833.2);
+  });
+
+  it("nunca funde grupos de fornecedores DIFERENTES, mesmo ambos com fornecedor sugerido", async () => {
+    await seed(
+      [
+        "data,descricao,valor,tipo",
+        '2026-01-08,Transferência | Pix / VERISURE BRASIL,"276,11",saida',
+        '2026-02-08,Transferência | Pix / VERISURE BRASIL,"280,00",saida',
+        '2026-03-08,Transferência | Pix / VERISURE BRASIL,"270,00",saida',
+        '2026-04-16,STYLUS CONTABILIDADE / Pagamento,"421,13",saida',
+      ].join("\n"),
+    );
+    const classified = await classifyPendingLines(STONE_ACCOUNT_ID);
+    const supplierIds = new Set(classified.map((c) => c.evidence.suggestedSupplierId).filter(Boolean));
+    expect(supplierIds.size).toBe(2); // Verisure e Stylus continuam separados
+  });
+
+  it("nunca funde grupos sem fornecedor sugerido (nada de fusão às cegas)", async () => {
+    await seed(
+      [
+        "data,descricao,valor,tipo",
+        '2026-01-08,Transferência | Pix / DESCONHECIDO A,"10,00",saida',
+        '2026-01-09,Transferência | Pix / DESCONHECIDO B,"10,00",saida',
+      ].join("\n"),
+    );
+    const classified = await classifyPendingLines(STONE_ACCOUNT_ID);
+    expect(classified.filter((c) => !c.evidence.suggestedSupplierId)).toHaveLength(2);
+  });
 });
 
 describe("buildDryRunClassificationReport — Fase T, nunca escreve no banco", () => {

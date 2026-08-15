@@ -30,6 +30,39 @@ function buildGroupKey(counterpartyKey: string, direction: BankStatementLineDire
   return `${direction}|${type}|${counterpartyKey}`;
 }
 
+/**
+ * Recalcula as estatísticas de um grupo a partir de um conjunto de linhas — reaproveitado tanto
+ * pelo agrupamento inicial (por padrão de texto) quanto pela fusão por fornecedor confirmado
+ * (`mergeGroupsBySupplier`, `classificationService.ts`), para as duas fontes nunca calcularem
+ * count/total/período de formas diferentes.
+ */
+export function buildGroupFromLines(lines: BankStatementLine[], groupKeyOverride?: string): BankStatementLineGroup {
+  if (lines.length === 0) throw new Error("Grupo sem nenhuma linha.");
+  const amounts = lines.map((l) => l.amount);
+  const dates = lines.map((l) => l.date).sort();
+  const months = new Set(lines.map((l) => l.date.slice(0, 7)));
+  const daysOfMonth = [...new Set(lines.map((l) => Number(l.date.slice(8, 10))))].sort((a, b) => a - b);
+  const total = Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100;
+  const counterpartyKey = extractCounterpartyKey(lines[0].description);
+
+  return {
+    groupKey: groupKeyOverride ?? buildGroupKey(counterpartyKey, lines[0].direction, lines[0].type),
+    counterpartyKey,
+    direction: lines[0].direction,
+    type: lines[0].type,
+    lines,
+    count: lines.length,
+    totalAmount: total,
+    averageAmount: Math.round((total / lines.length) * 100) / 100,
+    minAmount: Math.min(...amounts),
+    maxAmount: Math.max(...amounts),
+    periodFrom: dates[0],
+    periodTo: dates[dates.length - 1],
+    distinctMonths: months.size,
+    daysOfMonth,
+  };
+}
+
 export function groupBankStatementLines(lines: BankStatementLine[]): BankStatementLineGroup[] {
   const buckets = new Map<string, BankStatementLine[]>();
 
@@ -42,30 +75,7 @@ export function groupBankStatementLines(lines: BankStatementLine[]): BankStateme
   }
 
   const groups: BankStatementLineGroup[] = [];
-  for (const [groupKey, groupLines] of buckets) {
-    const amounts = groupLines.map((l) => l.amount);
-    const dates = groupLines.map((l) => l.date).sort();
-    const months = new Set(groupLines.map((l) => l.date.slice(0, 7)));
-    const daysOfMonth = [...new Set(groupLines.map((l) => Number(l.date.slice(8, 10))))].sort((a, b) => a - b);
-    const total = Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100;
-
-    groups.push({
-      groupKey,
-      counterpartyKey: extractCounterpartyKey(groupLines[0].description),
-      direction: groupLines[0].direction,
-      type: groupLines[0].type,
-      lines: groupLines,
-      count: groupLines.length,
-      totalAmount: total,
-      averageAmount: Math.round((total / groupLines.length) * 100) / 100,
-      minAmount: Math.min(...amounts),
-      maxAmount: Math.max(...amounts),
-      periodFrom: dates[0],
-      periodTo: dates[dates.length - 1],
-      distinctMonths: months.size,
-      daysOfMonth,
-    });
-  }
+  for (const [groupKey, groupLines] of buckets) groups.push(buildGroupFromLines(groupLines, groupKey));
 
   return groups.sort((a, b) => b.count - a.count || b.totalAmount - a.totalAmount);
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { getBankStatementRepository } from "@/lib/finance/bankStatement/repository-factory";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
-import { groupBankStatementLines, type BankStatementLineGroup } from "@/lib/finance/bankStatement/grouping";
+import { groupBankStatementLines, buildGroupFromLines, type BankStatementLineGroup } from "@/lib/finance/bankStatement/grouping";
 import { evaluateGroupEvidence, type ConfidenceTier, type GroupEvidenceResult } from "@/lib/finance/bankStatement/evidence";
 import { extractCounterpartyKey } from "@/lib/finance/bankStatement/normalization";
 import { STONE_SETTLEMENT_LINE_TYPES } from "@/lib/finance/bankStatement/types";
@@ -57,6 +57,43 @@ function excludeStoneSettlementCandidates(lines: BankStatementLine[]): BankState
   return lines.filter((l) => !STONE_SETTLEMENT_LINE_TYPES.includes(l.type));
 }
 
+/**
+ * Missão Financeiro V2.2 — dois grupos de texto diferentes podem resolver para o MESMO
+ * fornecedor real (ex.: "STYLUS CONTABILIDADE PAGAMENTO" x "STYLUS CONTABILIDADE STYLUS
+ * CONTABILIDADE PAGAMENTO" — mesma empresa, formatação de extrato levemente diferente). Depois
+ * de avaliar a evidência de cada grupo textual, funde os que apontaram para o mesmo
+ * `suggestedSupplierId` (+ mesma direção) numa única sugestão — o gestor confirma UMA vez, não
+ * duas. Nunca funde grupos sem fornecedor sugerido (nada a fundir com segurança).
+ */
+function mergeGroupsBySupplier(classified: ClassifiedGroup[], refs: EvidenceReferenceData): ClassifiedGroup[] {
+  const bySupplier = new Map<string, ClassifiedGroup[]>();
+  const passthrough: ClassifiedGroup[] = [];
+
+  for (const c of classified) {
+    if (!c.evidence.suggestedSupplierId) {
+      passthrough.push(c);
+      continue;
+    }
+    const key = `${c.evidence.suggestedSupplierId}|${c.group.direction}`;
+    const bucket = bySupplier.get(key) ?? [];
+    bucket.push(c);
+    bySupplier.set(key, bucket);
+  }
+
+  const merged: ClassifiedGroup[] = [...passthrough];
+  for (const bucket of bySupplier.values()) {
+    if (bucket.length === 1) {
+      merged.push(bucket[0]);
+      continue;
+    }
+    const allLines = bucket.flatMap((c) => c.group.lines);
+    const mergedGroup = buildGroupFromLines(allLines, `supplier|${bucket[0].evidence.suggestedSupplierId}|${bucket[0].group.direction}`);
+    merged.push({ group: mergedGroup, evidence: evaluateGroupEvidence(mergedGroup, refs) });
+  }
+
+  return merged.sort((a, b) => b.group.count - a.group.count || b.group.totalAmount - a.group.totalAmount);
+}
+
 export async function classifyPendingLines(financialAccountId: string, statusFilter: "a_classificar" | "nao_conciliado" | "all" = "all"): Promise<ClassifiedGroup[]> {
   const bankRepo = getBankStatementRepository();
   const refs = await loadReferenceData();
@@ -68,7 +105,8 @@ export async function classifyPendingLines(financialAccountId: string, statusFil
   const lines = excludeStoneSettlementCandidates(rawLines);
 
   const groups = groupBankStatementLines(lines);
-  return groups.map((group) => ({ group, evidence: evaluateGroupEvidence(group, refs) }));
+  const classified = groups.map((group) => ({ group, evidence: evaluateGroupEvidence(group, refs) }));
+  return mergeGroupsBySupplier(classified, refs);
 }
 
 export interface DryRunClassificationReport {
