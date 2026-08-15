@@ -16,8 +16,15 @@ const NOISE_TOKENS = [
   /stone institui[cç][aã]o de/gi,
   /pagamento\s+s\.?a\.?/gi,
   /ag:\s*\d+\s*[•·]\s*cc:\s*[\d-]+/gi,
-  /\bltda\.?\b/gi,
-  /\bs\.?a\.?\b/gi,
+  // Missão Financeiro V2.5 (achado técnico) — o `\b` final depois de um "." OPCIONAL nunca bate
+  // quando o próximo caractere real também não é letra/número (ex.: espaço): "LTDA." seguido de
+  // espaço tem duas transições não-palavra em sequência ("." -> " "), então `\b` falha ali e o
+  // regex recua para NÃO consumir o ponto, deixando um "." solto sobrando (ex.: "LTDA. / ..." ->
+  // "." em vez de ""). Troca `\b` final por `(?![a-z])` — mesma proteção contra falso-positivo
+  // no meio de palavra (nunca casa "SA" dentro de "SANEAMENTO", já que o "N" seguinte é letra),
+  // mas sem exigir uma transição de fronteira que pontuação seguida de espaço nunca cumpre.
+  /\bltda\.?(?![a-z])/gi,
+  /\bs\.?a\.?(?![a-z])/gi,
   /\bme\b/gi,
   /\beireli\b/gi,
   /\bepp\b/gi,
@@ -68,7 +75,16 @@ export function extractCounterpartyKey(original: string): string {
     .filter((token) => !/^\d+$/.test(token) || token.length > 8)
     .join(" ")
     .trim();
-  return withoutLoneNumbers || normalized;
+  // Missão Financeiro V2.5 (achado técnico) — rede de segurança final: nenhum token composto só
+  // de pontuação (ex.: um "." sobrando de um sufixo legal mal removido) nunca vira, sozinho, uma
+  // "contraparte" — sempre tratado como ausência de nome (nunca contraparte fabricada a partir de
+  // ruído de pontuação).
+  const withPunctuationOnlyTokensStripped = (withoutLoneNumbers || normalized)
+    .split(" ")
+    .filter((token) => /[\p{L}\p{N}]/u.test(token))
+    .join(" ")
+    .trim();
+  return withPunctuationOnlyTokensStripped;
 }
 
 function tokenize(text: string): string[] {
