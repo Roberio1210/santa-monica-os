@@ -10,7 +10,14 @@ import type { BankStatementLineDirection, BankStatementLineType } from "@/lib/fi
  * classificação para forçar uma correspondência.
  */
 const KEYWORD_RULES: { pattern: RegExp; type: BankStatementLineType; direction?: BankStatementLineDirection }[] = [
-  { pattern: /recebimento.*venda|venda.*recebimento|pix maquininha|liquidação.*venda/i, type: "recebimento_venda_stone", direction: "entrada" },
+  // Missão Financeiro V2.3 (auditoria gerencial, achado técnico) — "Pix Maquininha" aparece no
+  // extrato real como "Pix | Maquininha" (com pipe), nunca "pix maquininha" contíguo — o regex
+  // original nunca batia, então essas 154 linhas reais (recebimento via maquininha, entrada)
+  // caíam no motor geral como "pix_recebido" comum, indo parar em REVIEW/INSUFFICIENT/CONFLICT
+  // por descrição de contraparte poluída pela linha vizinha (mesmo padrão de contaminação já
+  // corrigido para "Maestro | Débito" — ver regra abaixo). Tolerante a 0+ espaços/pipe entre as
+  // palavras, nunca casa em saída.
+  { pattern: /recebimento.*venda|venda.*recebimento|pix\s*\|?\s*maquininha|liquidação.*venda/i, type: "recebimento_venda_stone", direction: "entrada" },
   // Missão Financeiro V2.2 (item 7D, caso real) — rótulo de bandeira/método de cartão
   // ("Maestro | Débito", "Visa Electron | Débito" etc.) é a mesma estrutura usada em liquidações
   // de venda Stone reais (ex.: "Recebimento vendas / Maestro | Débito"), só que às vezes sem o

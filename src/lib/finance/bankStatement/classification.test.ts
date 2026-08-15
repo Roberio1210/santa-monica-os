@@ -55,6 +55,16 @@ describe("inferBankStatementLineType — sugestão inicial, nunca decisão final
   it("rótulo de bandeira em SAÍDA nunca é confundido com venda Stone (vendas são sempre entrada)", () => {
     expect(inferBankStatementLineType("Maestro | Débito / ALGUEM", "saida")).not.toBe("recebimento_venda_stone");
   });
+
+  it("Missão Financeiro V2.3 (auditoria gerencial, achado técnico) — 'Pix | Maquininha' (com pipe, como no extrato real) -> recebimento_venda_stone, mesmo com contraparte vizinha colada", () => {
+    expect(inferBankStatementLineType("Pix | Maquininha / CELESC DISTRIBUICAO S.A", "entrada")).toBe("recebimento_venda_stone");
+    expect(inferBankStatementLineType("RONALD    C JERONIMO / Pix | Maquininha", "entrada")).toBe("recebimento_venda_stone");
+    expect(inferBankStatementLineType("Pix Maquininha", "entrada")).toBe("recebimento_venda_stone"); // formato sem pipe continua batendo
+  });
+
+  it("'Pix | Maquininha' em SAÍDA nunca é confundido com venda Stone", () => {
+    expect(inferBankStatementLineType("Maquininha Stone", "saida")).not.toBe("recebimento_venda_stone");
+  });
 });
 
 describe("initialStatusForType", () => {
