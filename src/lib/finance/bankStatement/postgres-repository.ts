@@ -1,9 +1,26 @@
 import "server-only";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { bankStatementImports as importsTable, bankStatementLines as linesTable } from "@/db/schema/bankStatement";
+import { bankStatementClassificationRules as rulesTable, bankStatementImports as importsTable, bankStatementLines as linesTable } from "@/db/schema/bankStatement";
 import type { BankStatementRepository, CreateImportWithLinesInput, UpdateBankStatementLineInput } from "@/lib/finance/bankStatement/repository";
-import type { BankStatementImport, BankStatementLine } from "@/lib/finance/bankStatement/types";
+import type { BankStatementClassificationRule, BankStatementImport, BankStatementLine, CreateBankStatementClassificationRuleInput } from "@/lib/finance/bankStatement/types";
+
+function toRule(row: typeof rulesTable.$inferSelect): BankStatementClassificationRule {
+  return {
+    id: row.id,
+    criteriaDirection: row.criteriaDirection,
+    criteriaCounterpartyPattern: row.criteriaCounterpartyPattern,
+    criteriaDescriptionKeyword: row.criteriaDescriptionKeyword,
+    resultingType: row.resultingType,
+    categoryId: row.categoryId,
+    supplierId: row.supplierId,
+    partnerId: row.partnerId,
+    appliedCount: row.appliedCount,
+    createdBy: row.createdBy,
+    active: row.active,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
 
 function toImport(row: typeof importsTable.$inferSelect): BankStatementImport {
   return {
@@ -115,12 +132,13 @@ export class BankStatementPostgresRepository implements BankStatementRepository 
     return rows.map(toImport).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"] }): Promise<BankStatementLine[]> {
+  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]> {
     const conditions = [];
     if (filter?.status) conditions.push(eq(linesTable.status, filter.status));
     if (filter?.dateFrom) conditions.push(gte(linesTable.date, filter.dateFrom));
     if (filter?.dateTo) conditions.push(lte(linesTable.date, filter.dateTo));
     if (filter?.direction) conditions.push(eq(linesTable.direction, filter.direction));
+    if (filter?.type) conditions.push(eq(linesTable.type, filter.type));
 
     if (filter?.financialAccountId) {
       const importIds = await this.db().select({ id: importsTable.id }).from(importsTable).where(eq(importsTable.financialAccountId, filter.financialAccountId));
@@ -156,5 +174,40 @@ export class BankStatementPostgresRepository implements BankStatementRepository 
     const [row] = await this.db().update(linesTable).set(values).where(eq(linesTable.id, input.id)).returning();
     if (!row) throw new Error(`Linha de extrato não encontrada: ${input.id}`);
     return toLine(row);
+  }
+
+  async listClassificationRules(activeOnly?: boolean): Promise<BankStatementClassificationRule[]> {
+    const rows = activeOnly ? await this.db().select().from(rulesTable).where(eq(rulesTable.active, true)) : await this.db().select().from(rulesTable);
+    return rows.map(toRule);
+  }
+
+  async createClassificationRule(input: CreateBankStatementClassificationRuleInput): Promise<BankStatementClassificationRule> {
+    const [row] = await this.db()
+      .insert(rulesTable)
+      .values({
+        criteriaDirection: input.criteriaDirection ?? null,
+        criteriaCounterpartyPattern: input.criteriaCounterpartyPattern ?? null,
+        criteriaDescriptionKeyword: input.criteriaDescriptionKeyword ?? null,
+        resultingType: input.resultingType,
+        categoryId: input.categoryId ?? null,
+        supplierId: input.supplierId ?? null,
+        partnerId: input.partnerId ?? null,
+        createdBy: input.createdBy,
+      })
+      .returning();
+    return toRule(row);
+  }
+
+  async incrementRuleAppliedCount(ruleId: string): Promise<void> {
+    await this.db()
+      .update(rulesTable)
+      .set({ appliedCount: sql`${rulesTable.appliedCount} + 1`, updatedAt: new Date() })
+      .where(eq(rulesTable.id, ruleId));
+  }
+
+  async deactivateClassificationRule(ruleId: string): Promise<BankStatementClassificationRule> {
+    const [row] = await this.db().update(rulesTable).set({ active: false, updatedAt: new Date() }).where(eq(rulesTable.id, ruleId)).returning();
+    if (!row) throw new Error(`Regra não encontrada: ${ruleId}`);
+    return toRule(row);
   }
 }

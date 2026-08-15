@@ -1441,6 +1441,14 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return rows.map(toAuditLogEntry);
   }
 
+  async createAuditLogEntry(input: { action: string; entityType: string; entityId: string; beforeState: Record<string, unknown> | null; afterState: Record<string, unknown> | null; notes?: string | null }): Promise<AuditLogEntry> {
+    const [row] = await this.db()
+      .insert(auditLogsTable)
+      .values({ action: input.action, entityType: input.entityType, entityId: input.entityId, beforeState: input.beforeState, afterState: input.afterState, source: "manual", notes: input.notes ?? null })
+      .returning();
+    return toAuditLogEntry(row);
+  }
+
   // --- Contabilidade Gerencial ---
 
   async listFinancialClassifications(): Promise<FinancialClassification[]> {

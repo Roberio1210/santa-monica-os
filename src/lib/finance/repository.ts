@@ -110,6 +110,8 @@ export interface FinanceRepository {
   /** Só permitido quando não há nenhuma baixa registrada — senão lança erro (preferir cancelar). */
   deleteAccountsPayable(id: string): Promise<void>;
   listAuditLog(entityType: string, entityId: string): Promise<AuditLogEntry[]>;
+  /** Missão Financeiro V2.2 — grava um registro de auditoria genérico (reaproveitado pelo motor de classificação do extrato bancário, nunca uma tabela paralela). */
+  createAuditLogEntry(input: { action: string; entityType: string; entityId: string; beforeState: Record<string, unknown> | null; afterState: Record<string, unknown> | null; notes?: string | null }): Promise<AuditLogEntry>;
 
   // --- Contabilidade Gerencial ---
   listFinancialClassifications(): Promise<FinancialClassification[]>;

@@ -267,6 +267,13 @@
       "when": 1786749739164,
       "tag": "0037_steep_overlord",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786760369315,
+      "tag": "0038_long_the_leader",
+      "breakpoints": true
     }
   ]
 }

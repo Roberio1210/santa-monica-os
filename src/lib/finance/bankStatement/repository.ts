@@ -1,4 +1,4 @@
-import type { BankStatementImport, BankStatementLine, RawBankStatementLineInput } from "@/lib/finance/bankStatement/types";
+import type { BankStatementClassificationRule, BankStatementImport, BankStatementLine, CreateBankStatementClassificationRuleInput, RawBankStatementLineInput } from "@/lib/finance/bankStatement/types";
 
 /**
  * Missão Financeiro V2.1 — persistência do extrato bancário, mesmo padrão de
@@ -40,7 +40,14 @@ export interface BankStatementRepository {
   listExistingDedupeKeys(financialAccountId: string): Promise<Set<string>>;
   createImportWithLines(input: CreateImportWithLinesInput): Promise<BankStatementImport>;
   listImports(financialAccountId?: string): Promise<BankStatementImport[]>;
-  listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"] }): Promise<BankStatementLine[]>;
+  listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]>;
   getLine(id: string): Promise<BankStatementLine | null>;
   updateLine(input: UpdateBankStatementLineInput): Promise<BankStatementLine>;
+
+  // --- Missão Financeiro V2.2 (Fase H/V) — regras ensinadas ---
+  listClassificationRules(activeOnly?: boolean): Promise<BankStatementClassificationRule[]>;
+  createClassificationRule(input: CreateBankStatementClassificationRuleInput): Promise<BankStatementClassificationRule>;
+  /** Incrementa `appliedCount` — nunca decrementado, só histórico de quantas vezes a regra já classificou algo. */
+  incrementRuleAppliedCount(ruleId: string): Promise<void>;
+  deactivateClassificationRule(ruleId: string): Promise<BankStatementClassificationRule>;
 }

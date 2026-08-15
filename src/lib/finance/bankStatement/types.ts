@@ -112,3 +112,33 @@ export interface MarkLineIgnoredInput {
   reason: string;
   performedBy: string;
 }
+
+/**
+ * Missão Financeiro V2.2 (Fase H/V) — regra ensinada pelo gestor a partir da confirmação de um
+ * grupo. Espelha `bank_statement_classification_rules` (schema/bankStatement.ts).
+ */
+export interface BankStatementClassificationRule {
+  id: string;
+  criteriaDirection: BankStatementLineDirection | null;
+  criteriaCounterpartyPattern: string | null;
+  criteriaDescriptionKeyword: string | null;
+  resultingType: BankStatementLineType;
+  categoryId: string | null;
+  supplierId: string | null;
+  partnerId: string | null;
+  appliedCount: number;
+  createdBy: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface CreateBankStatementClassificationRuleInput {
+  criteriaDirection?: BankStatementLineDirection | null;
+  criteriaCounterpartyPattern?: string | null;
+  criteriaDescriptionKeyword?: string | null;
+  resultingType: BankStatementLineType;
+  categoryId?: string | null;
+  supplierId?: string | null;
+  partnerId?: string | null;
+  createdBy: string;
+}

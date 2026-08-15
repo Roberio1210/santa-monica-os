@@ -121,3 +121,33 @@ export const bankStatementLines = pgTable("bank_statement_lines", {
   notes: notes(),
   ...timestamps,
 });
+
+/**
+ * Missão Financeiro V2.2 (Fase H/V) — "aprendizado controlado": quando o gestor confirma um
+ * grupo e marca "aplicar a futuros movimentos equivalentes", isto cria uma regra determinística
+ * aqui. Nunca machine learning opaco — toda regra tem critério explícito e explicável. Uma regra
+ * sem NENHUM critério específico (`counterpartyPattern`/`descriptionKeyword`) é rejeitada na
+ * criação (`validateRuleNotTooBroad`, `evidence.ts`) — direção sozinha bateria em quase tudo.
+ * Aplicada a um grupo, uma regra correspondente é a ÚNICA fonte de confiança EXACT do motor de
+ * evidências (a outra fonte de EXACT — liquidação Stone batida na cadeia de saldo — já existe
+ * via `stone_normalized_transactions`/`reconciliation.ts`, Missão V2.1, não duplicada aqui).
+ */
+export const bankStatementClassificationRules = pgTable("bank_statement_classification_rules", {
+  id: id(),
+  criteriaDirection: bankStatementLineDirectionEnum("criteria_direction"),
+  /** Substring normalizada (maiúscula, sem acento) contra `extractCounterpartyKey` — nunca regex livre, para manter a regra auditável/legível. */
+  criteriaCounterpartyPattern: text("criteria_counterparty_pattern"),
+  criteriaDescriptionKeyword: text("criteria_description_keyword"),
+  resultingType: bankStatementLineTypeEnum("resulting_type").notNull(),
+  categoryId: uuid("category_id").references(() => financialCategories.id),
+  supplierId: uuid("supplier_id").references(() => suppliers.id),
+  partnerId: uuid("partner_id").references(() => partners.id),
+  /** Quantas vezes esta regra já classificou uma linha automaticamente — nunca decrementado, só histórico. */
+  appliedCount: integer("applied_count").notNull().default(0),
+  /** Texto livre — sem sessão de usuário real ainda (mesmo padrão de outras tabelas do sistema). */
+  createdBy: text("created_by"),
+  active: active(),
+  source: source(),
+  notes: notes(),
+  ...timestamps,
+});

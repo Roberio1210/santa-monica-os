@@ -1,11 +1,12 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { BankStatementRepository, CreateImportWithLinesInput, UpdateBankStatementLineInput } from "@/lib/finance/bankStatement/repository";
-import type { BankStatementImport, BankStatementLine } from "@/lib/finance/bankStatement/types";
+import type { BankStatementClassificationRule, BankStatementImport, BankStatementLine, CreateBankStatementClassificationRuleInput } from "@/lib/finance/bankStatement/types";
 
 export class BankStatementMemoryRepository implements BankStatementRepository {
   private imports = new Map<string, BankStatementImport>();
   private lines = new Map<string, BankStatementLine>();
+  private rules = new Map<string, BankStatementClassificationRule>();
 
   async listExistingDedupeKeys(financialAccountId: string): Promise<Set<string>> {
     const importIds = new Set([...this.imports.values()].filter((i) => i.financialAccountId === financialAccountId).map((i) => i.id));
@@ -67,7 +68,7 @@ export class BankStatementMemoryRepository implements BankStatementRepository {
     return (financialAccountId ? all.filter((i) => i.financialAccountId === financialAccountId) : all).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"] }): Promise<BankStatementLine[]> {
+  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]> {
     let result = [...this.lines.values()];
     if (filter?.financialAccountId) {
       const importIds = new Set([...this.imports.values()].filter((i) => i.financialAccountId === filter.financialAccountId).map((i) => i.id));
@@ -77,6 +78,7 @@ export class BankStatementMemoryRepository implements BankStatementRepository {
     if (filter?.dateFrom) result = result.filter((l) => l.date >= filter.dateFrom!);
     if (filter?.dateTo) result = result.filter((l) => l.date <= filter.dateTo!);
     if (filter?.direction) result = result.filter((l) => l.direction === filter.direction);
+    if (filter?.type) result = result.filter((l) => l.type === filter.type);
     return result.sort((a, b) => b.date.localeCompare(a.date) || a.rowIndex - b.rowIndex).map((l) => ({ ...l }));
   }
 
@@ -103,6 +105,44 @@ export class BankStatementMemoryRepository implements BankStatementRepository {
     if (input.reconciliationNote !== undefined) updated.reconciliationNote = input.reconciliationNote;
     if (input.processedBy !== undefined) updated.processedBy = input.processedBy;
     this.lines.set(input.id, updated);
+    return { ...updated };
+  }
+
+  async listClassificationRules(activeOnly?: boolean): Promise<BankStatementClassificationRule[]> {
+    const all = [...this.rules.values()];
+    return (activeOnly ? all.filter((r) => r.active) : all).map((r) => ({ ...r }));
+  }
+
+  async createClassificationRule(input: CreateBankStatementClassificationRuleInput): Promise<BankStatementClassificationRule> {
+    const rule: BankStatementClassificationRule = {
+      id: randomUUID(),
+      criteriaDirection: input.criteriaDirection ?? null,
+      criteriaCounterpartyPattern: input.criteriaCounterpartyPattern ?? null,
+      criteriaDescriptionKeyword: input.criteriaDescriptionKeyword ?? null,
+      resultingType: input.resultingType,
+      categoryId: input.categoryId ?? null,
+      supplierId: input.supplierId ?? null,
+      partnerId: input.partnerId ?? null,
+      appliedCount: 0,
+      createdBy: input.createdBy,
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+    this.rules.set(rule.id, rule);
+    return { ...rule };
+  }
+
+  async incrementRuleAppliedCount(ruleId: string): Promise<void> {
+    const rule = this.rules.get(ruleId);
+    if (!rule) return;
+    this.rules.set(ruleId, { ...rule, appliedCount: rule.appliedCount + 1 });
+  }
+
+  async deactivateClassificationRule(ruleId: string): Promise<BankStatementClassificationRule> {
+    const rule = this.rules.get(ruleId);
+    if (!rule) throw new Error(`Regra não encontrada: ${ruleId}`);
+    const updated = { ...rule, active: false };
+    this.rules.set(ruleId, updated);
     return { ...updated };
   }
 }

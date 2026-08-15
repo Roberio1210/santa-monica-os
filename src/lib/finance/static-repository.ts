@@ -758,6 +758,11 @@ export class StaticFinanceRepository implements FinanceRepository {
       .map((entry) => ({ ...entry }));
   }
 
+  async createAuditLogEntry(input: { action: string; entityType: string; entityId: string; beforeState: Record<string, unknown> | null; afterState: Record<string, unknown> | null; notes?: string | null }): Promise<AuditLogEntry> {
+    this.appendAudit(input.action, input.entityType, input.entityId, input.beforeState, input.afterState);
+    return { ...this.auditLog[this.auditLog.length - 1] };
+  }
+
   private appendAudit(action: string, entityType: string, entityId: string, before: unknown, after: unknown): void {
     this.auditLog.push({
       id: generateId("audit"),

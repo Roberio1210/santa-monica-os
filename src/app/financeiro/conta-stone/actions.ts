@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { dryRunBankStatementImport, confirmBankStatementImport, type DryRunResult } from "@/lib/finance/bankStatement/importService";
 import { attemptStoneSettlementReconciliation, markBankStatementLineIgnored, processBankStatementLine } from "@/lib/finance/bankStatement/lineProcessingService";
-import type { BankStatementLineType } from "@/lib/finance/bankStatement/types";
+import { confirmGroup, rejectGroup } from "@/lib/finance/bankStatement/batchActionsService";
+import type { BankStatementLineDirection, BankStatementLineType } from "@/lib/finance/bankStatement/types";
 
 export interface FormActionState {
   error: string | null;
@@ -106,5 +107,63 @@ export async function ignoreLineAction(_prevState: FormActionState, formData: Fo
     return { error: null, success: "Linha marcada como ignorada." };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha ao ignorar a linha.", success: null };
+  }
+}
+
+/** Missão Financeiro V2.2 (Fase I) — confirma um grupo inteiro de uma vez, nunca sem decisão humana explícita. */
+export async function confirmGroupAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const financialAccountId = String(formData.get("financialAccountId") ?? "");
+  const lineIds = formData.getAll("lineIds").map(String).filter(Boolean);
+  const resultingType = String(formData.get("resultingType") ?? "") as BankStatementLineType;
+  const performedBy = String(formData.get("performedBy") ?? "").trim();
+  const categoryId = String(formData.get("categoryId") ?? "").trim() || null;
+  const supplierId = String(formData.get("supplierId") ?? "").trim() || null;
+  const partnerId = String(formData.get("partnerId") ?? "").trim() || null;
+  const counterAccountId = String(formData.get("counterAccountId") ?? "").trim() || null;
+  const createRuleFlag = formData.get("createRule") === "on";
+  const criteriaCounterpartyPattern = String(formData.get("criteriaCounterpartyPattern") ?? "").trim() || null;
+  const criteriaDirection = (String(formData.get("criteriaDirection") ?? "").trim() || null) as BankStatementLineDirection | null;
+
+  if (lineIds.length === 0 || !resultingType || !financialAccountId) return { error: "Dados inválidos.", success: null };
+
+  try {
+    const result = await confirmGroup(
+      {
+        lineIds,
+        resultingType,
+        performedBy,
+        categoryId,
+        supplierId,
+        partnerId,
+        counterAccountId,
+        createRule: createRuleFlag ? { criteriaDirection, criteriaCounterpartyPattern } : undefined,
+      },
+      financialAccountId,
+    );
+    revalidatePath("/financeiro/conta-stone");
+    revalidatePath("/financeiro/classificacao");
+    revalidatePath("/financeiro/fluxo-de-caixa");
+
+    const parts = [`${result.processedLineIds.length} linha(s) confirmada(s).`];
+    if (result.failedLineIds.length > 0) parts.push(`${result.failedLineIds.length} falharam.`);
+    if (result.createdRuleId) parts.push("Regra criada para futuros movimentos equivalentes.");
+    return { error: null, success: parts.join(" ") };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao confirmar o grupo.", success: null };
+  }
+}
+
+export async function rejectGroupAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const lineIds = formData.getAll("lineIds").map(String).filter(Boolean);
+  const reason = String(formData.get("reason") ?? "").trim();
+  const performedBy = String(formData.get("performedBy") ?? "").trim();
+  if (lineIds.length === 0) return { error: "Nenhuma linha selecionada.", success: null };
+
+  try {
+    const result = await rejectGroup({ lineIds, reason, performedBy });
+    revalidatePath("/financeiro/conta-stone");
+    return { error: null, success: `${result.processedLineIds.length} linha(s) marcada(s) como ignorada(s).` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao rejeitar o grupo.", success: null };
   }
 }
