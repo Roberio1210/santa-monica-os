@@ -15,8 +15,13 @@ const KEYWORD_RULES: { pattern: RegExp; type: BankStatementLineType; direction?:
   { pattern: /devolu[cç][aã]o|estorno|chargeback/i, type: "devolucao" },
   { pattern: /mensalidade.*stone|stone.*mensalidade|taxa de adesão/i, type: "mensalidade_stone", direction: "saida" },
   { pattern: /tarifa|taxa banc[aá]ria|manuten[cç][aã]o de conta/i, type: "tarifa", direction: "saida" },
-  { pattern: /transfer[eê]ncia/i, type: "transferencia_entrada" }, // direção real decide entrada/saída, ver abaixo
+  // "pix" checado ANTES de "transferência" de propósito: a Stone rotula todo Pix (inclusive
+  // pagamento a fornecedor externo) como "Transferência | Pix" — esse rótulo é ambíguo entre
+  // "movimento entre contas próprias" e "pagamento/recebimento externo via Pix", então o palpite
+  // inicial mais honesto é "Pix a classificar", nunca presumir transferência interna. Só cai na
+  // regra de transferência abaixo quando o texto NÃO menciona Pix (ex.: TED entre contas próprias).
   { pattern: /pix\s*(recebido|enviado)?/i, type: "pix_recebido" }, // direção real decide, ver abaixo
+  { pattern: /transfer[eê]ncia/i, type: "transferencia_entrada" }, // direção real decide entrada/saída, ver abaixo
   { pattern: /pagamento/i, type: "pagamento", direction: "saida" },
 ];
 

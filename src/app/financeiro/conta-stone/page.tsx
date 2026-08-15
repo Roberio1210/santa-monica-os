@@ -14,8 +14,6 @@ import type { BankStatementLineDirection, BankStatementLineStatus } from "@/lib/
 
 export const dynamic = "force-dynamic";
 
-const STONE_ACCOUNT_ID = "conta-stone";
-
 interface SearchParams {
   period?: string;
   from?: string;
@@ -32,9 +30,22 @@ export default async function ContaStonePage({ searchParams }: { searchParams: P
   const statusFilter = VALID_STATUSES.includes(params.status as BankStatementLineStatus) ? (params.status as BankStatementLineStatus) : undefined;
   const directionFilter = params.direction === "entrada" || params.direction === "saida" ? (params.direction as BankStatementLineDirection) : undefined;
 
-  const [overview, financialAccounts, receivableOverview, payableOverview] = await Promise.all([
-    fetchStoneAccountOverview(STONE_ACCOUNT_ID, period.from, period.to, { status: statusFilter, direction: directionFilter }),
-    fetchFinancialAccounts(),
+  // O id real da conta Stone é gerado pelo banco (uuid) — nunca fixo no código (o seed em
+  // memória usa "conta-stone" só como slug de teste; no Postgres real o id é outro). Resolvido
+  // pelo nome, mesmo padrão já usado para o Caixa físico em /financeiro.
+  const financialAccounts = await fetchFinancialAccounts();
+  const stoneAccount = financialAccounts.find((a) => a.name.toLowerCase() === "stone");
+  if (!stoneAccount) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Conta Stone" description="Conta financeira 'Stone' não encontrada em Financeiro > Contas — cadastre-a antes de usar o extrato." />
+      </div>
+    );
+  }
+  const stoneAccountId = stoneAccount.id;
+
+  const [overview, receivableOverview, payableOverview] = await Promise.all([
+    fetchStoneAccountOverview(stoneAccountId, period.from, period.to, { status: statusFilter, direction: directionFilter }),
     fetchAccountsReceivableOverview(),
     fetchAccountsPayableOverview(),
   ]);
@@ -76,12 +87,12 @@ export default async function ContaStonePage({ searchParams }: { searchParams: P
         </CardContent>
       </Card>
 
-      <BankStatementImportForm financialAccountId={STONE_ACCOUNT_ID} />
+      <BankStatementImportForm financialAccountId={stoneAccountId} />
 
       <BankStatementLineList
-        financialAccountId={STONE_ACCOUNT_ID}
+        financialAccountId={stoneAccountId}
         lines={overview.lines}
-        financialAccounts={financialAccounts.filter((a) => a.id !== STONE_ACCOUNT_ID)}
+        financialAccounts={financialAccounts.filter((a) => a.id !== stoneAccountId)}
         openReceivables={openReceivables.map((r) => ({ id: r.id, label: `${r.partyName} — ${formatCurrency(r.outstandingAmount)} (${r.description})` }))}
         openPayables={openPayables.map((p) => ({ id: p.id, label: `${p.supplierName ?? "Sem fornecedor"} — ${formatCurrency(p.outstandingAmount)} (${p.description})` }))}
         currentStatus={statusFilter}
