@@ -46,6 +46,35 @@ describe("evaluateGroupEvidence — regra absoluta: nunca EXACT/HIGH_CONFIDENCE 
     expect(result.matchedRuleId).toBe("rule-1");
   });
 
+  it("Missão Financeiro V2.4 (achado técnico, caso real CASAN+CELESC R$361,12) — 2 regras ensinadas distintas batendo na mesma contraparte -> CONFLICT, nunca EXACT pela primeira regra do array", () => {
+    const group = groupBankStatementLines([line({ id: "1", description: "AGUAS E SANEAMENTO CASAN / Transferência | Pix / CELESC DISTRIBUICAO S.A" })])[0];
+    const refs: EvidenceReferenceData = {
+      ...emptyRefs,
+      activeRules: [
+        { id: "rule-celesc", criteriaDirection: "saida", criteriaCounterpartyPattern: "CELESC DISTRIBUICAO", criteriaDescriptionKeyword: null, resultingType: "pagamento", categoryId: "cat-energia", supplierId: "sup-celesc", partnerId: null },
+        { id: "rule-casan", criteriaDirection: "saida", criteriaCounterpartyPattern: "AGUAS E SANEAMENTO CASAN", criteriaDescriptionKeyword: null, resultingType: "pagamento", categoryId: "cat-agua", supplierId: "sup-casan", partnerId: null },
+      ],
+    };
+    const result = evaluateGroupEvidence(group, refs);
+    expect(result.confidence).toBe("conflict");
+    expect(result.matchedRuleId).toBeNull();
+    expect(result.suggestedSupplierId).toBeNull();
+  });
+
+  it("regra única batendo continua EXACT mesmo quando outra regra existe mas não bate nesta contraparte", () => {
+    const group = groupBankStatementLines([line({ id: "1", description: "AGUAS E SANEAMENTO CASAN / Transferência | Pix" })])[0];
+    const refs: EvidenceReferenceData = {
+      ...emptyRefs,
+      activeRules: [
+        { id: "rule-celesc", criteriaDirection: "saida", criteriaCounterpartyPattern: "CELESC DISTRIBUICAO", criteriaDescriptionKeyword: null, resultingType: "pagamento", categoryId: "cat-energia", supplierId: "sup-celesc", partnerId: null },
+        { id: "rule-casan", criteriaDirection: "saida", criteriaCounterpartyPattern: "AGUAS E SANEAMENTO CASAN", criteriaDescriptionKeyword: null, resultingType: "pagamento", categoryId: "cat-agua", supplierId: "sup-casan", partnerId: null },
+      ],
+    };
+    const result = evaluateGroupEvidence(group, refs);
+    expect(result.confidence).toBe("exact");
+    expect(result.matchedRuleId).toBe("rule-casan");
+  });
+
   it("fornecedor conhecido (nome parcial real: 'Verisure Brasil' contém 'Verisure') + valor bate com despesa recorrente -> HIGH_CONFIDENCE (2 evidências)", () => {
     const group = groupBankStatementLines([
       line({ id: "1", date: "2026-01-08", amount: 276.11, description: "Transferência | Pix / VERISURE BRASIL" }),

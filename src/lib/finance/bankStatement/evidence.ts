@@ -103,19 +103,46 @@ export function validateRuleNotTooBroad(input: { criteriaCounterpartyPattern: st
 export function evaluateGroupEvidence(group: BankStatementLineGroup, refs: EvidenceReferenceData): GroupEvidenceResult {
   // 1. Regra ensinada — única fonte de EXACT nesta engine (a outra fonte de EXACT, conciliação
   // de liquidação Stone, é tratada por reconciliation.ts, não aqui).
-  for (const rule of refs.activeRules) {
-    if (matchesRule(group, rule)) {
-      return {
-        confidence: "exact",
-        evidences: [{ kind: "exact_rule_match", detail: `Regra ensinada pelo gestor aplicada (id ${rule.id}).` }],
-        suggestedType: rule.resultingType,
-        suggestedSupplierId: rule.supplierId,
-        suggestedPartnerId: rule.partnerId,
-        suggestedCategoryId: rule.categoryId,
-        matchedRuleId: rule.id,
-        reasonSummary: `Corresponde a uma regra confirmada anteriormente pelo gestor para este padrão exato.`,
-      };
-    }
+  //
+  // Missão Financeiro V2.4 (achado técnico) — caso real: um grupo com contraparte ambígua (ex.:
+  // "AGUAS E SANEAMENTO CASAN CELESC DISTRIBUICAO", que contém as strings de DUAS regras
+  // distintas confirmadas pelo gestor — CASAN e Celesc, fornecedores genuinamente diferentes)
+  // batia na primeira regra do array por `.includes()`, virando EXACT silenciosamente e
+  // escondendo um CONFLICT real. Corrigido: coleta TODAS as regras que batem antes de decidir —
+  // 1 regra bate = EXACT (comportamento antigo, intocado); 2+ regras com padrões distintos batem
+  // = CONFLICT (mesma semântica já usada abaixo para "conflicting_supplier_candidates"), nunca a
+  // primeira escolhida arbitrariamente.
+  const matchingRules = refs.activeRules.filter((rule) => matchesRule(group, rule));
+  const distinctRulePatterns = new Set(matchingRules.map((rule) => (rule.criteriaCounterpartyPattern ?? rule.criteriaDescriptionKeyword ?? rule.id).toUpperCase()));
+  if (distinctRulePatterns.size > 1) {
+    return {
+      confidence: "conflict",
+      evidences: [
+        {
+          kind: "conflicting_supplier_candidates",
+          detail: `Contraparte corresponde a ${matchingRules.length} regras ensinadas distintas pelo gestor (${matchingRules.map((r) => r.criteriaCounterpartyPattern ?? r.criteriaDescriptionKeyword).join(", ")}) — ambíguo, exige decisão humana.`,
+        },
+      ],
+      suggestedType: null,
+      suggestedSupplierId: null,
+      suggestedPartnerId: null,
+      suggestedCategoryId: null,
+      matchedRuleId: null,
+      reasonSummary: "Mais de uma regra ensinada corresponde a esta contraparte — ambíguo, exige decisão humana.",
+    };
+  }
+  if (matchingRules.length === 1) {
+    const rule = matchingRules[0];
+    return {
+      confidence: "exact",
+      evidences: [{ kind: "exact_rule_match", detail: `Regra ensinada pelo gestor aplicada (id ${rule.id}).` }],
+      suggestedType: rule.resultingType,
+      suggestedSupplierId: rule.supplierId,
+      suggestedPartnerId: rule.partnerId,
+      suggestedCategoryId: rule.categoryId,
+      matchedRuleId: rule.id,
+      reasonSummary: `Corresponde a uma regra confirmada anteriormente pelo gestor para este padrão exato.`,
+    };
   }
 
   const evidences: Evidence[] = [];
