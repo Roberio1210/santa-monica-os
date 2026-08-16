@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDreReport, computeDreVariationPercent, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
-import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification } from "@/lib/finance/types";
+import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification, Partner } from "@/lib/finance/types";
 
 function makeAR(overrides: Partial<AccountsReceivable>): AccountsReceivable {
   return {
@@ -110,6 +110,10 @@ function makeCM(overrides: Partial<CashMovement>): CashMovement {
     notes: null,
     ...overrides,
   };
+}
+
+function makePartner(overrides: Partial<Partner>): Partner {
+  return { id: "partner-1", name: "Parceiro", type: "outro", ...overrides };
 }
 
 const emptyClassifications: FinancialClassification[] = [];
@@ -688,5 +692,237 @@ describe("Ausência de dado ≠ zero — regra obrigatória da DRE", () => {
     const sumOfItems = Math.round(report.despesasOperacionais.items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     expect(sumOfItems).toBe(report.despesasOperacionais.amount);
     expect(report.despesasOperacionais.items).toHaveLength(2);
+  });
+});
+
+/**
+ * Missão Financeiro V3.0 — DRE Gerencial Real. Regime híbrido "gerencial": usa competência quando
+ * conhecida (accounts_payable/accounts_receivable, e cash_movements com `competenceDate`
+ * preenchido) e cai para a data do movimento de caixa quando não há competência confirmada —
+ * nunca inventa uma competência. Caso de teste explícito: Kaua Rezende da Costa Pedro, salário CLT
+ * de competência 04/2026 pago em 07/05/2026 (Missão V2.8) — deve aparecer em abril, nunca em maio.
+ */
+describe("DRE em regime gerencial (híbrido) — Missão V3.0", () => {
+  it("usa competenceDate do cash_movement quando preenchido (caso Kaua: competência 04/2026, pago em 05/2026)", () => {
+    const kauaSalario = makeCM({
+      id: "kaua",
+      date: "2026-05-07",
+      competenceDate: "2026-04-30",
+      type: "saida",
+      amount: 2685.02,
+      categoryName: "Salários CLT",
+      costCenterName: null,
+      nature: null,
+    });
+    const abril = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-04-01",
+      competenceTo: "2026-04-30",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [kauaSalario],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(abril.despesasOperacionais.amount).toBe(2685.02);
+
+    const maio = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-05-01",
+      competenceTo: "2026-05-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [kauaSalario],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    // Nunca aparece em maio, mesmo sendo a data bancária real — a competência confirmada manda.
+    expect(maio.despesasOperacionais.amount).toBe(0);
+  });
+
+  it("cai para a data do movimento quando competenceDate não foi informado — nunca inventa competência", () => {
+    const semCompetencia = makeCM({ date: "2026-06-15", competenceDate: null, type: "saida", amount: 300, categoryName: "Manutenção" });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-06-01",
+      competenceTo: "2026-06-30",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [semCompetencia],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.despesasOperacionais.amount).toBe(300);
+  });
+
+  it("inclui accounts_payable/accounts_receivable pela competência, igual ao regime de competência puro", () => {
+    const ar = makeAR({ expectedAmount: 900 });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [ar],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(900);
+  });
+
+  it("nunca duplica: cash_movement já ligado a uma accounts_receivable/payable não entra de novo pela via caixa", () => {
+    const ar = makeAR({ id: "ar-liquidada", expectedAmount: 900 });
+    const liquidacao = makeCM({ id: "cm-liquidacao", accountsReceivableId: "ar-liquidada", amount: 900, categoryName: "Lavação", type: "entrada" });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [ar],
+      cashMovements: [liquidacao],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBe(900); // uma vez só, não 1800
+  });
+
+  it("devolução de empréstimo de parte relacionada (TES Training) — nunca entra na DRE em nenhum regime, impacto zero", () => {
+    const devolucao = makeCM({ amount: 450, categoryId: null, categoryName: null, nature: null, type: "saida" });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [devolucao],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.despesasOperacionais.amount).toBe(0);
+    expect(report.custosDiretos.amount).toBe(0);
+    expect(report.naoClassificados).toHaveLength(1); // sem categoria -> pendente, nunca fora_dre silencioso nem despesa
+  });
+});
+
+describe("Receita de Clientes/Parcerias Corporativas — segmentação por partners.type (Missão V3.0)", () => {
+  it("receita de parceiro com type parceria_pos_paga/contrato_mensal cai em receitaBrutaParceriasCorporativas, não em Estética/Estacionamento/Outras", () => {
+    const iesa = makePartner({ id: "iesa", name: "Grupo IESA/Nissan", type: "parceria_pos_paga" });
+    const receita = makeCM({ amount: 2680, categoryName: "Lavação", costCenterName: null, partnerId: "iesa", type: "entrada" });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [receita],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      partners: [iesa],
+    });
+    expect(report.receitaBrutaParceriasCorporativas.amount).toBe(2680);
+    expect(report.receitaBrutaEstetica.amount).toBe(0);
+    expect(report.receitaBrutaOutras.amount).toBe(0);
+    expect(report.receitaBruta).toBe(2680);
+    expect(report.participacaoParceriasReceita).toBe(100);
+  });
+
+  it("partner type 'outro' (ex.: WeCharge) não é tratado como parceria corporativa", () => {
+    const weCharge = makePartner({ id: "wc", name: "WeCharge", type: "outro" });
+    const receita = makeCM({ amount: 500, categoryName: "Lavação", costCenterName: "Estética Automotiva", partnerId: "wc", type: "entrada" });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [receita],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      partners: [weCharge],
+    });
+    expect(report.receitaBrutaParceriasCorporativas.amount).toBe(0);
+    expect(report.receitaBrutaEstetica.amount).toBe(500);
+  });
+
+  it("sem `partners` informado (parâmetro opcional), nenhuma linha cai em parcerias — comportamento retrocompatível", () => {
+    const receita = makeCM({ amount: 100, categoryName: "Lavação", costCenterName: "Estética Automotiva", partnerId: "algum-id", type: "entrada" });
+    const report = computeDreReport({
+      regime: "caixa",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [receita],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBrutaParceriasCorporativas.amount).toBe(0);
+    expect(report.receitaBrutaEstetica.amount).toBe(100);
+  });
+});
+
+describe("Mão de obra — total, operacional e percentuais (Missão V3.0)", () => {
+  it("soma Salários CLT + Prestadores PJ de custosDiretos/despesasOperacionais, calcula % sobre receita líquida e bruta", () => {
+    const ar = makeAR({ expectedAmount: 1000 });
+    const salario = makeAP({ id: "sal", categoryName: "Salários CLT", originalAmount: 200, costCenterName: "Estética Automotiva" });
+    const prestador = makeAP({ id: "pj", categoryName: "Prestadores PJ", originalAmount: 100, costCenterName: "Administrativo" });
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [salario, prestador],
+      accountsReceivable: [ar],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.maoDeObraTotal).toBe(300);
+    expect(report.maoDeObraOperacional).toBe(200); // só a de Estética Automotiva, não a Administrativa
+    expect(report.maoDeObraPercentualReceitaLiquida).toBe(30);
+    expect(report.maoDeObraPercentualReceitaBruta).toBe(30);
+  });
+
+  it("despesas/custos presentes mas nenhum é mão de obra -> total real 0, nunca 'indisponível'", () => {
+    const ap = makeAP({ categoryName: "Energia", originalAmount: 100 });
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [ap],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.maoDeObraTotal).toBe(0);
+    expect(report.maoDeObraIndisponivelMotivo).toBeNull();
+  });
+
+  it("nenhum lançamento de custo/despesa no período -> mão de obra não calculável (null), nunca 0 fabricado", () => {
+    const report = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.maoDeObraTotal).toBeNull();
+    expect(report.maoDeObraOperacional).toBeNull();
+    expect(report.maoDeObraIndisponivelMotivo).not.toBeNull();
   });
 });

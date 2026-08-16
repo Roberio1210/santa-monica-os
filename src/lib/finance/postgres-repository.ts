@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, type DbOrTx } from "@/db/client";
 import {
   accountingPeriods as accountingPeriodsTable,
@@ -639,11 +639,74 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return null;
   }
 
+  /**
+   * Missão Financeiro V3.0 — busca todos os nomes relacionados (categoria/centro de custo/conta/
+   * parceiro/cliente/fornecedor) em lote (uma query por tabela, via `inArray`) em vez de resolver
+   * `toCashMovement` linha a linha. O padrão N+1 anterior (até 4 lookups sequenciais por linha)
+   * levava minutos com centenas de lançamentos reais no Neon — cada round-trip de rede custa muito
+   * mais do que o ganho de simplicidade do código linha-a-linha.
+   */
   async listCashMovements(): Promise<CashMovement[]> {
-    const rows = await this.db().select().from(cashMovementsTable).where(eq(cashMovementsTable.active, true));
-    const results: CashMovement[] = [];
-    for (const row of rows) results.push(await this.toCashMovement(row));
-    return results;
+    const db = this.db();
+    const rows = await db.select().from(cashMovementsTable).where(eq(cashMovementsTable.active, true));
+    if (rows.length === 0) return [];
+
+    const distinct = (values: (string | null)[]) => [...new Set(values.filter((v): v is string => v !== null))];
+    const categoryIds = distinct(rows.map((r) => r.categoryId));
+    const costCenterIds = distinct(rows.map((r) => r.costCenterId));
+    const financialAccountIds = distinct(rows.map((r) => r.financialAccountId));
+    const partnerIds = distinct(rows.map((r) => r.partnerId));
+    const customerIds = distinct(rows.map((r) => r.customerId));
+    const supplierIds = distinct(rows.map((r) => r.supplierId));
+
+    const [categories, costCenters, financialAccounts, partners, customers, suppliers] = await Promise.all([
+      categoryIds.length ? db.select().from(financialCategoriesTable).where(inArray(financialCategoriesTable.id, categoryIds)) : Promise.resolve([]),
+      costCenterIds.length ? db.select().from(costCentersTable).where(inArray(costCentersTable.id, costCenterIds)) : Promise.resolve([]),
+      financialAccountIds.length ? db.select().from(financialAccountsTable).where(inArray(financialAccountsTable.id, financialAccountIds)) : Promise.resolve([]),
+      partnerIds.length ? db.select().from(partnersTable).where(inArray(partnersTable.id, partnerIds)) : Promise.resolve([]),
+      customerIds.length ? db.select().from(customersTable).where(inArray(customersTable.id, customerIds)) : Promise.resolve([]),
+      supplierIds.length ? db.select().from(suppliersTable).where(inArray(suppliersTable.id, supplierIds)) : Promise.resolve([]),
+    ]);
+
+    const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+    const costCenterNameById = new Map(costCenters.map((c) => [c.id, c.name]));
+    const financialAccountNameById = new Map(financialAccounts.map((a) => [a.id, a.name]));
+    const partnerNameById = new Map(partners.map((p) => [p.id, p.name]));
+    const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
+    const supplierNameById = new Map(suppliers.map((s) => [s.id, s.name]));
+
+    return rows.map((row) => {
+      const partyName = (row.partnerId && partnerNameById.get(row.partnerId)) || (row.customerId && customerNameById.get(row.customerId)) || (row.supplierId && supplierNameById.get(row.supplierId)) || null;
+      return {
+        id: row.id,
+        date: row.date,
+        type: row.type as CashMovementType,
+        nature: row.nature as CashMovementNature | null,
+        amount: Number(row.amount),
+        description: row.description,
+        accountsReceivableId: row.accountsReceivableId,
+        accountsPayableId: row.accountsPayableId,
+        categoryId: row.categoryId,
+        categoryName: (row.categoryId && categoryNameById.get(row.categoryId)) ?? null,
+        costCenterId: row.costCenterId,
+        costCenterName: (row.costCenterId && costCenterNameById.get(row.costCenterId)) ?? null,
+        financialAccountId: row.financialAccountId,
+        financialAccountName: (row.financialAccountId && financialAccountNameById.get(row.financialAccountId)) ?? null,
+        paymentId: row.paymentId,
+        partnerId: row.partnerId,
+        customerId: row.customerId,
+        supplierId: row.supplierId,
+        partyName,
+        responsibleName: row.responsibleName,
+        documentRef: row.documentRef,
+        competenceDate: row.competenceDate,
+        balanceBefore: row.balanceBefore !== null ? Number(row.balanceBefore) : null,
+        balanceAfter: row.balanceAfter !== null ? Number(row.balanceAfter) : null,
+        source: row.source,
+        externalId: row.externalId,
+        notes: row.notes,
+      };
+    });
   }
 
   async listContracts(): Promise<Contract[]> {
@@ -1521,12 +1584,48 @@ export class PostgresFinanceRepository implements FinanceRepository {
     });
   }
 
+  /** Missão Financeiro V3.0 — mesmo motivo do batching em `listCashMovements`: evita N+1 (até 4 lookups por regra). */
   async listClassificationRules(): Promise<ClassificationRule[]> {
     const db = this.db();
     const rows = await db.select().from(classificationRulesTable).where(eq(classificationRulesTable.active, true));
-    const results: ClassificationRule[] = [];
-    for (const row of rows) results.push(await this.toClassificationRule(row));
-    return results;
+    if (rows.length === 0) return [];
+
+    const distinct = (values: (string | null)[]) => [...new Set(values.filter((v): v is string => v !== null))];
+    const supplierIds = distinct(rows.map((r) => r.supplierId));
+    const partnerIds = distinct(rows.map((r) => r.partnerId));
+    const categoryIds = distinct(rows.map((r) => r.categoryId));
+    const costCenterIds = distinct(rows.map((r) => r.suggestedCostCenterId));
+
+    const [suppliers, partners, categories, costCenters] = await Promise.all([
+      supplierIds.length ? db.select().from(suppliersTable).where(inArray(suppliersTable.id, supplierIds)) : Promise.resolve([]),
+      partnerIds.length ? db.select().from(partnersTable).where(inArray(partnersTable.id, partnerIds)) : Promise.resolve([]),
+      categoryIds.length ? db.select().from(financialCategoriesTable).where(inArray(financialCategoriesTable.id, categoryIds)) : Promise.resolve([]),
+      costCenterIds.length ? db.select().from(costCentersTable).where(inArray(costCentersTable.id, costCenterIds)) : Promise.resolve([]),
+    ]);
+    const supplierNameById = new Map(suppliers.map((s) => [s.id, s.name]));
+    const partnerNameById = new Map(partners.map((p) => [p.id, p.name]));
+    const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+    const costCenterNameById = new Map(costCenters.map((c) => [c.id, c.name]));
+
+    return rows.map((row) => ({
+      id: row.id,
+      matchType: row.matchType as ClassificationMatchType,
+      supplierId: row.supplierId,
+      supplierName: (row.supplierId && supplierNameById.get(row.supplierId)) ?? null,
+      partnerId: row.partnerId,
+      partnerName: (row.partnerId && partnerNameById.get(row.partnerId)) ?? null,
+      categoryId: row.categoryId,
+      categoryName: (row.categoryId && categoryNameById.get(row.categoryId)) ?? null,
+      keyword: row.keyword,
+      dreLine: row.dreLine as DreLine,
+      nature: row.nature as FinancialNature,
+      suggestedCostCenterId: row.suggestedCostCenterId,
+      suggestedCostCenterName: (row.suggestedCostCenterId && costCenterNameById.get(row.suggestedCostCenterId)) ?? null,
+      includeInDre: row.includeInDre,
+      reviewNeeded: row.reviewNeeded,
+      enabled: row.enabled,
+      notes: row.notes,
+    }));
   }
 
   private async toClassificationRule(row: typeof classificationRulesTable.$inferSelect): Promise<ClassificationRule> {

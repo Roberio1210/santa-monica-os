@@ -774,24 +774,33 @@ export async function fetchCashFlowOverview(asOfDate: string = new Date().toISOS
 // DRE gerencial para apoio à administração. Não substitui escrituração contábil, demonstrações
 // oficiais ou obrigações preparadas pela contabilidade.
 
-interface DreSourceData {
+export interface DreSourceData {
   accountsPayable: Awaited<ReturnType<ReturnType<typeof getFinanceRepository>["listAccountsPayable"]>>;
   accountsReceivable: Awaited<ReturnType<ReturnType<typeof getFinanceRepository>["listAccountsReceivable"]>>;
   cashMovements: CashMovement[];
   classifications: FinancialClassification[];
   rules: ClassificationRule[];
+  partners: Partner[];
 }
 
-async function fetchDreSourceData(): Promise<DreSourceData> {
+/**
+ * Busca todos os dados-fonte da DRE em UMA única rodada de queries. Missão V3.0: chamadores que
+ * precisam de múltiplos relatórios (comparação + por centro de custo + série mensal) DEVEM chamar
+ * isto uma vez e passar o resultado via `preFetchedData` para cada função — chamar 3x em paralelo
+ * serializa 3 rodadas completas de queries no pool de conexão único do Neon (`max: 1`) e derrubou o
+ * tempo de carregamento de `/financeiro/dre` para minutos (medido em preview local).
+ */
+export async function fetchDreSourceData(): Promise<DreSourceData> {
   const repo = getFinanceRepository();
-  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules] = await Promise.all([
+  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners] = await Promise.all([
     repo.listAccountsPayable(),
     repo.listAccountsReceivable(),
     repo.listCashMovements(),
     repo.listFinancialClassifications(),
     repo.listClassificationRules(),
+    repo.listPartners(),
   ]);
-  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules };
+  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners };
 }
 
 export async function fetchDreReport(
@@ -809,8 +818,9 @@ export async function fetchDreByCostCenterGroups(
   regime: DreRegime,
   competenceFrom: string,
   competenceTo: string,
+  preFetchedData?: DreSourceData,
 ): Promise<Record<DreCostCenterGroup, DreReport>> {
-  const data = await fetchDreSourceData();
+  const data = preFetchedData ?? (await fetchDreSourceData());
   const groups: DreCostCenterGroup[] = ["estetica_automotiva", "estacionamento", "administrativo_geral"];
   const entries = groups.map((group) => [group, computeDreReport({ regime, competenceFrom, competenceTo, costCenterGroup: group, ...data })] as const);
   return Object.fromEntries(entries) as Record<DreCostCenterGroup, DreReport>;
@@ -828,11 +838,122 @@ export async function fetchDreComparison(
   previousFrom: string,
   previousTo: string,
   costCenterGroup: DreCostCenterGroup | "consolidado" = "consolidado",
+  preFetchedData?: DreSourceData,
 ): Promise<DreComparison> {
-  const data = await fetchDreSourceData();
+  const data = preFetchedData ?? (await fetchDreSourceData());
   return {
     current: computeDreReport({ regime, competenceFrom: currentFrom, competenceTo: currentTo, costCenterGroup, ...data }),
     previous: computeDreReport({ regime, competenceFrom: previousFrom, competenceTo: previousTo, costCenterGroup, ...data }),
+  };
+}
+
+function lastDayOfMonth(month: string): string {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(year, monthNumber, 0).toISOString().slice(0, 10);
+}
+
+export interface DreMonthlyPoint {
+  month: string;
+  report: DreReport;
+}
+
+/**
+ * Missão Financeiro V3.0 — série mensal da DRE (ex.: Jan-Ago/2026, agosto parcial). Busca os dados
+ * uma única vez e reaproveita `computeDreReport` por mês, mesmo padrão de `fetchDreByCostCenterGroups`.
+ * Cada mês é sempre 1º ao último dia real do calendário — quando o mês ainda não terminou (ex.: mês
+ * corrente), o chamador deve passar `to` explícito via `monthOverrides`, nunca inventamos um corte.
+ */
+export async function fetchDreMonthlySeries(
+  regime: DreRegime,
+  months: string[],
+  costCenterGroup: DreCostCenterGroup | "consolidado" = "consolidado",
+  monthOverrides: Record<string, { to: string }> = {},
+  preFetchedData?: DreSourceData,
+): Promise<DreMonthlyPoint[]> {
+  const data = preFetchedData ?? (await fetchDreSourceData());
+  return months.map((month) => {
+    const from = `${month}-01`;
+    const to = monthOverrides[month]?.to ?? lastDayOfMonth(month);
+    return { month, report: computeDreReport({ regime, competenceFrom: from, competenceTo: to, costCenterGroup, ...data }) };
+  });
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export interface DreCoverage {
+  countTotal: number;
+  countClassified: number;
+  countPercent: number | null;
+  valueTotal: number;
+  valueClassified: number;
+  valuePercent: number | null;
+}
+
+/**
+ * Cobertura de classificação da DRE, por contagem E por valor (Missão V3.0) — valor é mais
+ * relevante gerencialmente do que contagem (uma linha de R$0,50 pendente pesa igual a uma de
+ * R$10.000 na contagem, mas não no valor). Nunca soma `naoClassificados` nos totais da DRE — só
+ * mede a proporção classificada/pendente sobre o total de lançamentos reais do período.
+ */
+export function computeDreCoverage(report: DreReport): DreCoverage {
+  const groups = [
+    report.receitaBrutaEstetica,
+    report.receitaBrutaEstacionamento,
+    report.receitaBrutaParceriasCorporativas,
+    report.receitaBrutaOutras,
+    report.deducoes,
+    report.custosDiretos,
+    report.despesasOperacionais,
+    report.resultadoFinanceiro,
+    report.tributos,
+  ];
+  const countClassified = groups.reduce((sum, g) => sum + g.items.length, 0);
+  const valueClassified = round2(groups.reduce((sum, g) => sum + g.items.reduce((s, i) => s + i.amount, 0), 0));
+  const countPending = report.naoClassificados.length;
+  const valuePending = round2(report.naoClassificados.reduce((sum, i) => sum + i.amount, 0));
+
+  const countTotal = countClassified + countPending;
+  const valueTotal = round2(valueClassified + valuePending);
+
+  return {
+    countTotal,
+    countClassified,
+    countPercent: countTotal > 0 ? round2((countClassified / countTotal) * 100) : null,
+    valueTotal,
+    valueClassified,
+    valuePercent: valueTotal > 0 ? round2((valueClassified / valueTotal) * 100) : null,
+  };
+}
+
+export interface DrePendencyOverview {
+  /** Lançamentos já em accounts_payable/receivable/cash_movements, mas sem classificação de DRE (fonte: `report.naoClassificados`). */
+  dreNaoClassificados: { count: number; value: number };
+  /** Linhas do extrato bancário ainda não classificadas (status "a_classificar") — nem chegaram a virar cash_movement. Pool anterior e distinto do de `dreNaoClassificados`, nunca somado a ele. */
+  extratoAClassificar: { count: number; value: number };
+}
+
+/**
+ * Transparência de pendências (Missão V3.0, Fase 40) — dois pools distintos e NUNCA somados entre
+ * si nem à DRE: (1) lançamentos que já entraram no sistema financeiro mas ficaram sem classificação
+ * de DRE, e (2) linhas de extrato bancário que ainda nem viraram lançamento algum. Não existe hoje
+ * no banco uma distinção formal "pendência técnica" x "baixa materialidade" (nenhum campo/tag
+ * assim foi criado nas Missões V2.4–V2.8) — inventar essa separação aqui seria fabricar uma
+ * categoria que não existe nos dados reais.
+ */
+export async function fetchDrePendencyOverview(report: DreReport): Promise<DrePendencyOverview> {
+  const { getBankStatementRepository } = await import("@/lib/finance/bankStatement/repository-factory");
+  const pendingLines = await getBankStatementRepository().listLines({ status: "a_classificar" });
+  return {
+    dreNaoClassificados: {
+      count: report.naoClassificados.length,
+      value: round2(report.naoClassificados.reduce((sum, i) => sum + i.amount, 0)),
+    },
+    extratoAClassificar: {
+      count: pendingLines.length,
+      value: round2(pendingLines.reduce((sum, l) => sum + Math.abs(l.amount), 0)),
+    },
   };
 }
 
@@ -926,7 +1047,15 @@ export async function fetchAccountingPeriodOverview(competenceMonth: string, asO
   };
 }
 
-export type AccountingAlertLevel = "margem_negativa" | "resultado_operacional_negativo" | "centro_custo_negativo" | "despesa_compartilhada_sem_rateio" | "competencia_proxima_fechamento" | "aumento_despesa_relevante";
+export type AccountingAlertLevel =
+  | "margem_negativa"
+  | "resultado_operacional_negativo"
+  | "centro_custo_negativo"
+  | "despesa_compartilhada_sem_rateio"
+  | "competencia_proxima_fechamento"
+  | "aumento_despesa_relevante"
+  | "periodo_parcial"
+  | "cobertura_baixa";
 
 export interface AccountingAlert {
   level: AccountingAlertLevel;
@@ -935,10 +1064,37 @@ export interface AccountingAlert {
 }
 
 const DESPESA_INCREASE_THRESHOLD_PERCENT = 30;
+/** Heurística, não um limite contábil oficial — configurável, só sinaliza quando a cobertura por valor cai abaixo disso. */
+const LOW_COVERAGE_VALUE_THRESHOLD_PERCENT = 80;
 
-/** Calculado sob demanda a partir da própria DRE — nunca persiste nada. */
-export function computeAccountingAlerts(current: DreReport, previous: DreReport | null, byCostCenter: Record<DreCostCenterGroup, DreReport> | null): AccountingAlert[] {
+/**
+ * Calculado sob demanda a partir da própria DRE — nunca persiste nada. `coverage` e
+ * `isPartialPeriod` são opcionais (Missão V3.0) — quando omitidos, os alertas correspondentes
+ * simplesmente não disparam, mantendo retrocompatibilidade com qualquer chamador existente.
+ */
+export function computeAccountingAlerts(
+  current: DreReport,
+  previous: DreReport | null,
+  byCostCenter: Record<DreCostCenterGroup, DreReport> | null,
+  coverage?: DreCoverage,
+  isPartialPeriod?: boolean,
+): AccountingAlert[] {
   const alerts: AccountingAlert[] = [];
+
+  if (isPartialPeriod) {
+    alerts.push({
+      level: "periodo_parcial",
+      message: "O período selecionado ainda não terminou — os valores mostrados são parciais, não representam o mês fechado.",
+      amount: null,
+    });
+  }
+  if (coverage && coverage.valuePercent !== null && coverage.valuePercent < LOW_COVERAGE_VALUE_THRESHOLD_PERCENT) {
+    alerts.push({
+      level: "cobertura_baixa",
+      message: `Cobertura de classificação por valor abaixo de ${LOW_COVERAGE_VALUE_THRESHOLD_PERCENT}% (heurística, limite configurável) — ${coverage.valuePercent}% do valor do período está classificado na DRE.`,
+      amount: coverage.valueClassified,
+    });
+  }
 
   if (current.margemContribuicaoPercentual !== null && current.margemContribuicaoPercentual < 0) {
     alerts.push({ level: "margem_negativa", message: "Margem de contribuição negativa no período.", amount: current.margemContribuicao });

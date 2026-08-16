@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { computeDreVariationPercent } from "@/lib/finance/dre";
+import { DreMonthlyChart } from "@/components/finance/dre-monthly-chart";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
-import type { AccountingAlert } from "@/lib/finance/service";
+import type { AccountingAlert, DreCoverage, DreMonthlyPoint, DrePendencyOverview } from "@/lib/finance/service";
 import type { DreCostCenterGroup, DreGroupTotal, DreRegime, DreReport } from "@/lib/finance/types";
 
 const fieldClasses =
@@ -21,6 +22,12 @@ const costCenterGroupLabels: Record<DreCostCenterGroup, string> = {
   administrativo_geral: "Administrativo/Geral",
 };
 
+const regimeLabels: Record<DreRegime, string> = {
+  gerencial: "usa a competência confirmada quando ela existe, e a data do movimento de caixa quando não existe — regime híbrido",
+  competencia: "de competência (obrigação integral, independente da baixa)",
+  caixa: "de caixa (só o que efetivamente entrou/saiu)",
+};
+
 const alertLabels: Record<AccountingAlert["level"], string> = {
   margem_negativa: "Margem negativa",
   resultado_operacional_negativo: "Resultado operacional negativo",
@@ -28,6 +35,8 @@ const alertLabels: Record<AccountingAlert["level"], string> = {
   despesa_compartilhada_sem_rateio: "Despesa compartilhada sem rateio",
   competencia_proxima_fechamento: "Competência próxima do fechamento",
   aumento_despesa_relevante: "Aumento relevante de despesa",
+  periodo_parcial: "Período parcial",
+  cobertura_baixa: "Cobertura baixa (heurística)",
 };
 
 interface DreViewProps {
@@ -39,14 +48,17 @@ interface DreViewProps {
   from: string;
   to: string;
   costCenterGroup: DreCostCenterGroup | "consolidado";
+  monthlySeries: DreMonthlyPoint[];
+  pendencyOverview: DrePendencyOverview;
+  coverage: DreCoverage;
 }
 
-export function DreView({ report, previous, byCostCenter, alerts, regime, from, to, costCenterGroup }: DreViewProps) {
+export function DreView({ report, previous, byCostCenter, alerts, regime, from, to, costCenterGroup, monthlySeries, pendencyOverview, coverage }: DreViewProps) {
   const router = useRouter();
 
   function handleFilter(formData: FormData) {
     const params = new URLSearchParams();
-    params.set("regime", String(formData.get("regime") ?? "competencia"));
+    params.set("regime", String(formData.get("regime") ?? "gerencial"));
     params.set("from", String(formData.get("from") ?? from));
     params.set("to", String(formData.get("to") ?? to));
     params.set("costCenterGroup", String(formData.get("costCenterGroup") ?? "consolidado"));
@@ -66,6 +78,7 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
                 Regime
               </label>
               <select id="regime" name="regime" defaultValue={regime} className={fieldClasses}>
+                <option value="gerencial">Gerencial (híbrido)</option>
                 <option value="competencia">Competência</option>
                 <option value="caixa">Caixa</option>
               </select>
@@ -95,9 +108,7 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
             </div>
             <Button type="submit">Aplicar</Button>
           </form>
-          <p className="mt-2 text-xs text-foreground-subtle">
-            Regime {regime === "competencia" ? "de competência (obrigação integral, independente da baixa)" : "de caixa (só o que efetivamente entrou/saiu)"} — nunca misturado no mesmo indicador.
-          </p>
+          <p className="mt-2 text-xs text-foreground-subtle">Regime {regimeLabels[regime]} — nunca misturado com os outros regimes no mesmo indicador.</p>
         </CardContent>
       </Card>
 
@@ -127,14 +138,30 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <IndicatorCard label="Margem de contribuição" value={report.margemContribuicaoPercentual} textOverride={report.margemContribuicaoPercentual === null ? (report.margemContribuicaoIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
-        <IndicatorCard label="Margem operacional" value={report.margemOperacionalPercentual} textOverride={report.margemOperacionalPercentual === null ? (report.resultadoOperacionalIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
-        <IndicatorCard label="Margem líquida" value={report.margemLiquidaPercentual} textOverride={report.margemLiquidaPercentual === null ? (report.resultadoOperacionalIndisponivelMotivo ?? "Sem receita bruta no período (denominador inválido).") : undefined} />
-        <IndicatorCard label="Participação Estética" value={report.participacaoEsteticaReceita} />
-        <IndicatorCard label="Participação Estacionamento" value={report.participacaoEstacionamentoReceita} />
-        <IndicatorCard label="EBITDA" value={null} textOverride={report.ebitdaIndisponivelMotivo ?? undefined} />
+      {/* Exatamente os 5 cards pedidos pela Missão V3.0 — demais indicadores (participações, EBITDA) ficam na seção "Mais indicadores" abaixo, não aqui. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiCard label="Receita Operacional" amount={report.receitaBruta} motivo={report.receitaBrutaIndisponivelMotivo} />
+        <KpiCard label="Margem Bruta" amount={report.margemContribuicao} percent={report.margemContribuicaoPercentual} motivo={report.margemContribuicaoIndisponivelMotivo} />
+        <KpiCard label="Resultado Operacional" amount={report.resultadoOperacional} percent={report.margemOperacionalPercentual} motivo={report.resultadoOperacionalIndisponivelMotivo} />
+        <KpiCard label="Resultado Gerencial" amount={report.resultadoLiquido} percent={report.margemLiquidaPercentual} motivo={report.resultadoOperacionalIndisponivelMotivo} />
+        <KpiCard label="Mão de Obra" amount={report.maoDeObraTotal} percent={report.maoDeObraPercentualReceitaLiquida} motivo={report.maoDeObraIndisponivelMotivo} />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Mais indicadores</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <IndicatorCard label="Participação Estética" value={report.participacaoEsteticaReceita} />
+            <IndicatorCard label="Participação Estacionamento" value={report.participacaoEstacionamentoReceita} />
+            <IndicatorCard label="Participação Parcerias Corporativas" value={report.participacaoParceriasReceita} />
+            <PlainIndicatorCard label="Mão de obra operacional" amount={report.maoDeObraOperacional} motivo={report.maoDeObraIndisponivelMotivo} />
+            <IndicatorCard label="Cobertura da DRE (por valor)" value={coverage.valuePercent} textOverride={coverage.valuePercent === null ? "Nenhum lançamento no período." : undefined} />
+            <IndicatorCard label="EBITDA" value={null} textOverride={report.ebitdaIndisponivelMotivo ?? undefined} />
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -150,18 +177,83 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
         <CardContent className="space-y-1 pt-0">
           <DreRow label="Receita da Estética Automotiva" group={report.receitaBrutaEstetica} />
           <DreRow label="Receita do Estacionamento" group={report.receitaBrutaEstacionamento} />
+          <DreRow label="Receita de Clientes/Parcerias Corporativas" group={report.receitaBrutaParceriasCorporativas} />
           <DreRow label="Outras receitas operacionais" group={report.receitaBrutaOutras} />
           <TotalRow label="RECEITA BRUTA" value={report.receitaBruta} previous={previous?.receitaBruta} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Deduções da receita" group={report.deducoes} negative />
           <TotalRow label="RECEITA LÍQUIDA" value={report.receitaLiquida} previous={previous?.receitaLiquida} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Custos diretos dos serviços" group={report.custosDiretos} negative />
-          <TotalRow label="MARGEM DE CONTRIBUIÇÃO" value={report.margemContribuicao} previous={previous?.margemContribuicao} motivo={report.margemContribuicaoIndisponivelMotivo} emphasis />
+          <TotalRow label="LUCRO BRUTO (Margem de contribuição)" value={report.margemContribuicao} previous={previous?.margemContribuicao} motivo={report.margemContribuicaoIndisponivelMotivo} emphasis />
           <DreRow label="(-) Despesas operacionais" group={report.despesasOperacionais} negative />
           <TotalRow label="RESULTADO OPERACIONAL" value={report.resultadoOperacional} previous={previous?.resultadoOperacional} motivo={report.resultadoOperacionalIndisponivelMotivo} emphasis />
           <DreRow label="(+/-) Resultado financeiro" group={report.resultadoFinanceiro} />
           <TotalRow label="RESULTADO ANTES DOS TRIBUTOS" value={report.resultadoAntesTributos} motivo={report.resultadoOperacionalIndisponivelMotivo} />
           <DreRow label="(-) Tributos" group={report.tributos} negative />
-          <TotalRow label="RESULTADO LÍQUIDO GERENCIAL" value={report.resultadoLiquido} previous={previous?.resultadoLiquido} motivo={report.resultadoOperacionalIndisponivelMotivo} emphasis final />
+          <TotalRow label="RESULTADO GERENCIAL" value={report.resultadoLiquido} previous={previous?.resultadoLiquido} motivo={report.resultadoOperacionalIndisponivelMotivo} emphasis final />
+          <div className="mt-3 flex items-center justify-between border-t border-dashed border-border-subtle pt-2 text-xs text-foreground-subtle">
+            <span>Mão de obra (Salários CLT + Prestadores PJ, incluída dentro das linhas acima — não é uma linha adicional)</span>
+            <span className="font-medium text-foreground">
+              {report.maoDeObraTotal === null ? "Não calculável" : formatCurrency(report.maoDeObraTotal)}
+              {report.maoDeObraPercentualReceitaLiquida !== null ? ` (${report.maoDeObraPercentualReceitaLiquida}% da receita líquida)` : ""}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Evolução mensal {monthlySeries.length > 0 ? `— ${formatMonthRangeLabel(monthlySeries)}` : ""}</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <DreMonthlyChart points={monthlySeries} />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border-subtle text-left text-foreground-subtle">
+                  <th className="py-1 pr-2 font-normal">Mês</th>
+                  <th className="py-1 pr-2 font-normal text-right">Receita bruta</th>
+                  <th className="py-1 pr-2 font-normal text-right">Resultado operacional</th>
+                  <th className="py-1 font-normal text-right">Resultado gerencial</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlySeries.map((point) => (
+                  <tr key={point.month} className="border-b border-border-subtle last:border-0">
+                    <td className="py-1 pr-2 text-foreground-muted">{formatMonthLabelBR(point.month)}</td>
+                    <MonthlyValueCell value={point.report.receitaBruta} />
+                    <MonthlyValueCell value={point.report.resultadoOperacional} />
+                    <MonthlyValueCell value={point.report.resultadoLiquido} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pendências e cobertura</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0">
+          <p className="text-xs text-foreground-subtle">
+            Nenhum valor pendente entra nos totais da DRE acima. Cobertura por contagem e por valor — valor é o indicador gerencialmente mais relevante (uma linha pequena pendente pesa igual a uma
+            grande na contagem, mas não no valor).
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <PendencyStat label="Cobertura por contagem" percent={coverage.countPercent} detail={`${coverage.countClassified} de ${coverage.countTotal} lançamentos`} />
+            <PendencyStat label="Cobertura por valor" percent={coverage.valuePercent} detail={`${formatCurrency(coverage.valueClassified)} de ${formatCurrency(coverage.valueTotal)}`} />
+            <PendencyStat
+              label="Não classificados na DRE"
+              percent={null}
+              detail={`${pendencyOverview.dreNaoClassificados.count} lançamentos — ${formatCurrency(pendencyOverview.dreNaoClassificados.value)}`}
+            />
+            <PendencyStat
+              label="Extrato bancário a classificar"
+              percent={null}
+              detail={`${pendencyOverview.extratoAClassificar.count} linhas — ${formatCurrency(pendencyOverview.extratoAClassificar.value)}`}
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -209,6 +301,64 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** Um dos 5 cards mandatórios da Missão V3.0 — sempre mostra o valor em R$; o % (quando informado) é secundário. */
+function KpiCard({ label, amount, percent, motivo }: { label: string; amount: number | null; percent?: number | null; motivo?: string | null }) {
+  return (
+    <div className="rounded-lg border border-border bg-background-elevated p-3">
+      <p className="text-xs text-foreground-subtle">{label}</p>
+      {amount === null ? (
+        <p className="mt-1 text-sm font-normal text-foreground-subtle">Não calculável{motivo ? ` — ${motivo}` : ""}</p>
+      ) : (
+        <>
+          <p className={`mt-1 text-lg font-semibold ${amount < 0 ? "text-critical" : "text-foreground"}`}>{formatCurrency(amount)}</p>
+          {percent !== undefined && percent !== null ? <p className="text-xs text-foreground-subtle">{percent}% da receita</p> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+function PlainIndicatorCard({ label, amount, motivo }: { label: string; amount: number | null; motivo?: string | null }) {
+  return (
+    <div className="rounded-lg border border-border bg-background-elevated p-3">
+      <p className="text-xs text-foreground-subtle">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">
+        {amount === null ? <span className="text-sm font-normal text-foreground-subtle">Não calculável{motivo ? ` — ${motivo}` : ""}</span> : formatCurrency(amount)}
+      </p>
+    </div>
+  );
+}
+
+const MONTH_NAMES_BR = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+function formatMonthLabelBR(month: string): string {
+  const [year, m] = month.split("-");
+  return `${MONTH_NAMES_BR[Number(m) - 1]}/${year.slice(2)}`;
+}
+
+function formatMonthRangeLabel(points: { month: string }[]): string {
+  if (points.length === 0) return "";
+  return `${formatMonthLabelBR(points[0].month)} a ${formatMonthLabelBR(points[points.length - 1].month)}`;
+}
+
+function MonthlyValueCell({ value }: { value: number | null }) {
+  return (
+    <td className={`py-1 text-right ${value === null ? "text-foreground-subtle" : value < 0 ? "text-critical" : "text-foreground"}`}>
+      {value === null ? "não calculável" : formatCurrency(value)}
+    </td>
+  );
+}
+
+function PendencyStat({ label, percent, detail }: { label: string; percent: number | null; detail: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-background-elevated p-3">
+      <p className="text-xs text-foreground-subtle">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">{percent !== null ? `${percent}%` : "—"}</p>
+      <p className="text-xs text-foreground-subtle">{detail}</p>
     </div>
   );
 }

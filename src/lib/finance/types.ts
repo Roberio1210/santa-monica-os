@@ -760,7 +760,12 @@ export interface ReopenAccountingPeriodInput {
 
 // --- DRE Gerencial ---
 
-export type DreRegime = "competencia" | "caixa";
+/**
+ * "gerencial" (Missão V3.0) é o regime híbrido: usa competência quando ela é conhecida (accounts_payable/
+ * accounts_receivable, e cash_movements com `competenceDate` preenchido) e cai para a data do movimento de
+ * caixa quando não há competência registrada — nunca inventa uma competência que não foi confirmada.
+ */
+export type DreRegime = "competencia" | "caixa" | "gerencial";
 
 export type DreCostCenterGroup = "estetica_automotiva" | "estacionamento" | "administrativo_geral";
 
@@ -791,6 +796,8 @@ export interface DreReport {
 
   receitaBrutaEstetica: DreGroupTotal;
   receitaBrutaEstacionamento: DreGroupTotal;
+  /** Receita de parceiros com `partners.type` "parceria_pos_paga" ou "contrato_mensal" (ex.: Grupo IESA/Nissan) — segmentada por tipo de parceiro, não por centro de custo, porque nem toda parceria corporativa tem um centro de custo próprio cadastrado. */
+  receitaBrutaParceriasCorporativas: DreGroupTotal;
   receitaBrutaOutras: DreGroupTotal;
   /** Null quando nenhuma receita foi registrada no período — ausência de lançamento nunca vira R$ 0 (ver `receitaBrutaIndisponivelMotivo`). */
   receitaBruta: number | null;
@@ -823,8 +830,22 @@ export interface DreReport {
   margemLiquidaPercentual: number | null;
   participacaoEsteticaReceita: number | null;
   participacaoEstacionamentoReceita: number | null;
+  participacaoParceriasReceita: number | null;
   ebitda: number | null;
   ebitdaIndisponivelMotivo: string | null;
+
+  /**
+   * Mão de obra = soma de itens de custosDiretos/despesasOperacionais nas categorias "Salários CLT" e
+   * "Prestadores PJ" — as duas únicas categorias de mão de obra que existem hoje no plano de contas, nenhuma
+   * nova foi inventada. `maoDeObraOperacional` é o subconjunto cujo centro de custo resolve para Estética
+   * Automotiva ou Estacionamento (não Administrativo/Geral). Segue "ausência de dado ≠ zero": null só quando
+   * NENHUM lançamento de custo/despesa existe no período; se existem mas nenhum é mão de obra, o valor real é 0.
+   */
+  maoDeObraTotal: number | null;
+  maoDeObraOperacional: number | null;
+  maoDeObraIndisponivelMotivo: string | null;
+  maoDeObraPercentualReceitaLiquida: number | null;
+  maoDeObraPercentualReceitaBruta: number | null;
 }
 
 export interface DreComparisonPoint {

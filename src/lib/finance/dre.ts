@@ -11,9 +11,11 @@ import type {
   DreGroupTotal,
   DreLine,
   DreLineItem,
+  DreRegime,
   DreReport,
   FinancialClassification,
   FinancialNature,
+  Partner,
 } from "@/lib/finance/types";
 
 /**
@@ -74,6 +76,12 @@ const TRANSFER_NATURE_MAP: Record<AccountTransferType, FinancialNature> = {
   aporte_socios: "aporte",
   retirada: "retirada",
 };
+
+/** As únicas duas categorias de mão de obra que existem hoje no plano de contas real — nenhuma nova foi inventada. */
+const LABOR_CATEGORY_NAMES = new Set(["Salários CLT", "Prestadores PJ"]);
+
+/** `partners.type` que caracterizam uma parceria/cliente corporativo (ex.: Grupo IESA/Nissan) — vem do cadastro real, nunca uma lista inventada por nome de contraparte. */
+const CORPORATE_PARTNERSHIP_TYPES = new Set(["parceria_pos_paga", "contrato_mensal"]);
 
 export interface ResolvedClassification {
   dreLine: DreLine;
@@ -187,7 +195,7 @@ interface DreCandidate {
 }
 
 export interface DreComputationInput {
-  regime: "competencia" | "caixa";
+  regime: DreRegime;
   competenceFrom: string;
   competenceTo: string;
   costCenterGroup: DreCostCenterGroup | "consolidado";
@@ -196,16 +204,21 @@ export interface DreComputationInput {
   cashMovements: CashMovement[];
   classifications: FinancialClassification[];
   rules: ClassificationRule[];
+  /** Opcional — só usado no regime "gerencial" para segmentar receita de Clientes/Parcerias Corporativas por `partners.type`. Omitir equivale a `[]` (nenhuma linha cai na segmentação de parceria). */
+  partners?: Partner[];
 }
 
 /**
  * Motor da DRE gerencial — nunca grava nada, sempre recalcula a partir dos lançamentos reais
- * (accounts_payable/accounts_receivable para competência, cash_movements para caixa). Nunca
- * mistura os dois regimes no mesmo relatório.
+ * (accounts_payable/accounts_receivable para competência, cash_movements para caixa, ou os dois
+ * combinados no regime híbrido "gerencial" — ver `buildManagerialCandidates`). Nunca mistura os
+ * regimes "competencia"/"caixa" puros no mesmo relatório.
  */
 export function computeDreReport(input: DreComputationInput): DreReport {
   const candidates: DreCandidate[] =
-    input.regime === "competencia" ? buildCompetenceCandidates(input) : buildCashCandidates(input);
+    input.regime === "competencia" ? buildCompetenceCandidates(input) : input.regime === "caixa" ? buildCashCandidates(input) : buildManagerialCandidates(input);
+
+  const partnerTypeById = new Map((input.partners ?? []).map((p) => [p.id, p.type]));
 
   const filtered = candidates.filter((c) => {
     if (c.date < input.competenceFrom || c.date > input.competenceTo) return false;
@@ -215,6 +228,7 @@ export function computeDreReport(input: DreComputationInput): DreReport {
 
   const receitaBrutaEstetica = emptyGroup("Receita da Estética Automotiva");
   const receitaBrutaEstacionamento = emptyGroup("Receita do Estacionamento");
+  const receitaBrutaParceriasCorporativas = emptyGroup("Receita de Clientes/Parcerias Corporativas");
   const receitaBrutaOutras = emptyGroup("Outras receitas operacionais");
   const deducoes = emptyGroup("Deduções da receita");
   const custosDiretos = emptyGroup("Custos diretos dos serviços");
@@ -257,8 +271,13 @@ export function computeDreReport(input: DreComputationInput): DreReport {
 
     switch (resolved.dreLine) {
       case "receita_bruta": {
-        const group = resolveDreCostCenterGroup(candidate.costCenterName);
-        addItem(group === "estetica_automotiva" ? receitaBrutaEstetica : group === "estacionamento" ? receitaBrutaEstacionamento : receitaBrutaOutras, item);
+        const partnerType = candidate.partnerId ? partnerTypeById.get(candidate.partnerId) : undefined;
+        if (partnerType && CORPORATE_PARTNERSHIP_TYPES.has(partnerType)) {
+          addItem(receitaBrutaParceriasCorporativas, item);
+        } else {
+          const group = resolveDreCostCenterGroup(candidate.costCenterName);
+          addItem(group === "estetica_automotiva" ? receitaBrutaEstetica : group === "estacionamento" ? receitaBrutaEstacionamento : receitaBrutaOutras, item);
+        }
         break;
       }
       case "deducoes_receita":
@@ -292,18 +311,37 @@ export function computeDreReport(input: DreComputationInput): DreReport {
    * bancária, imposto já classificado), não uma expectativa universal de toda operação, ao
    * contrário de receita/custos diretos/despesas operacionais.
    */
-  const hasRevenueData = receitaBrutaEstetica.items.length + receitaBrutaEstacionamento.items.length + receitaBrutaOutras.items.length > 0;
+  const hasRevenueData =
+    receitaBrutaEstetica.items.length + receitaBrutaEstacionamento.items.length + receitaBrutaParceriasCorporativas.items.length + receitaBrutaOutras.items.length > 0;
   const hasCustosDiretosData = custosDiretos.items.length > 0;
   const hasDespesasOperacionaisData = despesasOperacionais.items.length > 0;
 
-  const receitaBrutaValue = round2(receitaBrutaEstetica.amount + receitaBrutaEstacionamento.amount + receitaBrutaOutras.amount);
+  const receitaBrutaValue = round2(
+    receitaBrutaEstetica.amount + receitaBrutaEstacionamento.amount + receitaBrutaParceriasCorporativas.amount + receitaBrutaOutras.amount,
+  );
   const receitaLiquidaValue = round2(receitaBrutaValue - deducoes.amount);
   const margemContribuicaoValue = round2(receitaLiquidaValue - custosDiretos.amount);
   const resultadoOperacionalValue = round2(margemContribuicaoValue - despesasOperacionais.amount);
   const resultadoAntesTributosValue = round2(resultadoOperacionalValue + resultadoFinanceiro.amount);
   const resultadoLiquidoValue = round2(resultadoAntesTributosValue - tributos.amount);
 
-  const sourceLabel = input.regime === "competencia" ? "Contas a Receber/Contas a Pagar" : "Movimentações de Caixa";
+  const sourceLabel =
+    input.regime === "competencia" ? "Contas a Receber/Contas a Pagar" : input.regime === "caixa" ? "Movimentações de Caixa" : "Contas a Receber/Pagar + Movimentações de Caixa (regime gerencial híbrido)";
+
+  /**
+   * Mão de obra (Missão V3.0) — soma de itens de custosDiretos/despesasOperacionais nas categorias reais
+   * "Salários CLT" e "Prestadores PJ". Segue o mesmo princípio "ausência de dado ≠ zero": null só quando
+   * nenhum lançamento de custo/despesa existe no período; se existem lançamentos mas nenhum é mão de obra,
+   * o valor real é 0 (não "indisponível").
+   */
+  const laborItems = [...custosDiretos.items, ...despesasOperacionais.items].filter((i) => i.categoryName && LABOR_CATEGORY_NAMES.has(i.categoryName));
+  const maoDeObraOperacionalItems = laborItems.filter((i) => resolveDreCostCenterGroup(i.costCenterName) !== "administrativo_geral");
+  const maoDeObraIndisponivelMotivo =
+    hasCustosDiretosData || hasDespesasOperacionaisData
+      ? null
+      : `Nenhuma despesa operacional ou custo direto registrado neste período (fonte: ${sourceLabel}). Ausência de lançamento não significa mão de obra zero.`;
+  const maoDeObraTotal = maoDeObraIndisponivelMotivo ? null : round2(laborItems.reduce((s, i) => s + i.amount, 0));
+  const maoDeObraOperacional = maoDeObraIndisponivelMotivo ? null : round2(maoDeObraOperacionalItems.reduce((s, i) => s + i.amount, 0));
   const receitaBrutaIndisponivelMotivo = hasRevenueData
     ? null
     : `Nenhuma receita registrada com competência neste período (fonte: ${sourceLabel}). Ausência de lançamento não significa faturamento zero — pode haver receita real ainda não lançada no sistema.`;
@@ -328,6 +366,7 @@ export function computeDreReport(input: DreComputationInput): DreReport {
     costCenterGroup: input.costCenterGroup,
     receitaBrutaEstetica,
     receitaBrutaEstacionamento,
+    receitaBrutaParceriasCorporativas,
     receitaBrutaOutras,
     receitaBruta,
     receitaBrutaIndisponivelMotivo,
@@ -349,8 +388,14 @@ export function computeDreReport(input: DreComputationInput): DreReport {
     margemLiquidaPercentual: receitaBruta !== null && receitaBruta > 0 && resultadoLiquido !== null ? round2((resultadoLiquido / receitaBruta) * 100) : null,
     participacaoEsteticaReceita: receitaBruta !== null && receitaBruta > 0 ? round2((receitaBrutaEstetica.amount / receitaBruta) * 100) : null,
     participacaoEstacionamentoReceita: receitaBruta !== null && receitaBruta > 0 ? round2((receitaBrutaEstacionamento.amount / receitaBruta) * 100) : null,
+    participacaoParceriasReceita: receitaBruta !== null && receitaBruta > 0 ? round2((receitaBrutaParceriasCorporativas.amount / receitaBruta) * 100) : null,
     ebitda: null,
     ebitdaIndisponivelMotivo: "Depreciação e amortização não são registradas no sistema — classificação insuficiente para calcular EBITDA.",
+    maoDeObraTotal,
+    maoDeObraOperacional,
+    maoDeObraIndisponivelMotivo,
+    maoDeObraPercentualReceitaLiquida: receitaLiquida !== null && receitaLiquida > 0 && maoDeObraTotal !== null ? round2((maoDeObraTotal / receitaLiquida) * 100) : null,
+    maoDeObraPercentualReceitaBruta: receitaBruta !== null && receitaBruta > 0 && maoDeObraTotal !== null ? round2((maoDeObraTotal / receitaBruta) * 100) : null,
   };
 }
 
@@ -435,4 +480,33 @@ function buildCashCandidates(input: DreComputationInput): DreCandidate[] {
     absAmount: m.amount,
     cashMovementNature: m.nature,
   }));
+}
+
+/**
+ * Regime "gerencial" (Missão V3.0) — híbrido: obrigações de accounts_payable/accounts_receivable pela
+ * competência (mesma lógica de `buildCompetenceCandidates`) + cash_movements que NÃO estão ligados a uma
+ * dessas obrigações (accountsPayableId/accountsReceivableId nulos — evita contar a mesma obrigação duas
+ * vezes), usando `competenceDate` quando preenchido e caindo para a data do movimento quando não há
+ * competência confirmada. Nunca inventa uma competência: o fallback é sempre a data real do movimento.
+ */
+function buildManagerialCandidates(input: DreComputationInput): DreCandidate[] {
+  const obligationCandidates = buildCompetenceCandidates(input);
+
+  const cashCandidates: DreCandidate[] = input.cashMovements
+    .filter((m) => !m.accountsPayableId && !m.accountsReceivableId)
+    .map((m) => ({
+      sourceKind: "cash_movement" as const,
+      sourceId: m.id,
+      date: m.competenceDate ?? m.date,
+      description: m.description,
+      partyName: m.partyName,
+      categoryName: m.categoryName,
+      costCenterName: m.costCenterName,
+      supplierId: m.supplierId,
+      partnerId: m.partnerId,
+      absAmount: m.amount,
+      cashMovementNature: m.nature,
+    }));
+
+  return [...obligationCandidates, ...cashCandidates];
 }
