@@ -11,7 +11,7 @@ import { computeDreVariationPercent } from "@/lib/finance/dre";
 import { DreMonthlyChart } from "@/components/finance/dre-monthly-chart";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import type { AccountingAlert, DreCoverage, DreMonthlyPoint, DrePendencyOverview } from "@/lib/finance/service";
-import type { DreCostCenterGroup, DreGroupTotal, DreRegime, DreReport } from "@/lib/finance/types";
+import type { ClassificationSourceKind, DreCostCenterGroup, DreGroupTotal, DreRegime, DreReport } from "@/lib/finance/types";
 
 const fieldClasses =
   "h-9 rounded-lg border border-border bg-background-elevated px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50";
@@ -20,6 +20,15 @@ const costCenterGroupLabels: Record<DreCostCenterGroup, string> = {
   estetica_automotiva: "Estética Automotiva",
   estacionamento: "Estacionamento",
   administrativo_geral: "Administrativo/Geral",
+};
+
+/** Missão V3.1 — coluna "Fonte" do drill-down, para o gestor distinguir receita real do JumpPark de lançamentos vindos de conciliação bancária/AR manual. */
+const sourceKindLabels: Record<ClassificationSourceKind, string> = {
+  accounts_payable: "Contas a Pagar",
+  accounts_receivable: "Contas a Receber",
+  cash_movement: "Movimentação de Caixa",
+  account_transfer: "Transferência entre Contas",
+  jumppark_service_order: "JumpPark",
 };
 
 const regimeLabels: Record<DreRegime, string> = {
@@ -414,6 +423,7 @@ function DreRow({ label, group, negative }: { label: string; group: DreGroupTota
                     <td className="py-1 pr-2 text-foreground-subtle">{item.partyName ?? "—"}</td>
                     <td className="py-1 pr-2 text-foreground-subtle">{item.categoryName ?? "—"}</td>
                     <td className="py-1 pr-2 text-foreground-subtle">{item.costCenterName ?? "—"}</td>
+                    <td className="py-1 pr-2 text-foreground-subtle">{sourceKindLabels[item.sourceKind]}</td>
                     <td className="py-1 text-right text-foreground">{formatCurrency(item.amount)}</td>
                   </tr>
                 ))}

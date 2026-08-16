@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDreReport, computeDreVariationPercent, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
+import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
 import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification, Partner } from "@/lib/finance/types";
 
 function makeAR(overrides: Partial<AccountsReceivable>): AccountsReceivable {
@@ -924,5 +925,144 @@ describe("Mão de obra — total, operacional e percentuais (Missão V3.0)", () 
     expect(report.maoDeObraTotal).toBeNull();
     expect(report.maoDeObraOperacional).toBeNull();
     expect(report.maoDeObraIndisponivelMotivo).not.toBeNull();
+  });
+});
+
+function makeJumpParkOrder(overrides: Partial<JumpParkRevenueCandidateInput>): JumpParkRevenueCandidateInput {
+  return {
+    externalId: "jp-1",
+    orderDate: "2026-07-10",
+    parkingAmount: 0,
+    servicesAmount: 0,
+    clientName: null,
+    plateMasked: "ABC1D23",
+    ...overrides,
+  };
+}
+
+/**
+ * Missão Financeiro V3.1 — receita real do JumpPark alimentando a DRE, regime gerencial. Caso de
+ * teste central da missão: julho/2026 deve refletir o faturamento real de ordens JumpPark, nunca
+ * R$0,00 (o gap de cobertura identificado ao final da V3.0).
+ */
+describe("Receita JumpPark no regime gerencial — Missão V3.1", () => {
+  it("ordem com estacionamento e serviços gera duas linhas de receita, corretamente segmentadas", () => {
+    const order = makeJumpParkOrder({ parkingAmount: 20, servicesAmount: 80 });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: [order],
+    });
+    expect(report.receitaBrutaEstacionamento.amount).toBe(20);
+    expect(report.receitaBrutaEstetica.amount).toBe(80);
+    expect(report.receitaBruta).toBe(100);
+  });
+
+  it("julho real: soma de várias ordens JumpPark nunca fica R$0,00 (fecha o gap de cobertura da V3.0)", () => {
+    const orders = [
+      makeJumpParkOrder({ externalId: "jp-a", orderDate: "2026-07-05", parkingAmount: 30, servicesAmount: 120 }),
+      makeJumpParkOrder({ externalId: "jp-b", orderDate: "2026-07-20", parkingAmount: 0, servicesAmount: 200 }),
+      makeJumpParkOrder({ externalId: "jp-c", orderDate: "2026-06-15", parkingAmount: 50, servicesAmount: 0 }), // fora da janela de julho
+    ];
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: orders,
+    });
+    expect(report.receitaBruta).toBe(350); // 30+120+200, nunca inclui a ordem de junho
+  });
+
+  it("receita JumpPark é sempre determinística — nunca cai em pendente/não classificado", () => {
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: [makeJumpParkOrder({ servicesAmount: 50 })],
+    });
+    expect(report.naoClassificados).toHaveLength(0);
+  });
+
+  it("sem `jumpParkOrders` informado (parâmetro opcional), comportamento retrocompatível — nenhuma receita JumpPark", () => {
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.receitaBruta).toBeNull();
+  });
+
+  it("cash_movement (banco) e ordem JumpPark no mesmo período somam — nenhuma exclusão automática ainda existe fora da regra de IESA/desconto já aplicada na origem", () => {
+    const bankRevenue = makeCM({ amount: 550, categoryName: "Estacionamento", costCenterName: "Estacionamento", type: "entrada" });
+    const jumpParkOrder = makeJumpParkOrder({ parkingAmount: 100 });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [bankRevenue],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: [jumpParkOrder],
+    });
+    expect(report.receitaBrutaEstacionamento.amount).toBe(650); // 550 (banco) + 100 (JumpPark) — sem correspondência estrutural conhecida entre os dois
+  });
+
+  it("regime de competência/caixa puros nunca leem jumpParkOrders — só o regime gerencial usa essa fonte", () => {
+    const order = makeJumpParkOrder({ servicesAmount: 999 });
+    const competencia = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: [order],
+    });
+    expect(competencia.receitaBruta).toBeNull();
+
+    const caixa = computeDreReport({
+      regime: "caixa",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      jumpParkOrders: [order],
+    });
+    expect(caixa.receitaBruta).toBeNull();
   });
 });

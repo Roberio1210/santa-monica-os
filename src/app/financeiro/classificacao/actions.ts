@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
-import type { ClassificationMatchType, ClassificationSourceKind, DreLine, FinancialNature } from "@/lib/finance/types";
+import type { ClassificationMatchType, ManuallyClassifiableSourceKind, DreLine, FinancialNature } from "@/lib/finance/types";
 
 export interface FormActionState {
   error: string | null;
   success?: string | null;
 }
 
-const SOURCE_KINDS: ClassificationSourceKind[] = ["accounts_payable", "accounts_receivable", "cash_movement", "account_transfer"];
+const SOURCE_KINDS: ManuallyClassifiableSourceKind[] = ["accounts_payable", "accounts_receivable", "cash_movement", "account_transfer"];
 const DRE_LINES: DreLine[] = ["receita_bruta", "deducoes_receita", "custos_diretos", "despesas_operacionais", "resultado_financeiro", "tributos", "fora_dre"];
 const NATURES: FinancialNature[] = [
   "receita_operacional",
@@ -48,7 +48,7 @@ export async function classifyEntityAction(_prevState: FormActionState, formData
 
   try {
     await getFinanceRepository().classifyEntity({
-      sourceKind: sourceKindRaw as ClassificationSourceKind,
+      sourceKind: sourceKindRaw as ManuallyClassifiableSourceKind,
       sourceId,
       dreLine: dreLineRaw as DreLine,
       nature: natureRaw as FinancialNature,

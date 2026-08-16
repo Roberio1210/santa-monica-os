@@ -2,6 +2,8 @@ import "server-only";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
 import { computeDreReport, resolveClassification, resolveCashMovementNatureClassification } from "@/lib/finance/dre";
+import { fetchJumpParkRevenueCandidates } from "@/lib/finance/jumpparkRevenue";
+import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
 import type {
   AccountingPeriod,
   AccountsPayableView,
@@ -781,6 +783,7 @@ export interface DreSourceData {
   classifications: FinancialClassification[];
   rules: ClassificationRule[];
   partners: Partner[];
+  jumpParkOrders: JumpParkRevenueCandidateInput[];
 }
 
 /**
@@ -789,18 +792,22 @@ export interface DreSourceData {
  * isto uma vez e passar o resultado via `preFetchedData` para cada função — chamar 3x em paralelo
  * serializa 3 rodadas completas de queries no pool de conexão único do Neon (`max: 1`) e derrubou o
  * tempo de carregamento de `/financeiro/dre` para minutos (medido em preview local).
+ *
+ * Missão V3.1: inclui `jumpParkOrders`, a receita operacional real do JumpPark — ver
+ * `fetchJumpParkRevenueCandidates` para a regra de exclusão de itens IESA/desconto/situação.
  */
 export async function fetchDreSourceData(): Promise<DreSourceData> {
   const repo = getFinanceRepository();
-  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners] = await Promise.all([
+  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders] = await Promise.all([
     repo.listAccountsPayable(),
     repo.listAccountsReceivable(),
     repo.listCashMovements(),
     repo.listFinancialClassifications(),
     repo.listClassificationRules(),
     repo.listPartners(),
+    fetchJumpParkRevenueCandidates(),
   ]);
-  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners };
+  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders };
 }
 
 export async function fetchDreReport(

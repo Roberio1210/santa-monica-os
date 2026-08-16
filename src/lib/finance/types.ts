@@ -631,7 +631,15 @@ export type FinancialNature =
 
 export type ClassificationOrigin = "regra_automatica" | "herdada_categoria" | "herdada_fornecedor" | "herdada_cliente" | "manual" | "importacao_futura" | "pendente";
 
-export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer";
+/**
+ * Missão Financeiro V3.1 — "jumppark_service_order" identifica receita derivada diretamente de
+ * `jumppark_service_orders` (nunca persistida em accounts_receivable), para o gestor distinguir na
+ * DRE o que veio da operação real (JumpPark) do que veio de conciliação bancária/AR manual.
+ */
+export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer" | "jumppark_service_order";
+
+/** Subconjunto de `ClassificationSourceKind` que pode ser classificado manualmente via `classifyEntity` — receita JumpPark é sempre determinística (ver `dre.ts`), nunca reclassificável manualmente. */
+export type ManuallyClassifiableSourceKind = Exclude<ClassificationSourceKind, "jumppark_service_order">;
 
 export interface FinancialClassification {
   id: string;
@@ -651,7 +659,7 @@ export interface FinancialClassification {
 }
 
 export interface ClassifyEntityInput {
-  sourceKind: ClassificationSourceKind;
+  sourceKind: ManuallyClassifiableSourceKind;
   sourceId: string;
   dreLine: DreLine;
   nature: FinancialNature;

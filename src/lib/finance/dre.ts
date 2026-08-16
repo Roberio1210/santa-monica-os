@@ -83,6 +83,20 @@ const LABOR_CATEGORY_NAMES = new Set(["Salários CLT", "Prestadores PJ"]);
 /** `partners.type` que caracterizam uma parceria/cliente corporativo (ex.: Grupo IESA/Nissan) — vem do cadastro real, nunca uma lista inventada por nome de contraparte. */
 const CORPORATE_PARTNERSHIP_TYPES = new Set(["parceria_pos_paga", "contrato_mensal"]);
 
+/**
+ * Missão Financeiro V3.1 — receita JumpPark é sempre receita operacional real, classificada de
+ * forma determinística (nunca passa por resolveClassification/regras) — a ordem já veio da
+ * operação de verdade, não de um extrato bancário ambíguo que precise de regra/categoria para ser
+ * interpretado.
+ */
+const JUMPPARK_REVENUE_CLASSIFICATION: ResolvedClassification = {
+  dreLine: "receita_bruta",
+  nature: "receita_operacional",
+  includeInDre: true,
+  origin: "regra_automatica",
+  reviewNeeded: false,
+};
+
 export interface ResolvedClassification {
   dreLine: DreLine;
   nature: FinancialNature;
@@ -194,6 +208,25 @@ interface DreCandidate {
   cashMovementNature: CashMovementNature | null;
 }
 
+/**
+ * Missão Financeiro V3.1 — receita operacional derivada diretamente de uma ordem JumpPark real
+ * (`jumppark_service_orders`), já líquida de qualquer item "Lavação Parceria IESA" (que tem seu
+ * próprio mecanismo de reconhecimento em `iesaClosing.ts`, via accounts_receivable — nunca contada
+ * duas vezes) e de desconto (`discountAmount`, quando informado). Nunca persistida: a DRE lê a
+ * tabela diretamente a cada cálculo, então uma venda nova sincronizada pelo cron do JumpPark
+ * aparece na próxima consulta da DRE sem nenhuma ação adicional.
+ */
+export interface JumpParkRevenueCandidateInput {
+  externalId: string;
+  /** Competência = data da ordem (`jumppark_service_orders.order_date`) — entrada, com fallback para saída quando a entrada não existir; nunca a data de recebimento bancário. */
+  orderDate: string;
+  /** Já líquido de itens "Lavação Parceria IESA" e de desconto — nunca o total_amount bruto da ordem quando houver exclusão a aplicar. */
+  parkingAmount: number;
+  servicesAmount: number;
+  clientName: string | null;
+  plateMasked: string | null;
+}
+
 export interface DreComputationInput {
   regime: DreRegime;
   competenceFrom: string;
@@ -206,6 +239,8 @@ export interface DreComputationInput {
   rules: ClassificationRule[];
   /** Opcional — só usado no regime "gerencial" para segmentar receita de Clientes/Parcerias Corporativas por `partners.type`. Omitir equivale a `[]` (nenhuma linha cai na segmentação de parceria). */
   partners?: Partner[];
+  /** Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhuma receita JumpPark reconhecida — retrocompatível). */
+  jumpParkOrders?: JumpParkRevenueCandidateInput[];
 }
 
 /**
@@ -247,9 +282,12 @@ export function computeDreReport(input: DreComputationInput): DreReport {
 
   for (const candidate of filtered) {
     const explicit = explicitByKey.get(`${candidate.sourceKind}:${candidate.sourceId}`);
-    const resolved = candidate.cashMovementNature && !explicit
-      ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
-      : resolveClassification(candidate, explicit, input.rules);
+    const resolved =
+      candidate.sourceKind === "jumppark_service_order"
+        ? JUMPPARK_REVENUE_CLASSIFICATION
+        : candidate.cashMovementNature && !explicit
+          ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
+          : resolveClassification(candidate, explicit, input.rules);
 
     const item: DreLineItem = {
       sourceKind: candidate.sourceKind,
@@ -508,5 +546,51 @@ function buildManagerialCandidates(input: DreComputationInput): DreCandidate[] {
       cashMovementNature: m.nature,
     }));
 
-  return [...obligationCandidates, ...cashCandidates];
+  return [...obligationCandidates, ...cashCandidates, ...buildJumpParkCandidates(input)];
+}
+
+/**
+ * Missão Financeiro V3.1 — receita operacional real do JumpPark, direto da ordem (nunca via
+ * extrato bancário). Cada ordem gera até 2 candidatos (estacionamento/serviços), já que o modelo
+ * real separa `parking_amount` de `services_amount` — cada um cai na segmentação correta via
+ * `costCenterName` (mesmo mecanismo já usado para Estética x Estacionamento). Ordens/itens da
+ * parceria IESA são filtrados ANTES de chegar aqui (`fetchJumpParkRevenueCandidates`), porque têm
+ * seu próprio mecanismo de reconhecimento (accounts_receivable via `iesaClosing.ts`).
+ */
+function buildJumpParkCandidates(input: DreComputationInput): DreCandidate[] {
+  const candidates: DreCandidate[] = [];
+  for (const order of input.jumpParkOrders ?? []) {
+    const label = order.plateMasked ? `JumpPark — ${order.plateMasked}` : `JumpPark — ordem ${order.externalId}`;
+    if (order.parkingAmount > 0) {
+      candidates.push({
+        sourceKind: "jumppark_service_order",
+        sourceId: `${order.externalId}:estacionamento`,
+        date: order.orderDate,
+        description: `${label} (estacionamento)`,
+        partyName: order.clientName,
+        categoryName: "Estacionamento",
+        costCenterName: "Estacionamento",
+        supplierId: null,
+        partnerId: null,
+        absAmount: order.parkingAmount,
+        cashMovementNature: null,
+      });
+    }
+    if (order.servicesAmount > 0) {
+      candidates.push({
+        sourceKind: "jumppark_service_order",
+        sourceId: `${order.externalId}:servicos`,
+        date: order.orderDate,
+        description: `${label} (serviços)`,
+        partyName: order.clientName,
+        categoryName: "Lavação",
+        costCenterName: "Estética Automotiva",
+        supplierId: null,
+        partnerId: null,
+        absAmount: order.servicesAmount,
+        cashMovementNature: null,
+      });
+    }
+  }
+  return candidates;
 }
