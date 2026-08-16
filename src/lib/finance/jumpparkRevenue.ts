@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, ilike, inArray } from "drizzle-orm";
+import { and, eq, gte, lte, ilike, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { jumpParkServiceOrders, jumpParkServiceOrderItems } from "@/db/schema/jumppark";
 import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
@@ -97,4 +97,55 @@ export async function fetchJumpParkRevenueCandidates(): Promise<JumpParkRevenueC
   }
 
   return mapOrdersToRevenueCandidates(orders, iesaAmountByOrderId);
+}
+
+export interface JumpParkPaymentBreakdown {
+  total: number;
+  dinheiro: number;
+  cartaoDebito: number;
+  cartaoCredito: number;
+  pix: number;
+  outros: number;
+}
+
+/**
+ * Missão Financeiro V3.3 — quanto do faturamento JumpPark de um período foi recebido em cada forma
+ * de pagamento, com destaque para "Dinheiro" (nunca aparece no extrato Stone/bancário, por
+ * definição — ver `revenueReconciliation.ts`). Não confundir com receita da DRE: aqui o total é o
+ * `total_amount` bruto de cada ordem "Pago" no período, sem a exclusão de itens IESA/desconto que
+ * `fetchJumpParkRevenueCandidates` aplica — o objetivo é conciliação de fluxo de recebimento, não
+ * reconhecimento de receita.
+ */
+export async function fetchJumpParkPaymentBreakdown(dateFrom: string, dateTo: string): Promise<JumpParkPaymentBreakdown> {
+  const db = getDb();
+  if (!db) return { total: 0, dinheiro: 0, cartaoDebito: 0, cartaoCredito: 0, pix: 0, outros: 0 };
+
+  const rows = await db
+    .select({ paymentMethod: jumpParkServiceOrders.paymentMethod, total: sql<string>`sum(${jumpParkServiceOrders.totalAmount})` })
+    .from(jumpParkServiceOrders)
+    .where(and(gte(jumpParkServiceOrders.orderDate, dateFrom), lte(jumpParkServiceOrders.orderDate, dateTo), eq(jumpParkServiceOrders.situation, RECOGNIZED_SITUATION)))
+    .groupBy(jumpParkServiceOrders.paymentMethod);
+
+  const result: JumpParkPaymentBreakdown = { total: 0, dinheiro: 0, cartaoDebito: 0, cartaoCredito: 0, pix: 0, outros: 0 };
+  for (const row of rows) {
+    const amount = round2(Number(row.total ?? 0));
+    result.total = round2(result.total + amount);
+    switch (row.paymentMethod) {
+      case "Dinheiro":
+        result.dinheiro = amount;
+        break;
+      case "Débito":
+        result.cartaoDebito = amount;
+        break;
+      case "Crédito":
+        result.cartaoCredito = amount;
+        break;
+      case "Pix":
+        result.pix = amount;
+        break;
+      default:
+        result.outros = round2(result.outros + amount);
+    }
+  }
+  return result;
 }

@@ -10,6 +10,7 @@ import {
   computeAccountingAlerts,
   computeDreCoverage,
 } from "@/lib/finance/service";
+import { fetchRevenueReconciliation } from "@/lib/finance/revenueReconciliation";
 import { getStorageMode } from "@/lib/storage/mode";
 import type { DreCostCenterGroup, DreRegime } from "@/lib/finance/types";
 
@@ -69,7 +70,9 @@ export default async function DrePage({ searchParams }: { searchParams: Promise<
     fetchDreMonthlySeries(regime, months, costCenterGroup, { [currentMonth]: { to: today } }, sourceData),
   ]);
 
-  const pendencyOverview = await fetchDrePendencyOverview(comparison.current);
+  const faturamentoOperacional =
+    comparison.current.receitaBruta !== null ? Math.round((comparison.current.receitaBrutaEstetica.amount + comparison.current.receitaBrutaEstacionamento.amount) * 100) / 100 : null;
+  const [pendencyOverview, revenueReconciliation] = await Promise.all([fetchDrePendencyOverview(comparison.current), fetchRevenueReconciliation(from, to, faturamentoOperacional)]);
   const coverage = computeDreCoverage(comparison.current);
   const isPartialPeriod = to > today;
   const alerts = computeAccountingAlerts(comparison.current, comparison.previous, byCostCenter, coverage, isPartialPeriod);
@@ -95,6 +98,7 @@ export default async function DrePage({ searchParams }: { searchParams: Promise<
         monthlySeries={monthlySeries}
         pendencyOverview={pendencyOverview}
         coverage={coverage}
+        revenueReconciliation={revenueReconciliation}
       />
     </div>
   );

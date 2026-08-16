@@ -11,6 +11,7 @@ import { computeDreVariationPercent } from "@/lib/finance/dre";
 import { DreMonthlyChart } from "@/components/finance/dre-monthly-chart";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import type { AccountingAlert, DreCoverage, DreMonthlyPoint, DrePendencyOverview } from "@/lib/finance/service";
+import type { RevenueReconciliation } from "@/lib/finance/revenueReconciliation";
 import type { ClassificationSourceKind, DreCostCenterGroup, DreGroupTotal, DreRegime, DreReport } from "@/lib/finance/types";
 
 const fieldClasses =
@@ -60,9 +61,10 @@ interface DreViewProps {
   monthlySeries: DreMonthlyPoint[];
   pendencyOverview: DrePendencyOverview;
   coverage: DreCoverage;
+  revenueReconciliation: RevenueReconciliation;
 }
 
-export function DreView({ report, previous, byCostCenter, alerts, regime, from, to, costCenterGroup, monthlySeries, pendencyOverview, coverage }: DreViewProps) {
+export function DreView({ report, previous, byCostCenter, alerts, regime, from, to, costCenterGroup, monthlySeries, pendencyOverview, coverage, revenueReconciliation }: DreViewProps) {
   const router = useRouter();
 
   function handleFilter(formData: FormData) {
@@ -236,6 +238,28 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
                 ))}
               </tbody>
             </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Conciliação: Faturamento (JumpPark) × Recebimento (Stone)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0">
+          <p className="text-xs text-foreground-subtle">
+            Faturamento e recebimento medem coisas diferentes por definição — datas diferentes (visita × liquidação bancária) e o dinheiro nunca passa pelo Stone. A diferença abaixo é um indicador
+            gerencial e de conciliação, nunca um erro a ser zerado.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <PlainIndicatorCard label="Faturamento Operacional (JumpPark)" amount={revenueReconciliation.faturamentoOperacional} motivo={revenueReconciliation.faturamentoOperacional === null ? "Sem receita calculável no período." : undefined} />
+            <PlainIndicatorCard label="— dos quais em Dinheiro" amount={revenueReconciliation.faturamentoDinheiro} />
+            <PlainIndicatorCard label="Recebimentos/Liquidações Stone" amount={revenueReconciliation.recebimentosStone} />
+            <PendencyStat
+              label="Diferença (Faturamento − Recebido)"
+              percent={revenueReconciliation.diferencaPercent}
+              detail={revenueReconciliation.diferenca === null ? "Não calculável" : formatCurrency(revenueReconciliation.diferenca)}
+            />
           </div>
         </CardContent>
       </Card>
