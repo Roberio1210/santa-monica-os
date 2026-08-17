@@ -317,10 +317,29 @@ export interface FinancialAccount {
   notes: string | null;
 }
 
+/**
+ * Missão Financeiro V4.0 — de onde veio `currentBalance`: "extrato_bancario" quando a conta tem
+ * extrato importado (`bank_statement_lines`) — usa 100% das linhas reais, mais completo; ou
+ * "cash_movements" quando não há extrato importado para a conta (fallback, mesmo mecanismo de
+ * antes). Nunca oculto na UI — o gestor precisa saber qual é a base de cada saldo mostrado.
+ */
+export type AccountBalanceSource = "extrato_bancario" | "cash_movements";
+
+export interface AccountBalanceCoverage {
+  totalCount: number;
+  classifiedCount: number;
+  classifiedPercent: number | null;
+  importPeriodFrom: string | null;
+  importPeriodTo: string | null;
+}
+
 export interface FinancialAccountBalance extends FinancialAccount {
-  /** Sempre calculado a partir de cash_movements + account_transfers reais — nunca um valor gravado à parte. */
+  /** Sempre calculado a partir de dados reais — nunca um valor gravado à parte. Ver `balanceSource` para a origem exata. */
   currentBalance: number;
   belowThreshold: boolean;
+  balanceSource: AccountBalanceSource;
+  /** Só presente quando `balanceSource === "extrato_bancario"` — indica quanto do saldo já foi conciliado/classificado (não afeta o valor do saldo, que já usa 100% das linhas reais). */
+  coverage: AccountBalanceCoverage | null;
 }
 
 /**
@@ -571,6 +590,8 @@ export interface CashFlowAccountBalance {
   currentBalance: number;
   informedBalance: number | null;
   belowThreshold: boolean;
+  balanceSource: AccountBalanceSource;
+  coverage: AccountBalanceCoverage | null;
 }
 
 export interface CashFlowDashboard {

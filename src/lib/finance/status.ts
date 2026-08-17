@@ -147,6 +147,50 @@ export function computeAccountBalance(
   return Math.round((opening + cashDelta + transfersInTotal - transfersOutTotal) * 100) / 100;
 }
 
+export interface BankStatementBalanceResult {
+  balance: number;
+  /** Linhas reais que compõem o saldo (todo status exceto "ignorado" — ver comentário do enum em db/schema/bankStatement.ts: só é excluída com justificativa explícita gravada). */
+  totalCount: number;
+  /** Quantas dessas linhas já foram conciliadas (status "conciliado") — indicador de cobertura de CLASSIFICAÇÃO, não de saldo (o saldo já usa 100% das linhas reais). */
+  classifiedCount: number;
+  classifiedPercent: number | null;
+  importPeriodFrom: string | null;
+  importPeriodTo: string | null;
+}
+
+/**
+ * Missão Financeiro V4.0 — saldo real de uma conta a partir do EXTRATO BANCÁRIO BRUTO
+ * (`bank_statement_lines`), não apenas das linhas já convertidas em `cash_movements`. Achado da
+ * auditoria: só 574 de 1.987 linhas do extrato Stone real viraram cash_movements (29%) — o
+ * restante (sobretudo `recebimento_venda_stone`, a maior parte da receita real) nunca precisou de
+ * classificação humana e por isso nunca foi confirmado. Usar só cash_movements como fonte de
+ * saldo produzia um número artificialmente negativo, sem relação com a realidade financeira.
+ *
+ * "ignorado" é a única status excluída da soma (por definição, marcada só com justificativa
+ * explícita — nunca é uma linha real descartada por acaso). Todas as outras (conciliado,
+ * sugerido, nao_conciliado, a_classificar) representam dinheiro que realmente entrou/saiu, então
+ * entram no saldo mesmo sem classificação — a classificação define O QUE é, não SE aconteceu.
+ *
+ * Nunca presume saldo inicial: o resultado é relativo ao início do período efetivamente
+ * importado (`importPeriodFrom`), nunca um saldo "desde sempre" da conta real.
+ */
+export function computeAccountBalanceFromBankStatement(
+  lines: { direction: "entrada" | "saida"; amount: number; status: "conciliado" | "sugerido" | "nao_conciliado" | "a_classificar" | "ignorado"; date: string }[],
+): BankStatementBalanceResult {
+  const real = lines.filter((l) => l.status !== "ignorado");
+  const balance = Math.round(real.reduce((sum, l) => sum + (l.direction === "entrada" ? l.amount : -l.amount), 0) * 100) / 100;
+  const classifiedCount = real.filter((l) => l.status === "conciliado").length;
+  const dates = real.map((l) => l.date).sort();
+  return {
+    balance,
+    totalCount: real.length,
+    classifiedCount,
+    classifiedPercent: real.length > 0 ? Math.round((classifiedCount / real.length) * 1000) / 10 : null,
+    importPeriodFrom: dates[0] ?? null,
+    importPeriodTo: dates[dates.length - 1] ?? null,
+  };
+}
+
 export interface AccountPeriodSummary {
   openingBalance: number;
   totalIn: number;

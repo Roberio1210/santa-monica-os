@@ -551,6 +551,8 @@ export function computeCashFlowDashboard(
     currentBalance: a.currentBalance,
     informedBalance: a.informedBalance,
     belowThreshold: a.belowThreshold,
+    balanceSource: a.balanceSource,
+    coverage: a.coverage,
   }));
 
   const todayMovements = movements.filter((m) => m.date === asOfDate);

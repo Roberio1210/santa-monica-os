@@ -149,6 +149,21 @@ export function CashFlowView({
                 {a.informedBalance !== null ? (
                   <p className="text-xs text-foreground-subtle">Informado: {formatCurrency(a.informedBalance)}</p>
                 ) : null}
+                {a.balanceSource === "extrato_bancario" && a.coverage ? (
+                  <p className="mt-1 text-xs text-foreground-subtle">
+                    Calculado a partir do extrato bancário completo ({a.coverage.totalCount} lançamentos
+                    {a.coverage.importPeriodFrom && a.coverage.importPeriodTo ? `, ${formatDateBR(a.coverage.importPeriodFrom)} a ${formatDateBR(a.coverage.importPeriodTo)}` : ""}) — nunca inclui saldo
+                    anterior à importação.
+                    {a.coverage.classifiedPercent !== null ? (
+                      <>
+                        {" "}
+                        {a.coverage.classifiedPercent}% já classificado ({a.coverage.classifiedCount}/{a.coverage.totalCount}).
+                      </>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-foreground-subtle">Calculado a partir dos lançamentos manuais registrados (sem extrato bancário importado para esta conta).</p>
+                )}
                 <div className="mt-2">
                   <InformBalanceForm financialAccountId={a.financialAccountId} currentBalance={a.currentBalance} />
                 </div>

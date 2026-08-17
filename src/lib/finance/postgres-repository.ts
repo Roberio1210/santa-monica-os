@@ -9,6 +9,8 @@ import {
   allocationRuleShares as allocationRuleSharesTable,
   allocationRules as allocationRulesTable,
   auditLogs as auditLogsTable,
+  bankStatementImports as bankStatementImportsTable,
+  bankStatementLines as bankStatementLinesTable,
   cashMovements as cashMovementsTable,
   classificationRules as classificationRulesTable,
   contractBenefits as contractBenefitsTable,
@@ -80,6 +82,7 @@ import type {
 } from "@/lib/finance/types";
 import {
   computeAccountBalance,
+  computeAccountBalanceFromBankStatement,
   computeAccountsPayableStatus,
   computeAccountsReceivableStatus,
   computeInstallments,
@@ -904,6 +907,44 @@ export class PostgresFinanceRepository implements FinanceRepository {
     );
   }
 
+  /**
+   * Missão Financeiro V4.0 — quando a conta tem extrato bancário importado
+   * (`bank_statement_lines`, hoje só Stone), o saldo usa 100% das linhas reais do extrato, não só
+   * as que já viraram `cash_movements` (achado da auditoria: só 29% das linhas Stone reais tinham
+   * virado cash_movements, produzindo um saldo artificialmente negativo). Contas sem extrato
+   * importado continuam no mecanismo antigo (`getAccountCurrentBalance`), sem nenhuma mudança.
+   */
+  private async getAccountBalanceWithSource(
+    accountId: string,
+    fixedFundAmount: number | null,
+  ): Promise<{ currentBalance: number; balanceSource: "extrato_bancario" | "cash_movements"; coverage: FinancialAccountBalance["coverage"] }> {
+    const db = this.db();
+    const importedLines = await db
+      .select({
+        direction: bankStatementLinesTable.direction,
+        amount: bankStatementLinesTable.amount,
+        status: bankStatementLinesTable.status,
+        date: bankStatementLinesTable.date,
+      })
+      .from(bankStatementLinesTable)
+      .innerJoin(bankStatementImportsTable, eq(bankStatementImportsTable.id, bankStatementLinesTable.importId))
+      .where(and(eq(bankStatementImportsTable.financialAccountId, accountId), eq(bankStatementLinesTable.active, true)));
+
+    if (importedLines.length === 0) {
+      const currentBalance = await this.getAccountCurrentBalance(accountId, fixedFundAmount);
+      return { currentBalance, balanceSource: "cash_movements", coverage: null };
+    }
+
+    const result = computeAccountBalanceFromBankStatement(
+      importedLines.map((l) => ({ direction: l.direction, amount: Number(l.amount), status: l.status, date: l.date })),
+    );
+    return {
+      currentBalance: Math.round(((fixedFundAmount ?? 0) + result.balance) * 100) / 100,
+      balanceSource: "extrato_bancario",
+      coverage: { totalCount: result.totalCount, classifiedCount: result.classifiedCount, classifiedPercent: result.classifiedPercent, importPeriodFrom: result.importPeriodFrom, importPeriodTo: result.importPeriodTo },
+    };
+  }
+
   async listFinancialAccounts(): Promise<FinancialAccountBalance[]> {
     const db = this.db();
     const accounts = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.active, true));
@@ -911,7 +952,7 @@ export class PostgresFinanceRepository implements FinanceRepository {
     const results: FinancialAccountBalance[] = [];
     for (const account of accounts) {
       const fixedFundAmount = account.fixedFundAmount !== null ? Number(account.fixedFundAmount) : null;
-      const currentBalance = await this.getAccountCurrentBalance(account.id, fixedFundAmount);
+      const { currentBalance, balanceSource, coverage } = await this.getAccountBalanceWithSource(account.id, fixedFundAmount);
 
       results.push({
         id: account.id,
@@ -923,6 +964,8 @@ export class PostgresFinanceRepository implements FinanceRepository {
         notes: account.notes,
         currentBalance,
         belowThreshold: fixedFundAmount !== null && currentBalance < fixedFundAmount,
+        balanceSource,
+        coverage,
       });
     }
     return results;
@@ -1052,6 +1095,10 @@ export class PostgresFinanceRepository implements FinanceRepository {
       });
 
       const fixedFundAmount = updated.fixedFundAmount !== null ? Number(updated.fixedFundAmount) : null;
+      // Usa sempre o cálculo via cash_movements aqui (nunca o de bank_statement_lines) porque este
+      // método roda dentro de uma transação aberta (`tx`) — com o pool em max:1, uma segunda
+      // consulta fora da tx travaria para sempre (mesmo risco documentado em getAccountCurrentBalance).
+      // A tela de saldo por conta (listFinancialAccounts) é quem mostra o saldo mais completo.
       const currentBalance = await this.getAccountCurrentBalance(updated.id, fixedFundAmount, tx);
 
       return {
@@ -1064,6 +1111,8 @@ export class PostgresFinanceRepository implements FinanceRepository {
         notes: updated.notes,
         currentBalance,
         belowThreshold: fixedFundAmount !== null && currentBalance < fixedFundAmount,
+        balanceSource: "cash_movements",
+        coverage: null,
       };
     });
   }

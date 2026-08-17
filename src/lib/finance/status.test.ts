@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAccountsReceivableStatus, computeNetAmount, computeOutstanding, resolveContractValue } from "@/lib/finance/status";
+import { computeAccountBalanceFromBankStatement, computeAccountsReceivableStatus, computeNetAmount, computeOutstanding, resolveContractValue } from "@/lib/finance/status";
 import type { ContractValuePeriod } from "@/lib/finance/types";
 
 describe("computeOutstanding", () => {
@@ -109,5 +109,60 @@ describe("resolveContractValue — vigência do contrato Don Juan", () => {
   it("não inventa valor para a lacuna entre 16/07/2026 e 14/08/2026", () => {
     expect(resolveContractValue(donJuanPeriods, "2026-07-20")).toBeNull();
     expect(resolveContractValue(donJuanPeriods, "2026-08-14")).toBeNull();
+  });
+});
+
+/**
+ * Missão Financeiro V4.0 — saldo real a partir do extrato bancário bruto, não só das linhas já
+ * convertidas em cash_movements (achado da auditoria: só 29% das linhas Stone reais tinham virado
+ * cash_movements, produzindo um saldo artificialmente negativo, sem relação com a realidade).
+ */
+describe("computeAccountBalanceFromBankStatement", () => {
+  it("usa todas as linhas reais (não só as classificadas) para somar o saldo", () => {
+    const result = computeAccountBalanceFromBankStatement([
+      { direction: "entrada", amount: 1000, status: "conciliado", date: "2026-07-01" },
+      { direction: "entrada", amount: 500, status: "a_classificar", date: "2026-07-05" }, // ainda não classificada, mas é dinheiro real
+      { direction: "saida", amount: 200, status: "nao_conciliado", date: "2026-07-10" },
+    ]);
+    expect(result.balance).toBe(1300); // 1000 + 500 - 200, mesmo com 2 delas não classificadas
+  });
+
+  it("exclui linhas 'ignorado' do saldo — são as únicas marcadas com justificativa explícita de exclusão", () => {
+    const result = computeAccountBalanceFromBankStatement([
+      { direction: "entrada", amount: 1000, status: "conciliado", date: "2026-07-01" },
+      { direction: "entrada", amount: 999999, status: "ignorado", date: "2026-07-02" },
+    ]);
+    expect(result.balance).toBe(1000);
+    expect(result.totalCount).toBe(1); // a linha ignorada nem conta no total
+  });
+
+  it("cobertura de classificação é separada do saldo — % conciliado, mas o saldo já usa 100% das linhas reais", () => {
+    const result = computeAccountBalanceFromBankStatement([
+      { direction: "entrada", amount: 100, status: "conciliado", date: "2026-07-01" },
+      { direction: "entrada", amount: 100, status: "a_classificar", date: "2026-07-02" },
+      { direction: "entrada", amount: 100, status: "nao_conciliado", date: "2026-07-03" },
+      { direction: "entrada", amount: 100, status: "conciliado", date: "2026-07-04" },
+    ]);
+    expect(result.balance).toBe(400); // 100% das linhas reais entram no saldo
+    expect(result.classifiedCount).toBe(2);
+    expect(result.totalCount).toBe(4);
+    expect(result.classifiedPercent).toBe(50); // só a cobertura de classificação é parcial
+  });
+
+  it("período coberto é o intervalo real das linhas — nunca presume data anterior à importação", () => {
+    const result = computeAccountBalanceFromBankStatement([
+      { direction: "entrada", amount: 100, status: "conciliado", date: "2026-03-05" },
+      { direction: "saida", amount: 50, status: "conciliado", date: "2026-08-14" },
+    ]);
+    expect(result.importPeriodFrom).toBe("2026-03-05");
+    expect(result.importPeriodTo).toBe("2026-08-14");
+  });
+
+  it("sem nenhuma linha real, cobertura percentual é null (nunca 0/0 fabricado) e saldo é 0", () => {
+    const result = computeAccountBalanceFromBankStatement([]);
+    expect(result.balance).toBe(0);
+    expect(result.classifiedPercent).toBeNull();
+    expect(result.importPeriodFrom).toBeNull();
+    expect(result.importPeriodTo).toBeNull();
   });
 });

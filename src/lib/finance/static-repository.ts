@@ -422,6 +422,8 @@ export class StaticFinanceRepository implements FinanceRepository {
       ...account,
       currentBalance,
       belowThreshold: account.fixedFundAmount !== null && currentBalance < account.fixedFundAmount,
+      balanceSource: "cash_movements",
+      coverage: null,
     };
   }
 
@@ -498,6 +500,9 @@ export class StaticFinanceRepository implements FinanceRepository {
         ...account,
         currentBalance,
         belowThreshold: account.fixedFundAmount !== null && currentBalance < account.fixedFundAmount,
+        // Missão V4.0: repositório em memória não modela bank_statement_lines — sempre cash_movements.
+        balanceSource: "cash_movements",
+        coverage: null,
       };
     });
   }

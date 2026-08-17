@@ -66,6 +66,8 @@ function makeAccount(overrides: Partial<FinancialAccountBalance>): FinancialAcco
     notes: null,
     currentBalance: 100,
     belowThreshold: false,
+    balanceSource: "cash_movements",
+    coverage: null,
     ...overrides,
   };
 }
