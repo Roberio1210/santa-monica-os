@@ -288,6 +288,13 @@
       "when": 1786931020418,
       "tag": "0040_volatile_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786990531140,
+      "tag": "0041_dear_wallop",
+      "breakpoints": true
     }
   ]
 }

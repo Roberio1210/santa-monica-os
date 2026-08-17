@@ -3,9 +3,7 @@ import { and, eq, gte, lte, ilike, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { jumpParkServiceOrders, jumpParkServiceOrderItems } from "@/db/schema/jumppark";
 import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
-
-/** Mesmo padrão usado em `iesaClosing.ts` — nunca duplicar a lista de itens "Lavação Parceria IESA", que tem seu próprio mecanismo de reconhecimento via accounts_receivable. */
-const IESA_ITEM_DESCRIPTION_LIKE = "%iesa%";
+import { LEGACY_IESA_FALLBACK_KEYWORD, resolveOrderCorporateExclusionAmount } from "@/lib/finance/corporatePartnerRevenue";
 
 /** Único valor de `situation` observado nos dados reais (ver docs/jumppark-data-map.md) — qualquer outro valor futuro (ex.: cancelamento) fica de fora por padrão, nunca inventamos o que significaria. */
 const RECOGNIZED_SITUATION = "Pago";
@@ -23,20 +21,39 @@ export interface RawJumpParkOrderRow {
   discountAmount: string | number | null;
   clientName: string | null;
   plateMasked: string | null;
+  /** Missão V4.2 — vínculo formal com parceiro corporativo (`jumppark_service_orders.partner_id`). Quando preenchido, a ordem INTEIRA é excluída daqui (ver `resolveOrderCorporateExclusionAmount`). */
+  partnerId: string | null;
+}
+
+export interface RawJumpParkOrderItemRow {
+  serviceOrderId: string;
+  description: string | null;
+  amount: string | number | null;
 }
 
 /**
- * Missão Financeiro V3.1 — parte pura (sem banco) da derivação de receita JumpPark, isolada para
- * ser testável sem depender de uma conexão real: aplica exclusão de itens "Lavação Parceria IESA"
- * (já reconhecidos via `iesaClosing.ts`/accounts_receivable) e abate `discountAmount` do valor de
- * serviços, sempre travando em zero (nunca negativo — cortesia/desconto total nunca vira receita
- * negativa).
+ * Missão Financeiro V3.1 (ampliada na V4.2) — parte pura (sem banco) da derivação de receita
+ * JumpPark, isolada para ser testável sem depender de uma conexão real: exclui a receita já
+ * reconhecida via o fechamento consolidado de parceiros corporativos (`accounts_receivable`, ver
+ * `corporatePartnerRevenue.ts`) e abate `discountAmount`, sempre travando em zero (nunca negativo —
+ * cortesia/desconto total nunca vira receita negativa).
+ *
+ * Missão V4.2 — a exclusão passou de "só o item cuja descrição contém 'iesa'" para "a ordem
+ * INTEIRA, quando vinculada formalmente a um parceiro corporativo" (`partner_id`), porque a
+ * auditoria de julho/2026 encontrou serviços reais da IESA (ex.: "Polimento Peça - Nissan") que o
+ * texto antigo nunca capturava. Ordens sem vínculo formal ainda caem no mecanismo textual histórico
+ * (só para o parceiro que já tinha esse texto antes desta missão — nunca estendido a outro), para
+ * não alterar nenhum mês já auditado (março-junho/2026) sem confirmação explícita.
  */
-export function mapOrdersToRevenueCandidates(orders: RawJumpParkOrderRow[], iesaAmountByOrderId: Map<string, number>): JumpParkRevenueCandidateInput[] {
+export function mapOrdersToRevenueCandidates(orders: RawJumpParkOrderRow[], itemsByOrderId: Map<string, RawJumpParkOrderItemRow[]>): JumpParkRevenueCandidateInput[] {
   return orders.map((order) => {
-    const iesaAmount = iesaAmountByOrderId.get(order.id) ?? 0;
+    const items = (itemsByOrderId.get(order.id) ?? []).map((it) => ({ description: it.description, amount: Number(it.amount ?? 0) }));
+    const exclusionAmount = resolveOrderCorporateExclusionAmount(
+      { servicesAmount: Number(order.servicesAmount), discountAmount: order.discountAmount !== null ? Number(order.discountAmount) : null, partnerId: order.partnerId },
+      items,
+    );
     const discountAmount = Number(order.discountAmount ?? 0);
-    const servicesAmount = Math.max(0, round2(Number(order.servicesAmount) - iesaAmount - discountAmount));
+    const servicesAmount = Math.max(0, round2(Number(order.servicesAmount) - exclusionAmount - discountAmount));
     return {
       externalId: order.externalId,
       orderDate: order.orderDate,
@@ -49,10 +66,12 @@ export function mapOrdersToRevenueCandidates(orders: RawJumpParkOrderRow[], iesa
 }
 
 /**
- * Missão Financeiro V3.1 — receita operacional real do JumpPark para a DRE, direto de
- * `jumppark_service_orders` (nunca persistida em accounts_receivable). Sempre líquida de:
- * 1) itens "Lavação Parceria IESA" (já reconhecidos separadamente via `iesaClosing.ts`/AR —
- *    contá-los aqui também duplicaria a receita);
+ * Missão Financeiro V3.1 (ampliada na V4.2) — receita operacional real do JumpPark para a DRE,
+ * direto de `jumppark_service_orders` (nunca persistida em accounts_receivable). Sempre líquida de:
+ * 1) ordens vinculadas a um parceiro corporativo (`partner_id`, ver `corporatePartnerRevenue.ts`) —
+ *    já reconhecidas separadamente via o fechamento consolidado (`accounts_receivable`) daquele
+ *    parceiro, contá-las aqui também duplicaria a receita; para ordens ainda sem vínculo formal,
+ *    mantém o filtro textual histórico só para não alterar meses já auditados;
  * 2) `discount_amount`, quando informado (abatido do valor de serviços — não há campo de desconto
  *    próprio para estacionamento na fonte);
  * 3) ordens cujo `situation` não seja exatamente "Pago" (único valor confirmado nos dados reais).
@@ -79,24 +98,30 @@ export async function fetchJumpParkRevenueCandidates(): Promise<JumpParkRevenueC
       discountAmount: jumpParkServiceOrders.discountAmount,
       clientName: jumpParkServiceOrders.clientName,
       plateMasked: jumpParkServiceOrders.plateMasked,
+      partnerId: jumpParkServiceOrders.partnerId,
     })
     .from(jumpParkServiceOrders)
     .where(eq(jumpParkServiceOrders.situation, RECOGNIZED_SITUATION));
 
   if (orders.length === 0) return [];
 
-  const orderIds = orders.map((o) => o.id);
-  const iesaItems = await db
-    .select({ serviceOrderId: jumpParkServiceOrderItems.serviceOrderId, amount: jumpParkServiceOrderItems.amount })
-    .from(jumpParkServiceOrderItems)
-    .where(and(ilike(jumpParkServiceOrderItems.description, IESA_ITEM_DESCRIPTION_LIKE), inArray(jumpParkServiceOrderItems.serviceOrderId, orderIds)));
+  const unlinkedOrderIds = orders.filter((o) => o.partnerId === null).map((o) => o.id);
+  const legacyItems =
+    unlinkedOrderIds.length === 0
+      ? []
+      : await db
+          .select({ serviceOrderId: jumpParkServiceOrderItems.serviceOrderId, description: jumpParkServiceOrderItems.description, amount: jumpParkServiceOrderItems.amount })
+          .from(jumpParkServiceOrderItems)
+          .where(and(ilike(jumpParkServiceOrderItems.description, `%${LEGACY_IESA_FALLBACK_KEYWORD}%`), inArray(jumpParkServiceOrderItems.serviceOrderId, unlinkedOrderIds)));
 
-  const iesaAmountByOrderId = new Map<string, number>();
-  for (const item of iesaItems) {
-    iesaAmountByOrderId.set(item.serviceOrderId, (iesaAmountByOrderId.get(item.serviceOrderId) ?? 0) + Number(item.amount ?? 0));
+  const itemsByOrderId = new Map<string, RawJumpParkOrderItemRow[]>();
+  for (const item of legacyItems) {
+    const list = itemsByOrderId.get(item.serviceOrderId) ?? [];
+    list.push(item);
+    itemsByOrderId.set(item.serviceOrderId, list);
   }
 
-  return mapOrdersToRevenueCandidates(orders, iesaAmountByOrderId);
+  return mapOrdersToRevenueCandidates(orders, itemsByOrderId);
 }
 
 export interface JumpParkPaymentBreakdown {

@@ -1,6 +1,7 @@
 import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 import { customers, vehicles } from "./crm";
+import { partners } from "./finance";
 
 /**
  * Modelo de destino para a sincronização descrita em docs/jumppark-sync-strategy.md.
@@ -70,11 +71,21 @@ export const jumpParkServiceOrders = pgTable("jumppark_service_orders", {
    * o recálculo ajustar (inclusive desfazer, se a evidência mudar).
    */
   customerLinkLocked: boolean("customer_link_locked").notNull().default(false),
+  /**
+   * Missão Financeiro V4.2 — vínculo formal com um parceiro corporativo (ex.: Grupo IESA/Nissan),
+   * independente do texto de qualquer serviço da ordem. Preenchido por `refreshJumpParkPartnerLinks`
+   * (ver `src/lib/finance/corporatePartnerRevenue.ts`) quando `client_name` ou a descrição de algum
+   * item bate com `partners.jumppark_match_keywords`. Null = ordem não vinculada a nenhum parceiro
+   * corporativo (a receita segue como Estética Automotiva genérica, comportamento padrão).
+   */
+  partnerId: uuid("partner_id").references(() => partners.id),
+  /** Mesmo padrão de `customerLinkLocked` — `true` só quando um humano confirmou/corrigiu o vínculo manualmente; nesse caso o recálculo automático nunca sobrescreve. */
+  partnerLinkLocked: boolean("partner_link_locked").notNull().default(false),
   active: active(),
   source: source(),
   notes: notes(),
   ...timestamps,
-}, (table) => [index("jumppark_service_orders_customer_id_idx").on(table.customerId), index("jumppark_service_orders_vehicle_id_idx").on(table.vehicleId)]);
+}, (table) => [index("jumppark_service_orders_customer_id_idx").on(table.customerId), index("jumppark_service_orders_vehicle_id_idx").on(table.vehicleId), index("jumppark_service_orders_partner_id_idx").on(table.partnerId)]);
 
 /**
  * Missão 27 — serviços individuais por ordem (`services[]` da API, ver docs/jumppark-data-map.md).

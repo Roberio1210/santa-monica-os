@@ -89,6 +89,8 @@ async function main() {
       source: "seed:contratos-reais",
       externalId: "iesa-nissan",
       notes: "Parceria pós-paga. Registros do JumpPark lançados como dinheiro não significam necessariamente caixa recebido.",
+      /** Missão V4.2 — vincula formalmente ordens do JumpPark a este parceiro (ver `refreshJumpParkPartnerLinks`). "nissan" é necessário porque serviços reais (ex.: "Polimento Peça - Nissan") não usam a palavra "iesa". */
+      jumpparkMatchKeywords: ["iesa", "nissan"],
     })
     .onConflictDoNothing({ target: partners.externalId })
     .returning({ id: partners.id });

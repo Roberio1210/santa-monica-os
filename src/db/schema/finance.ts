@@ -19,6 +19,16 @@ export const partners = pgTable("partners", {
   /** Slug estável (ex.: "iesa-nissan") — único, para seed idempotente (src/db/seed/contracts.ts). */
   externalId: text("external_id").unique(),
   notes: notes(),
+  /**
+   * Missão Financeiro V4.2 — palavras-chave (minúsculas) usadas SÓ para vincular automaticamente
+   * ordens do JumpPark a este parceiro corporativo (ver `jumppark_service_orders.partner_id` e
+   * `src/lib/finance/corporatePartnerRevenue.ts`). Casa contra `client_name` OU a descrição de
+   * qualquer item da ordem — nunca decide sozinho a classificação financeira, só ESTABELECE o
+   * vínculo; uma vez vinculada, TODA a ordem pertence ao parceiro, independente do texto de cada
+   * item. Null/vazio = nenhum vínculo automático para este parceiro (comportamento anterior a esta
+   * missão, preservado por padrão).
+   */
+  jumpparkMatchKeywords: text("jumppark_match_keywords").array(),
   ...timestamps,
 });
 
