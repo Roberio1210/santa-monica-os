@@ -20,6 +20,15 @@ import { getFinanceRepository } from "@/lib/finance/repository-factory";
  * o vínculo formal `jumppark_service_orders.partner_id` quando disponível (toda a ordem conta,
  * independente do nome do serviço), com o texto antigo como fallback só para ordens ainda sem
  * vínculo — nunca alterando meses já fechados sem confirmação explícita.
+ *
+ * Auditoria histórica (agosto/2026) — março/2026 foi o mês de implantação do JumpPark (não usado
+ * desde o dia 1 da competência, confirmado pelo gestor). O valor reconstruído aqui para março
+ * (R$2.290: 17 lavações + 3 polimentos, todos com `situation = "Pago"`, nenhum cancelado/excluído)
+ * é só a parcela real que o JumpPark chegou a registrar naquele mês — NUNCA a competência completa.
+ * A diferença para o valor oficial da planilha (R$2.680) não é um bug de reconhecimento nem precisa
+ * de correção: para competências anteriores à adoção plena do JumpPark, a planilha oficial da
+ * IESA/Nissan validada pelo gestor é a fonte de verdade, e não deve ser sobrescrita por uma
+ * reconstrução parcial. Abril/2026 em diante já bate exato com a planilha oficial (auditado).
  */
 export type IesaMonthlyClosing = CorporatePartnerMonthlyClosing;
 export type GenerateIesaClosingResult = GenerateCorporatePartnerClosingResult;

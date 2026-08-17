@@ -40,7 +40,7 @@ export function IesaClosingCard({ closings }: { closings: IesaMonthlyClosing[] }
                   <th className="pb-2 pr-3 font-medium">Competência</th>
                   <th className="pb-2 pr-3 font-medium">Serviços</th>
                   <th className="pb-2 pr-3 font-medium">Ordens</th>
-                  <th className="pb-2 pr-3 font-medium">Valor real</th>
+                  <th className="pb-2 pr-3 font-medium">Valor reconstruído (JumpPark)</th>
                   <th className="pb-2 pr-3 font-medium">Cobrança</th>
                   <th className="pb-2 pr-3 font-medium">Diferença</th>
                   <th className="pb-2 font-medium">Ação</th>
@@ -59,6 +59,12 @@ export function IesaClosingCard({ closings }: { closings: IesaMonthlyClosing[] }
           &quot;IESA&quot;. Meses sem vínculo ainda formado usam o reconhecimento textual histórico (&quot;Lavação Parceria IESA&quot;), preservado
           para não alterar competências já fechadas. Gerar a cobrança nunca presume pagamento individual por ordem; é sempre um fechamento
           consolidado do mês.
+        </p>
+        <p className="mt-2 text-xs text-foreground-subtle">
+          Março/2026 foi o mês de implantação do JumpPark (não usado desde o dia 1) — o valor reconstruído aqui é só a parcela que ficou
+          registrada no sistema, nunca a competência completa. Para março/2026 e qualquer outra competência anterior à adoção plena do
+          JumpPark, quando existir planilha oficial da IESA/Nissan validada pelo gestor, ela prevalece como fonte de verdade — o valor desta
+          tabela não deve ser usado para gerar cobrança nesses meses.
         </p>
       </CardContent>
     </Card>
