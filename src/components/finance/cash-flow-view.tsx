@@ -57,6 +57,8 @@ const movementLabelMap: Record<string, string> = {
   reposicao_caixa: "Reposição de caixa",
   aporte_socios: "Aporte de sócios",
   retirada: "Retirada",
+  emprestimo_recebido: "Empréstimo recebido",
+  emprestimo_devolvido: "Devolução de empréstimo",
 };
 
 interface CashFlowViewProps {

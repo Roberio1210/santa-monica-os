@@ -274,6 +274,20 @@
       "when": 1786760369315,
       "tag": "0038_long_the_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786930831927,
+      "tag": "0039_fantastic_sauron",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786931020418,
+      "tag": "0040_volatile_star_brand",
+      "breakpoints": true
     }
   ]
 }

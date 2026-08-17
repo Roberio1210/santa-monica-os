@@ -346,6 +346,20 @@ describe("Transferências, aportes e retiradas — sempre fora da DRE", () => {
     expect(resolved.nature).toBe("retirada");
     expect(resolved.includeInDre).toBe(false);
   });
+
+  it("empréstimo recebido de terceiros/sócios nunca entra como receita (Missão V4.0)", () => {
+    const resolved = resolveTransferClassification("emprestimo_recebido");
+    expect(resolved.nature).toBe("emprestimo");
+    expect(resolved.includeInDre).toBe(false);
+    expect(resolved.dreLine).toBe("fora_dre");
+  });
+
+  it("devolução de empréstimo a terceiros/sócios nunca entra como despesa operacional (Missão V4.0)", () => {
+    const resolved = resolveTransferClassification("emprestimo_devolvido");
+    expect(resolved.nature).toBe("emprestimo");
+    expect(resolved.includeInDre).toBe(false);
+    expect(resolved.dreLine).toBe("fora_dre");
+  });
 });
 
 describe("Classificação — precedência manual > regra > categoria > pendente", () => {

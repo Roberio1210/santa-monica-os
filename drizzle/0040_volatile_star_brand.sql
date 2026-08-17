@@ -1,0 +1,1 @@
+ALTER TYPE "public"."financial_nature" ADD VALUE 'emprestimo' BEFORE 'reembolso';

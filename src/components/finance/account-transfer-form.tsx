@@ -28,6 +28,8 @@ export function AccountTransferForm({ financialAccounts }: AccountTransferFormPr
             <option value="reposicao_caixa">Reposição de caixa</option>
             <option value="aporte_socios">Aporte dos sócios</option>
             <option value="retirada">Retirada</option>
+            <option value="emprestimo_recebido">Empréstimo recebido (terceiros/sócios)</option>
+            <option value="emprestimo_devolvido">Devolução de empréstimo (terceiros/sócios)</option>
           </select>
         </div>
 

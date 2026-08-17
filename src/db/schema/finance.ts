@@ -358,12 +358,22 @@ export const cashMovements = pgTable("cash_movements", {
  * null — dinheiro saindo do sistema de contas) reaproveitam o mesmo padrão from/to nullable já
  * usado por transferência/reposição — adicionados ao enum existente via ALTER TYPE ADD VALUE,
  * sem remover nenhum valor em uso (módulo Fluxo de Caixa, 12/07/2026).
+ *
+ * "emprestimo_recebido" (fromAccountId null) e "emprestimo_devolvido" (toAccountId null) —
+ * Missão Financeiro V4.0 (15/08/2026): mesmo padrão de aporte_socios/retirada, mas para dívida com
+ * terceiros/sócios que espera devolução (ex.: RF Base Participações, empréstimo de sócio) —
+ * conceitualmente distinto de aporte (capital, sem devolução esperada) e de "Empréstimos e
+ * financiamentos" (categoria já existente, usada para financiamento bancário formal, ex. Sicoob).
+ * Nunca migra automaticamente lançamentos históricos já classificados em cash_movements — só
+ * disponibiliza a estrutura formal para uso a partir de agora.
  */
 export const accountTransferTypeEnum = pgEnum("account_transfer_type", [
   "transferencia",
   "reposicao_caixa",
   "aporte_socios",
   "retirada",
+  "emprestimo_recebido",
+  "emprestimo_devolvido",
 ]);
 
 /**

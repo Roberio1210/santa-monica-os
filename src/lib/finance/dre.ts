@@ -75,6 +75,8 @@ const TRANSFER_NATURE_MAP: Record<AccountTransferType, FinancialNature> = {
   reposicao_caixa: "transferencia",
   aporte_socios: "aporte",
   retirada: "retirada",
+  emprestimo_recebido: "emprestimo",
+  emprestimo_devolvido: "emprestimo",
 };
 
 /** As únicas duas categorias de mão de obra que existem hoje no plano de contas real — nenhuma nova foi inventada. */

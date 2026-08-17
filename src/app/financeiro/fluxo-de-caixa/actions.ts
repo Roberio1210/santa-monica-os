@@ -11,7 +11,7 @@ export interface FormActionState {
 
 const MOVEMENT_TYPES: CashMovementType[] = ["entrada", "saida"];
 const MOVEMENT_NATURES: CashMovementNature[] = ["receita", "despesa", "ajuste", "estorno", "taxa_bancaria", "tarifa", "juros"];
-const TRANSFER_TYPES: AccountTransferType[] = ["transferencia", "reposicao_caixa", "aporte_socios", "retirada"];
+const TRANSFER_TYPES: AccountTransferType[] = ["transferencia", "reposicao_caixa", "aporte_socios", "retirada", "emprestimo_recebido", "emprestimo_devolvido"];
 
 function parseOptionalString(value: FormDataEntryValue | null): string | null {
   const str = String(value ?? "").trim();
@@ -95,6 +95,8 @@ export async function recordAccountTransferAction(_prevState: FormActionState, f
 
   if (type === "aporte_socios" && !toAccountId) return { error: "Aporte de sócios precisa de uma conta de destino." };
   if (type === "retirada" && !fromAccountId) return { error: "Retirada precisa de uma conta de origem." };
+  if (type === "emprestimo_recebido" && !toAccountId) return { error: "Empréstimo recebido precisa de uma conta de destino." };
+  if (type === "emprestimo_devolvido" && !fromAccountId) return { error: "Devolução de empréstimo precisa de uma conta de origem." };
   if ((type === "transferencia" || type === "reposicao_caixa") && (!fromAccountId || !toAccountId)) {
     return { error: "Transferência/reposição precisa de conta de origem e de destino." };
   }

@@ -30,6 +30,8 @@ export const financialNatureEnum = pgEnum("financial_nature", [
   "transferencia",
   "aporte",
   "retirada",
+  /** Missão Financeiro V4.0 — dívida com terceiros/sócios que espera devolução (recebida ou devolvida), ex.: RF Base Participações. */
+  "emprestimo",
   "reembolso",
   "nao_classificavel",
 ]);

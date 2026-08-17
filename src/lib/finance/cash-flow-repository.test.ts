@@ -116,6 +116,41 @@ describe("Transferências entre contas — aporte de sócios e retirada", () => 
     expect(all).toHaveLength(1);
     expect(all[0].type).toBe("reposicao_caixa");
   });
+
+  it("empréstimo recebido (fromAccountId null) aumenta o saldo da conta de destino, igual a aporte — Missão V4.0", async () => {
+    const repo = new StaticFinanceRepository({ accountTransfers: [] });
+
+    const transfer = await repo.recordAccountTransfer({
+      type: "emprestimo_recebido",
+      toAccountId: "conta-caixa-fisico",
+      amount: 900,
+      date: "2026-08-11",
+      description: "Empréstimo de sócio — Bruno Vainstock Monteiro",
+    });
+
+    expect(transfer.fromAccountId).toBeNull();
+    expect(transfer.type).toBe("emprestimo_recebido");
+
+    const accounts = await repo.listFinancialAccounts();
+    const caixa = accounts.find((a) => a.id === "conta-caixa-fisico")!;
+    expect(caixa.currentBalance).toBe(1000); // 100 (fundo fixo) + 900 (empréstimo)
+  });
+
+  it("devolução de empréstimo (toAccountId null) reduz o saldo da conta de origem, igual a retirada — Missão V4.0", async () => {
+    const repo = new StaticFinanceRepository({ accountTransfers: [] });
+
+    await repo.recordAccountTransfer({
+      type: "emprestimo_devolvido",
+      fromAccountId: "conta-caixa-fisico",
+      amount: 30,
+      date: "2026-08-15",
+      description: "Devolução de empréstimo",
+    });
+
+    const accounts = await repo.listFinancialAccounts();
+    const caixa = accounts.find((a) => a.id === "conta-caixa-fisico")!;
+    expect(caixa.currentBalance).toBe(70); // 100 - 30
+  });
 });
 
 describe("Saldo informado", () => {

@@ -346,7 +346,8 @@ export interface FinancialAccountBalance extends FinancialAccount {
  * "aporte_socios" (fromAccountId null) e "retirada" (toAccountId null) reaproveitam o mesmo
  * padrão from/to nullable já usado por transferência/reposição de caixa.
  */
-export type AccountTransferType = "transferencia" | "reposicao_caixa" | "aporte_socios" | "retirada";
+/** "emprestimo_recebido"/"emprestimo_devolvido" — Missão Financeiro V4.0: dívida com terceiros/sócios que espera devolução (ex.: RF Base Participações, empréstimo de sócio), distinta de aporte (capital, sem devolução) e da categoria "Empréstimos e financiamentos" (financiamento bancário formal). */
+export type AccountTransferType = "transferencia" | "reposicao_caixa" | "aporte_socios" | "retirada" | "emprestimo_recebido" | "emprestimo_devolvido";
 
 export interface AccountTransfer {
   id: string;
@@ -647,6 +648,7 @@ export type FinancialNature =
   | "transferencia"
   | "aporte"
   | "retirada"
+  | "emprestimo"
   | "reembolso"
   | "nao_classificavel";
 
