@@ -67,6 +67,19 @@ interface DreViewProps {
 export function DreView({ report, previous, byCostCenter, alerts, regime, from, to, costCenterGroup, monthlySeries, pendencyOverview, coverage, revenueReconciliation }: DreViewProps) {
   const router = useRouter();
 
+  /**
+   * Missão V4.2 — "Estética Automotiva TOTAL" = clientes comuns (receitaBrutaEstetica) + parcerias
+   * corporativas (receitaBrutaParceriasCorporativas). Puramente derivado para exibição — nenhum
+   * cálculo novo, nenhum valor alterado; segue a mesma regra "ausência de dado ≠ zero" do resto da
+   * DRE (null quando `receitaBruta` não é calculável no período).
+   */
+  const esteticaAutomotivaTotal = report.receitaBruta === null ? null : Math.round((report.receitaBrutaEstetica.amount + report.receitaBrutaParceriasCorporativas.amount) * 100) / 100;
+  const previousEsteticaAutomotivaTotal = previous
+    ? previous.receitaBruta === null
+      ? null
+      : Math.round((previous.receitaBrutaEstetica.amount + previous.receitaBrutaParceriasCorporativas.amount) * 100) / 100
+    : undefined;
+
   function handleFilter(formData: FormData) {
     const params = new URLSearchParams();
     params.set("regime", String(formData.get("regime") ?? "gerencial"));
@@ -164,7 +177,7 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <IndicatorCard label="Participação Estética" value={report.participacaoEsteticaReceita} />
+            <IndicatorCard label="Participação Estética — Clientes comuns" value={report.participacaoEsteticaReceita} />
             <IndicatorCard label="Participação Estacionamento" value={report.participacaoEstacionamentoReceita} />
             <IndicatorCard label="Participação Parcerias Corporativas" value={report.participacaoParceriasReceita} />
             <PlainIndicatorCard label="Mão de obra operacional" amount={report.maoDeObraOperacional} motivo={report.maoDeObraIndisponivelMotivo} />
@@ -186,11 +199,20 @@ export function DreView({ report, previous, byCostCenter, alerts, regime, from, 
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 pt-0">
-          <DreRow label="Receita da Estética Automotiva" group={report.receitaBrutaEstetica} />
+          {/*
+            Missão V4.2 — hierarquia gerencial explícita: "Receita da Estética Automotiva" sozinha
+            representa só clientes comuns, NUNCA a atividade inteira (achado da correção do
+            fechamento IESA de julho/2026, que estava fora dessa linha). "Estética Automotiva TOTAL"
+            é clientes comuns + parcerias corporativas — soma pura de dois valores já existentes no
+            relatório, calculada aqui só para exibição, nunca uma fonte nova de cálculo financeiro.
+          */}
+          <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-foreground-subtle">Estética Automotiva</p>
+          <DreRow label="Clientes comuns" group={report.receitaBrutaEstetica} indent />
+          <DreRow label="Parcerias corporativas (ex.: IESA/Nissan)" group={report.receitaBrutaParceriasCorporativas} indent />
+          <TotalRow label="ESTÉTICA AUTOMOTIVA TOTAL" value={esteticaAutomotivaTotal} previous={previousEsteticaAutomotivaTotal} motivo={report.receitaBrutaIndisponivelMotivo} />
           <DreRow label="Receita do Estacionamento" group={report.receitaBrutaEstacionamento} />
-          <DreRow label="Receita de Clientes/Parcerias Corporativas" group={report.receitaBrutaParceriasCorporativas} />
           <DreRow label="Outras receitas operacionais" group={report.receitaBrutaOutras} />
-          <TotalRow label="RECEITA BRUTA" value={report.receitaBruta} previous={previous?.receitaBruta} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
+          <TotalRow label="RECEITA BRUTA (RECEITA OPERACIONAL TOTAL)" value={report.receitaBruta} previous={previous?.receitaBruta} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Deduções da receita" group={report.deducoes} negative />
           <TotalRow label="RECEITA LÍQUIDA" value={report.receitaLiquida} previous={previous?.receitaLiquida} motivo={report.receitaBrutaIndisponivelMotivo} emphasis />
           <DreRow label="(-) Custos diretos dos serviços" group={report.custosDiretos} negative />
@@ -412,11 +434,11 @@ function IndicatorCard({ label, value, textOverride }: { label: string; value: n
  * deixa explícito que é uma CONTAGEM real de zero lançamentos, nunca escondida atrás de um valor
  * em R$ que pareceria uma confirmação de "gasto zero".
  */
-function DreRow({ label, group, negative }: { label: string; group: DreGroupTotal; negative?: boolean }) {
+function DreRow({ label, group, negative, indent }: { label: string; group: DreGroupTotal; negative?: boolean; indent?: boolean }) {
   const [open, setOpen] = useState(false);
   if (group.items.length === 0) {
     return (
-      <div className="flex items-center justify-between py-1 text-sm text-foreground-subtle">
+      <div className={`flex items-center justify-between py-1 text-sm text-foreground-subtle ${indent ? "pl-4" : ""}`}>
         <span>
           {label} <span className="text-xs">(0 lançamentos)</span>
         </span>
@@ -425,7 +447,7 @@ function DreRow({ label, group, negative }: { label: string; group: DreGroupTota
     );
   }
   return (
-    <div>
+    <div className={indent ? "pl-4" : undefined}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between py-1 text-left text-sm hover:bg-background-elevated/50">
         <span className="flex items-center gap-1 text-foreground-muted">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
