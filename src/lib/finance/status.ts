@@ -154,6 +154,10 @@ export interface BankStatementBalanceResult {
   /** Quantas dessas linhas já foram conciliadas (status "conciliado") — indicador de cobertura de CLASSIFICAÇÃO, não de saldo (o saldo já usa 100% das linhas reais). */
   classifiedCount: number;
   classifiedPercent: number | null;
+  /** totalCount - classifiedCount — Missão V4.1. */
+  unclassifiedCount: number;
+  /** Soma do valor (módulo) das linhas ainda não conciliadas — Missão V4.1, Fase 5: nunca classifica automaticamente, só torna o volume pendente visível. */
+  unclassifiedAmount: number;
   importPeriodFrom: string | null;
   importPeriodTo: string | null;
 }
@@ -179,13 +183,16 @@ export function computeAccountBalanceFromBankStatement(
 ): BankStatementBalanceResult {
   const real = lines.filter((l) => l.status !== "ignorado");
   const balance = Math.round(real.reduce((sum, l) => sum + (l.direction === "entrada" ? l.amount : -l.amount), 0) * 100) / 100;
-  const classifiedCount = real.filter((l) => l.status === "conciliado").length;
+  const unclassified = real.filter((l) => l.status !== "conciliado");
+  const classifiedCount = real.length - unclassified.length;
   const dates = real.map((l) => l.date).sort();
   return {
     balance,
     totalCount: real.length,
     classifiedCount,
     classifiedPercent: real.length > 0 ? Math.round((classifiedCount / real.length) * 1000) / 10 : null,
+    unclassifiedCount: unclassified.length,
+    unclassifiedAmount: Math.round(unclassified.reduce((sum, l) => sum + l.amount, 0) * 100) / 100,
     importPeriodFrom: dates[0] ?? null,
     importPeriodTo: dates[dates.length - 1] ?? null,
   };

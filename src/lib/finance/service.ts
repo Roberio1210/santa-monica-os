@@ -1,14 +1,16 @@
 import "server-only";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
-import { computeDreReport, resolveClassification, resolveCashMovementNatureClassification } from "@/lib/finance/dre";
+import { computeDreReport, resolveClassification, resolveCashMovementClassification, resolveTransferClassification } from "@/lib/finance/dre";
 import { fetchJumpParkRevenueCandidates } from "@/lib/finance/jumpparkRevenue";
-import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
+import type { JumpParkRevenueCandidateInput, ResolvedClassification } from "@/lib/finance/dre";
 import type {
   AccountingPeriod,
   AccountsPayableView,
   AccountsReceivableView,
   AccountTransfer,
+  AgingBucket,
+  AgingBucketSummary,
   CashFlowAccountBalance,
   CashFlowAlert,
   CashFlowDashboard,
@@ -29,6 +31,7 @@ import type {
   FinancialAccountBalance,
   FinancialCategory,
   FinancialClassification,
+  FinancialNature,
   Partner,
   RecurringBillTemplate,
   Supplier,
@@ -470,63 +473,104 @@ export async function fetchCostCenters(): Promise<CostCenter[]> {
 
 // --- Fluxo de Caixa / Livro Caixa ---
 
+/** receita_operacional/despesa_operacional/custo_direto contam como operação real do negócio; as demais naturezas (transferência, aporte, retirada, empréstimo, resultado financeiro, dedução, investimento, ativo/passivo, reembolso, não classificável) são não-operacionais — Missão V4.1, Fase 5. Reaproveita a taxonomia já existente da DRE, nunca cria uma nova. */
+const OPERATIONAL_NATURES = new Set<FinancialNature>(["receita_operacional", "despesa_operacional", "custo_direto"]);
+
+function classificationStatusFrom(resolved: ResolvedClassification): "classificado" | "revisao_necessaria" | "pendente" {
+  if (resolved.origin === "pendente") return "pendente";
+  if (resolved.reviewNeeded) return "revisao_necessaria";
+  return "classificado";
+}
+
 /**
  * Livro Caixa: junta cash_movements ("movimento") e account_transfers ("transferencia") numa
  * única lista ordenada cronologicamente — nenhuma tabela nova, só uma visão combinada. Toda
  * entrada e toda saída real passa por uma dessas duas tabelas, então nada fica de fora.
+ *
+ * Missão V4.1, Fase 5 — `classifications`/`rules` são opcionais: quando fornecidos, cada entrada
+ * ganha nature/isOperational/classificationStatus reaproveitando exatamente os mesmos resolvers
+ * da DRE (nunca uma segunda lógica de classificação); quando omitidos (chamadores antigos), esses
+ * três campos ficam null e o resto do comportamento é idêntico ao de antes desta missão.
  */
-export function computeCashLedger(movements: CashMovement[], transfers: AccountTransfer[]): CashLedgerEntry[] {
-  const fromMovements: CashLedgerEntry[] = movements.map((m) => ({
-    id: m.id,
-    kind: "movimento",
-    date: m.date,
-    label: m.nature ?? m.type,
-    amount: m.type === "saida" ? -m.amount : m.amount,
-    description: m.description,
-    financialAccountId: m.financialAccountId,
-    financialAccountName: m.financialAccountName,
-    toAccountId: null,
-    toAccountName: null,
-    categoryName: m.categoryName,
-    costCenterName: m.costCenterName,
-    partyName: m.partyName,
-    responsibleName: m.responsibleName,
-    documentRef: m.documentRef,
-    competenceDate: m.competenceDate,
-    balanceBefore: m.balanceBefore,
-    balanceAfter: m.balanceAfter,
-    notes: m.notes,
-  }));
+export function computeCashLedger(
+  movements: CashMovement[],
+  transfers: AccountTransfer[],
+  classifications?: FinancialClassification[],
+  rules?: ClassificationRule[],
+): CashLedgerEntry[] {
+  const explicitByCashMovementId = new Map<string, FinancialClassification>();
+  for (const c of classifications ?? []) {
+    if (c.cashMovementId) explicitByCashMovementId.set(c.cashMovementId, c);
+  }
 
-  const fromTransfers: CashLedgerEntry[] = transfers.map((t) => ({
-    id: t.id,
-    kind: "transferencia",
-    date: t.date,
-    label: t.type,
-    amount: t.amount,
-    description: t.description,
-    financialAccountId: t.fromAccountId,
-    financialAccountName: t.fromAccountName,
-    toAccountId: t.toAccountId,
-    toAccountName: t.toAccountName,
-    categoryName: null,
-    costCenterName: null,
-    partyName: null,
-    responsibleName: t.responsibleName,
-    documentRef: t.documentRef,
-    competenceDate: null,
-    balanceBefore: null,
-    balanceAfter: null,
-    notes: t.notes,
-  }));
+  const fromMovements: CashLedgerEntry[] = movements.map((m) => {
+    const resolved = rules ? resolveCashMovementClassification(m, explicitByCashMovementId.get(m.id), rules) : null;
+    return {
+      id: m.id,
+      kind: "movimento",
+      date: m.date,
+      label: m.nature ?? m.type,
+      amount: m.type === "saida" ? -m.amount : m.amount,
+      description: m.description,
+      financialAccountId: m.financialAccountId,
+      financialAccountName: m.financialAccountName,
+      toAccountId: null,
+      toAccountName: null,
+      categoryName: m.categoryName,
+      costCenterName: m.costCenterName,
+      partyName: m.partyName,
+      responsibleName: m.responsibleName,
+      documentRef: m.documentRef,
+      competenceDate: m.competenceDate,
+      nature: resolved?.nature ?? null,
+      isOperational: resolved ? OPERATIONAL_NATURES.has(resolved.nature) : null,
+      classificationStatus: resolved ? classificationStatusFrom(resolved) : null,
+      balanceBefore: m.balanceBefore,
+      balanceAfter: m.balanceAfter,
+      notes: m.notes,
+    };
+  });
+
+  const fromTransfers: CashLedgerEntry[] = transfers.map((t) => {
+    const resolved = rules ? resolveTransferClassification(t.type) : null;
+    return {
+      id: t.id,
+      kind: "transferencia",
+      date: t.date,
+      label: t.type,
+      amount: t.amount,
+      description: t.description,
+      financialAccountId: t.fromAccountId,
+      financialAccountName: t.fromAccountName,
+      toAccountId: t.toAccountId,
+      toAccountName: t.toAccountName,
+      categoryName: null,
+      costCenterName: null,
+      partyName: null,
+      responsibleName: t.responsibleName,
+      documentRef: t.documentRef,
+      competenceDate: null,
+      nature: resolved?.nature ?? null,
+      isOperational: resolved ? OPERATIONAL_NATURES.has(resolved.nature) : null,
+      classificationStatus: resolved ? classificationStatusFrom(resolved) : null,
+      balanceBefore: null,
+      balanceAfter: null,
+      notes: t.notes,
+    };
+  });
 
   return [...fromMovements, ...fromTransfers].sort((a, b) => (a.date === b.date ? a.id.localeCompare(b.id) : a.date.localeCompare(b.date)));
 }
 
 export async function fetchCashLedger(): Promise<CashLedgerEntry[]> {
   const repo = getFinanceRepository();
-  const [movements, transfers] = await Promise.all([repo.listCashMovements(), repo.listAccountTransfers()]);
-  return computeCashLedger(movements, transfers);
+  const [movements, transfers, classifications, rules] = await Promise.all([
+    repo.listCashMovements(),
+    repo.listAccountTransfers(),
+    repo.listFinancialClassifications(),
+    repo.listClassificationRules(),
+  ]);
+  return computeCashLedger(movements, transfers, classifications, rules);
 }
 
 const CASH_FLOW_TOP_N = 5;
@@ -543,6 +587,8 @@ export function computeCashFlowDashboard(
   arItems: AccountsReceivableView[],
   apItems: AccountsPayableView[],
   asOfDate: string,
+  periodFrom: string = asOfDate,
+  periodTo: string = asOfDate,
 ): CashFlowDashboard {
   const saldoGeral = Math.round(accounts.reduce((sum, a) => sum + a.currentBalance, 0) * 100) / 100;
   const saldoPorConta: CashFlowAccountBalance[] = accounts.map((a) => ({
@@ -599,6 +645,11 @@ export function computeCashFlowDashboard(
     .slice(0, CASH_FLOW_TOP_N)
     .map((m) => ({ description: m.description, amount: m.amount, date: m.date }));
 
+  const periodMovements = movements.filter((m) => m.date >= periodFrom && m.date <= periodTo);
+  const entradasPeriodo = Math.round(periodMovements.filter((m) => m.type === "entrada").reduce((sum, m) => sum + m.amount, 0) * 100) / 100;
+  const saidasPeriodo = Math.round(periodMovements.filter((m) => m.type === "saida").reduce((sum, m) => sum + m.amount, 0) * 100) / 100;
+  const variacaoLiquidaPeriodo = Math.round((entradasPeriodo - saidasPeriodo) * 100) / 100;
+
   const entradasPorCentroCusto = groupSumByAmount(
     movements.filter((m) => m.type === "entrada"),
     (m) => m.costCenterName ?? "Não informado",
@@ -622,6 +673,11 @@ export function computeCashFlowDashboard(
     maioresReceitas,
     entradasPorCentroCusto,
     saidasPorCentroCusto,
+    periodFrom,
+    periodTo,
+    entradasPeriodo,
+    saidasPeriodo,
+    variacaoLiquidaPeriodo,
   };
 }
 
@@ -672,12 +728,74 @@ export function computeCashFlowProjection(
   });
 }
 
+/**
+ * Missão V4.1, Fase 6 — agrupa itens em aberto de Contas a Receber/Pagar em faixas de vencimento
+ * sempre relativas a `asOfDate` ("hoje" real), independentes do período selecionado no painel
+ * (Fase 2 só afeta indicadores/movimentações já realizados). "vencida" é estritamente dueDate <
+ * asOfDate; as demais faixas são cumulativas por limite superior, cada item cai em exatamente uma.
+ */
+function bucketByDueDate(items: { dueDate: string; outstandingAmount: number }[], asOfDate: string): AgingBucketSummary[] {
+  const thresholds: { bucket: AgingBucket; limit: string | null }[] = [
+    { bucket: "hoje", limit: asOfDate },
+    { bucket: "7_dias", limit: addDays(asOfDate, 7) },
+    { bucket: "15_dias", limit: addDays(asOfDate, 15) },
+    { bucket: "30_dias", limit: addDays(asOfDate, 30) },
+    { bucket: "futuro", limit: null },
+  ];
+
+  const buckets = new Map<AgingBucket, { count: number; amount: number }>([
+    ["vencida", { count: 0, amount: 0 }],
+    ["hoje", { count: 0, amount: 0 }],
+    ["7_dias", { count: 0, amount: 0 }],
+    ["15_dias", { count: 0, amount: 0 }],
+    ["30_dias", { count: 0, amount: 0 }],
+    ["futuro", { count: 0, amount: 0 }],
+  ]);
+
+  for (const item of items) {
+    const bucket: AgingBucket = item.dueDate < asOfDate ? "vencida" : (thresholds.find((t) => t.limit === null || item.dueDate <= t.limit)?.bucket ?? "futuro");
+    const entry = buckets.get(bucket)!;
+    entry.count += 1;
+    entry.amount = Math.round((entry.amount + item.outstandingAmount) * 100) / 100;
+  }
+
+  return Array.from(buckets.entries()).map(([bucket, v]) => ({ bucket, ...v }));
+}
+
+export function computeReceivableAging(items: AccountsReceivableView[], asOfDate: string): AgingBucketSummary[] {
+  const open = items.filter((i) => i.computedStatus !== "cancelled" && i.computedStatus !== "draft" && i.outstandingAmount > 0);
+  return bucketByDueDate(open, asOfDate);
+}
+
+export function computePayableAging(items: AccountsPayableView[], asOfDate: string): AgingBucketSummary[] {
+  const open = items.filter((i) => i.computedStatus !== "cancelada" && i.computedStatus !== "rascunho" && i.outstandingAmount > 0);
+  return bucketByDueDate(open, asOfDate);
+}
+
 const ACCOUNT_INACTIVITY_ALERT_DAYS = 30;
+
+export interface CashFlowAlertsExtra {
+  arItems: AccountsReceivableView[];
+  apItems: AccountsPayableView[];
+  saldoGeral: number;
+  periodFrom: string;
+  periodTo: string;
+}
+
+const HIGH_OUTFLOW_MULTIPLIER = 3;
+const HIGH_OUTFLOW_LOOKBACK_DAYS = 30;
+const HIGH_OUTFLOW_MIN_SAMPLE_DAYS = 5;
+const INFLOW_DROP_THRESHOLD_PERCENT = 30;
 
 /**
  * Calculado sob demanda — nunca persiste nada, mesmo padrão de computePayableAlerts/
  * computeReceivableAlerts. "conta_zerando" só dispara para contas com fundo fixo definido (ex.:
  * Caixa físico) — nunca inventamos um limiar para Stone/Ailos, que não têm fundo fixo.
+ *
+ * `extra` (Missão V4.1) é opcional — quando omitido, o comportamento é idêntico ao de antes desta
+ * missão (só os 5 alertas originais). Quando fornecido, habilita os 6 alertas novos da Fase 7.
+ * Todo alerta novo expõe os números exatos usados no cálculo na própria mensagem — nunca um
+ * julgamento vago ("caiu muito") sem o dado por trás, para não criar falso senso de precisão.
  */
 export function computeCashFlowAlerts(
   accounts: FinancialAccountBalance[],
@@ -685,6 +803,7 @@ export function computeCashFlowAlerts(
   transfers: AccountTransfer[],
   projection: CashFlowProjectionPoint[],
   asOfDate: string,
+  extra?: CashFlowAlertsExtra,
 ): CashFlowAlert[] {
   const alerts: CashFlowAlert[] = [];
 
@@ -717,21 +836,37 @@ export function computeCashFlowAlerts(
       });
     }
 
-    const lastMovementDate = movements
-      .filter((m) => m.financialAccountId === account.id)
-      .concat(transfers.filter((t) => t.fromAccountId === account.id || t.toAccountId === account.id).map((t) => ({ date: t.date }) as CashMovement))
-      .map((m) => m.date)
-      .sort()
-      .at(-1);
+    // Missão V4.1: contas com saldo via extrato bancário (ex.: Stone) rotineiramente não têm
+    // cash_movements/transfers recentes por desenho (V4.0) — usar a data real do extrato
+    // (coverage.importPeriodTo) como "última movimentação" evita um falso positivo permanente.
+    const lastMovementDate =
+      account.balanceSource === "extrato_bancario" && account.coverage
+        ? account.coverage.importPeriodTo
+        : movements
+            .filter((m) => m.financialAccountId === account.id)
+            .concat(transfers.filter((t) => t.fromAccountId === account.id || t.toAccountId === account.id).map((t) => ({ date: t.date }) as CashMovement))
+            .map((m) => m.date)
+            .sort()
+            .at(-1);
     if (!lastMovementDate || diffInDays(asOfDate, lastMovementDate) > ACCOUNT_INACTIVITY_ALERT_DAYS) {
       alerts.push({
         level: "conta_sem_movimentacao",
         financialAccountId: account.id,
         financialAccountName: account.name,
         message: lastMovementDate
-          ? `${account.name} não tem movimentação há mais de ${ACCOUNT_INACTIVITY_ALERT_DAYS} dias.`
+          ? `${account.name} não tem ${account.balanceSource === "extrato_bancario" ? "extrato importado" : "movimentação"} há mais de ${ACCOUNT_INACTIVITY_ALERT_DAYS} dias (último registro: ${lastMovementDate}).`
           : `${account.name} nunca teve nenhuma movimentação registrada.`,
         amount: null,
+      });
+    }
+
+    if (extra && account.coverage && account.coverage.unclassifiedCount > 0) {
+      alerts.push({
+        level: "movimentacao_sem_classificacao",
+        financialAccountId: account.id,
+        financialAccountName: account.name,
+        message: `${account.name} tem ${account.coverage.unclassifiedCount} de ${account.coverage.totalCount} lançamentos do extrato ainda não classificados (${account.coverage.classifiedPercent}% classificado), somando ${account.coverage.unclassifiedAmount} não classificados.`,
+        amount: account.coverage.unclassifiedAmount,
       });
     }
   }
@@ -747,31 +882,129 @@ export function computeCashFlowAlerts(
     });
   }
 
+  if (extra) {
+    const { arItems, apItems, saldoGeral, periodFrom, periodTo } = extra;
+
+    const overdueAr = computeReceivableAging(arItems, asOfDate).find((b) => b.bucket === "vencida");
+    if (overdueAr && overdueAr.amount > 0) {
+      alerts.push({
+        level: "conta_a_receber_vencida",
+        financialAccountId: null,
+        financialAccountName: null,
+        message: `${overdueAr.count} conta(s) a receber vencida(s), somando ${overdueAr.amount}.`,
+        amount: overdueAr.amount,
+      });
+    }
+
+    const overdueAp = computePayableAging(apItems, asOfDate).find((b) => b.bucket === "vencida");
+    if (overdueAp && overdueAp.amount > 0) {
+      alerts.push({
+        level: "conta_a_pagar_vencida",
+        financialAccountId: null,
+        financialAccountName: null,
+        message: `${overdueAp.count} conta(s) a pagar vencida(s), somando ${overdueAp.amount}.`,
+        amount: overdueAp.amount,
+      });
+    }
+
+    const next7DaysApBuckets = computePayableAging(apItems, asOfDate).filter((b) => b.bucket === "vencida" || b.bucket === "hoje" || b.bucket === "7_dias");
+    const next7DaysApTotal = Math.round(next7DaysApBuckets.reduce((sum, b) => sum + b.amount, 0) * 100) / 100;
+    if (next7DaysApTotal > saldoGeral) {
+      alerts.push({
+        level: "concentracao_pagamentos",
+        financialAccountId: null,
+        financialAccountName: null,
+        message: `Contas a pagar nos próximos 7 dias (${next7DaysApTotal}) superam o saldo geral atual (${saldoGeral}).`,
+        amount: Math.round((next7DaysApTotal - saldoGeral) * 100) / 100,
+      });
+    }
+
+    const todaySaida = Math.round(movements.filter((m) => m.date === asOfDate && m.type === "saida").reduce((sum, m) => sum + m.amount, 0) * 100) / 100;
+    const lookbackFrom = addDays(asOfDate, -HIGH_OUTFLOW_LOOKBACK_DAYS);
+    const historicalOutflowDays = new Set(movements.filter((m) => m.type === "saida" && m.date >= lookbackFrom && m.date < asOfDate).map((m) => m.date));
+    if (todaySaida > 0 && historicalOutflowDays.size >= HIGH_OUTFLOW_MIN_SAMPLE_DAYS) {
+      const historicalTotal = movements
+        .filter((m) => m.type === "saida" && m.date >= lookbackFrom && m.date < asOfDate)
+        .reduce((sum, m) => sum + m.amount, 0);
+      const avgDailyOutflow = Math.round((historicalTotal / historicalOutflowDays.size) * 100) / 100;
+      if (avgDailyOutflow > 0 && todaySaida > avgDailyOutflow * HIGH_OUTFLOW_MULTIPLIER) {
+        alerts.push({
+          level: "saida_excepcional",
+          financialAccountId: null,
+          financialAccountName: null,
+          message: `Saída de hoje (${todaySaida}) é mais de ${HIGH_OUTFLOW_MULTIPLIER}x a média diária dos últimos ${historicalOutflowDays.size} dias com movimento (${avgDailyOutflow}).`,
+          amount: todaySaida,
+        });
+      }
+    }
+
+    if (periodFrom !== periodTo) {
+      const periodDays = diffInDays(periodTo, periodFrom) + 1;
+      const previousTo = addDays(periodFrom, -1);
+      const previousFrom = addDays(periodFrom, -periodDays);
+      const currentEntradas = movements.filter((m) => m.type === "entrada" && m.date >= periodFrom && m.date <= periodTo).reduce((sum, m) => sum + m.amount, 0);
+      const previousEntradas = movements.filter((m) => m.type === "entrada" && m.date >= previousFrom && m.date <= previousTo).reduce((sum, m) => sum + m.amount, 0);
+      if (previousEntradas > 0) {
+        const dropPercent = Math.round(((previousEntradas - currentEntradas) / previousEntradas) * 1000) / 10;
+        if (dropPercent >= INFLOW_DROP_THRESHOLD_PERCENT) {
+          alerts.push({
+            level: "queda_entradas",
+            financialAccountId: null,
+            financialAccountName: null,
+            message: `Entradas do período (${Math.round(currentEntradas * 100) / 100}) caíram ${dropPercent}% em relação ao período equivalente anterior (${Math.round(previousEntradas * 100) / 100}, ${previousFrom} a ${previousTo}).`,
+            amount: Math.round((currentEntradas - previousEntradas) * 100) / 100,
+          });
+        }
+      }
+    }
+  }
+
   return alerts;
 }
 
-export async function fetchCashFlowOverview(asOfDate: string = new Date().toISOString().slice(0, 10)): Promise<{
+/**
+ * Missão V4.1 — `periodFrom`/`periodTo` (Fase 2) são opcionais e, quando omitidos, caem em
+ * `asOfDate` (equivalente ao preset "Hoje"), preservando exatamente o comportamento anterior para
+ * quem já chama esta função sem eles (Central de Operações, `today-panel`, etc.).
+ */
+export async function fetchCashFlowOverview(
+  asOfDate: string = new Date().toISOString().slice(0, 10),
+  periodFrom: string = asOfDate,
+  periodTo: string = asOfDate,
+): Promise<{
   dashboard: CashFlowDashboard;
   projection: CashFlowProjectionPoint[];
   alerts: CashFlowAlert[];
   ledger: CashLedgerEntry[];
   accounts: FinancialAccountBalance[];
+  receivablesAging: AgingBucketSummary[];
+  payablesAging: AgingBucketSummary[];
 }> {
   const repo = getFinanceRepository();
-  const [accounts, movements, transfers, arOverview, apOverview] = await Promise.all([
+  const [accounts, movements, transfers, arOverview, apOverview, classifications, rules] = await Promise.all([
     repo.listFinancialAccounts(),
     repo.listCashMovements(),
     repo.listAccountTransfers(),
     fetchAccountsReceivableOverview(asOfDate),
     fetchAccountsPayableOverview(asOfDate),
+    repo.listFinancialClassifications(),
+    repo.listClassificationRules(),
   ]);
 
-  const dashboard = computeCashFlowDashboard(accounts, movements, arOverview.items, apOverview.items, asOfDate);
+  const dashboard = computeCashFlowDashboard(accounts, movements, arOverview.items, apOverview.items, asOfDate, periodFrom, periodTo);
   const projection = computeCashFlowProjection(dashboard.saldoGeral, arOverview.items, apOverview.items, asOfDate);
-  const alerts = computeCashFlowAlerts(accounts, movements, transfers, projection, asOfDate);
-  const ledger = computeCashLedger(movements, transfers);
+  const alerts = computeCashFlowAlerts(accounts, movements, transfers, projection, asOfDate, {
+    arItems: arOverview.items,
+    apItems: apOverview.items,
+    saldoGeral: dashboard.saldoGeral,
+    periodFrom,
+    periodTo,
+  });
+  const ledger = computeCashLedger(movements, transfers, classifications, rules);
+  const receivablesAging = computeReceivableAging(arOverview.items, asOfDate);
+  const payablesAging = computePayableAging(apOverview.items, asOfDate);
 
-  return { dashboard, projection, alerts, ledger, accounts };
+  return { dashboard, projection, alerts, ledger, accounts, receivablesAging, payablesAging };
 }
 
 // --- Contabilidade Gerencial / DRE ---
@@ -1006,9 +1239,7 @@ export async function fetchClassificationQueue(): Promise<ClassificationQueueIte
   for (const cm of data.cashMovements) {
     if (cm.accountsPayableId || cm.accountsReceivableId) continue; // já cobertos via a conta a pagar/receber de origem
     const explicit = explicitByKey.get(`cash_movement:${cm.id}`);
-    const resolved = cm.nature && !explicit
-      ? resolveCashMovementNatureClassification(cm.nature)
-      : resolveClassification({ categoryName: cm.categoryName, supplierId: cm.supplierId, partnerId: cm.partnerId, description: cm.description }, explicit, data.rules);
+    const resolved = resolveCashMovementClassification(cm, explicit, data.rules);
     const base = { sourceKind: "cash_movement" as const, sourceId: cm.id, date: cm.date, description: cm.description, partyName: cm.partyName, categoryName: cm.categoryName, costCenterName: cm.costCenterName, amount: cm.amount };
     if (resolved.origin === "pendente") items.push({ ...base, reason: "sem_classificacao" });
     else if (resolved.reviewNeeded) items.push({ ...base, reason: "revisao_necessaria" });

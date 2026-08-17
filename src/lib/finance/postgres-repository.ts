@@ -941,7 +941,15 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return {
       currentBalance: Math.round(((fixedFundAmount ?? 0) + result.balance) * 100) / 100,
       balanceSource: "extrato_bancario",
-      coverage: { totalCount: result.totalCount, classifiedCount: result.classifiedCount, classifiedPercent: result.classifiedPercent, importPeriodFrom: result.importPeriodFrom, importPeriodTo: result.importPeriodTo },
+      coverage: {
+        totalCount: result.totalCount,
+        classifiedCount: result.classifiedCount,
+        classifiedPercent: result.classifiedPercent,
+        unclassifiedCount: result.unclassifiedCount,
+        unclassifiedAmount: result.unclassifiedAmount,
+        importPeriodFrom: result.importPeriodFrom,
+        importPeriodTo: result.importPeriodTo,
+      },
     };
   }
 

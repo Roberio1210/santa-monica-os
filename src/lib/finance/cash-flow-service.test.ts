@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeCashFlowAlerts, computeCashFlowDashboard, computeCashFlowProjection, computeCashLedger } from "@/lib/finance/service";
-import type { AccountsPayableView, AccountsReceivableView, AccountTransfer, CashMovement, FinancialAccountBalance } from "@/lib/finance/types";
+import { computeCashFlowAlerts, computeCashFlowDashboard, computeCashFlowProjection, computeCashLedger, computePayableAging, computeReceivableAging } from "@/lib/finance/service";
+import type { AccountsPayableView, AccountsReceivableView, AccountTransfer, CashMovement, ClassificationRule, FinancialAccountBalance, FinancialClassification } from "@/lib/finance/types";
 
 const ASOF = "2026-07-15";
 
@@ -219,5 +219,196 @@ describe("computeCashFlowAlerts", () => {
     ];
     const alerts = computeCashFlowAlerts(accounts, movements, [], projection, ASOF);
     expect(alerts.some((a) => a.level === "fluxo_negativo_futuro")).toBe(true);
+  });
+
+  it("Missão V4.1 — conta com saldo via extrato bancário usa coverage.importPeriodTo como última movimentação, não cash_movements", () => {
+    const accountWithFreshStatement = makeAccount({
+      id: "conta-stone",
+      name: "Stone",
+      fixedFundAmount: null,
+      currentBalance: -800,
+      balanceSource: "extrato_bancario",
+      coverage: { totalCount: 100, classifiedCount: 30, classifiedPercent: 30, unclassifiedCount: 70, unclassifiedAmount: 500, importPeriodFrom: "2026-01-01", importPeriodTo: ASOF },
+    });
+    // Nenhum cash_movement recente para esta conta — antes da correção isso gerava um falso "conta_sem_movimentacao".
+    const alerts = computeCashFlowAlerts([accountWithFreshStatement], [], [], [], ASOF);
+    expect(alerts.some((a) => a.level === "conta_sem_movimentacao")).toBe(false);
+  });
+
+  it("Missão V4.1 — conta via extrato bancário com importPeriodTo antigo ainda gera conta_sem_movimentacao", () => {
+    const staleAccount = makeAccount({
+      id: "conta-stone",
+      name: "Stone",
+      fixedFundAmount: null,
+      currentBalance: -800,
+      balanceSource: "extrato_bancario",
+      coverage: { totalCount: 100, classifiedCount: 30, classifiedPercent: 30, unclassifiedCount: 70, unclassifiedAmount: 500, importPeriodFrom: "2026-01-01", importPeriodTo: "2026-05-01" },
+    });
+    const alerts = computeCashFlowAlerts([staleAccount], [], [], [], ASOF);
+    const alert = alerts.find((a) => a.level === "conta_sem_movimentacao");
+    expect(alert).toBeDefined();
+    expect(alert!.message).toContain("extrato");
+  });
+
+  it("sem `extra`, nenhum dos 6 alertas novos da Fase 7 é gerado (compatibilidade retroativa)", () => {
+    const accounts = [makeAccount({ currentBalance: 100 })];
+    const alerts = computeCashFlowAlerts(accounts, [], [], [], ASOF);
+    const newLevels = ["concentracao_pagamentos", "saida_excepcional", "queda_entradas", "conta_a_pagar_vencida", "conta_a_receber_vencida", "movimentacao_sem_classificacao"];
+    expect(alerts.some((a) => newLevels.includes(a.level))).toBe(false);
+  });
+
+  it("com `extra`, gera conta_a_receber_vencida e conta_a_pagar_vencida a partir dos itens vencidos", () => {
+    const accounts = [makeAccount({ currentBalance: 100000 })];
+    const arItems = [{ outstandingAmount: 300, dueDate: "2026-07-01", computedStatus: "overdue" } as AccountsReceivableView];
+    const apItems = [{ outstandingAmount: 150, dueDate: "2026-07-01", computedStatus: "vencida" } as AccountsPayableView];
+    const alerts = computeCashFlowAlerts(accounts, [], [], [], ASOF, { arItems, apItems, saldoGeral: 100000, periodFrom: ASOF, periodTo: ASOF });
+
+    const arAlert = alerts.find((a) => a.level === "conta_a_receber_vencida");
+    expect(arAlert?.amount).toBe(300);
+    const apAlert = alerts.find((a) => a.level === "conta_a_pagar_vencida");
+    expect(apAlert?.amount).toBe(150);
+  });
+
+  it("gera concentracao_pagamentos quando contas a pagar nos próximos 7 dias superam o saldo geral", () => {
+    const accounts = [makeAccount({ currentBalance: 1000 })];
+    const apItems = [{ outstandingAmount: 5000, dueDate: "2026-07-18", computedStatus: "pendente" } as AccountsPayableView];
+    const alerts = computeCashFlowAlerts(accounts, [], [], [], ASOF, { arItems: [], apItems, saldoGeral: 1000, periodFrom: ASOF, periodTo: ASOF });
+    expect(alerts.some((a) => a.level === "concentracao_pagamentos")).toBe(true);
+  });
+
+  it("gera movimentacao_sem_classificacao quando a conta tem linhas de extrato não classificadas", () => {
+    const account = makeAccount({
+      id: "conta-stone",
+      balanceSource: "extrato_bancario",
+      coverage: { totalCount: 100, classifiedCount: 30, classifiedPercent: 30, unclassifiedCount: 70, unclassifiedAmount: 4200, importPeriodFrom: "2026-01-01", importPeriodTo: ASOF },
+    });
+    const alerts = computeCashFlowAlerts([account], [], [], [], ASOF, { arItems: [], apItems: [], saldoGeral: 0, periodFrom: ASOF, periodTo: ASOF });
+    const alert = alerts.find((a) => a.level === "movimentacao_sem_classificacao");
+    expect(alert?.amount).toBe(4200);
+  });
+
+  it("gera saida_excepcional quando a saída de hoje é muito maior que a média histórica", () => {
+    const accounts = [makeAccount({ currentBalance: 1000 })];
+    const historicalDays = ["2026-07-10", "2026-07-11", "2026-07-12", "2026-07-13", "2026-07-14"];
+    const movements = [
+      ...historicalDays.map((date, i) => makeMovement({ id: `hist-${i}`, date, type: "saida", amount: 10 })),
+      makeMovement({ id: "hoje", date: ASOF, type: "saida", amount: 500 }),
+    ];
+    const alerts = computeCashFlowAlerts(accounts, movements, [], [], ASOF, { arItems: [], apItems: [], saldoGeral: 1000, periodFrom: ASOF, periodTo: ASOF });
+    expect(alerts.some((a) => a.level === "saida_excepcional")).toBe(true);
+  });
+
+  it("gera queda_entradas quando as entradas do período caem >= 30% frente ao período equivalente anterior", () => {
+    const accounts = [makeAccount({ currentBalance: 1000 })];
+    const movements = [
+      makeMovement({ id: "atual", date: "2026-07-15", type: "entrada", amount: 100 }),
+      makeMovement({ id: "anterior", date: "2026-07-08", type: "entrada", amount: 1000 }),
+    ];
+    const alerts = computeCashFlowAlerts(accounts, movements, [], [], ASOF, {
+      arItems: [],
+      apItems: [],
+      saldoGeral: 1000,
+      periodFrom: "2026-07-09",
+      periodTo: "2026-07-15",
+    });
+    const alert = alerts.find((a) => a.level === "queda_entradas");
+    expect(alert).toBeDefined();
+  });
+});
+
+describe("computeReceivableAging / computePayableAging — Missão V4.1, Fase 6", () => {
+  it("classifica vencida/hoje/7/15/30/futuro corretamente", () => {
+    const items = [
+      { outstandingAmount: 100, dueDate: "2026-07-01", computedStatus: "overdue" },
+      { outstandingAmount: 200, dueDate: ASOF, computedStatus: "open" },
+      { outstandingAmount: 300, dueDate: "2026-07-20", computedStatus: "open" },
+      { outstandingAmount: 400, dueDate: "2026-07-28", computedStatus: "open" },
+      { outstandingAmount: 500, dueDate: "2026-08-10", computedStatus: "open" },
+      { outstandingAmount: 600, dueDate: "2026-12-01", computedStatus: "open" },
+    ] as AccountsReceivableView[];
+
+    const buckets = computeReceivableAging(items, ASOF);
+    const byBucket = Object.fromEntries(buckets.map((b) => [b.bucket, b]));
+
+    expect(byBucket.vencida).toEqual({ bucket: "vencida", count: 1, amount: 100 });
+    expect(byBucket.hoje).toEqual({ bucket: "hoje", count: 1, amount: 200 });
+    expect(byBucket["7_dias"]).toEqual({ bucket: "7_dias", count: 1, amount: 300 });
+    expect(byBucket["15_dias"]).toEqual({ bucket: "15_dias", count: 1, amount: 400 });
+    expect(byBucket["30_dias"]).toEqual({ bucket: "30_dias", count: 1, amount: 500 });
+    expect(byBucket.futuro).toEqual({ bucket: "futuro", count: 1, amount: 600 });
+  });
+
+  it("nunca inclui itens cancelados/rascunho ou com outstanding zerado", () => {
+    const arItems = [
+      { outstandingAmount: 999, dueDate: ASOF, computedStatus: "cancelled" },
+      { outstandingAmount: 0, dueDate: ASOF, computedStatus: "open" },
+    ] as AccountsReceivableView[];
+    expect(computeReceivableAging(arItems, ASOF).every((b) => b.count === 0)).toBe(true);
+
+    const apItems = [
+      { outstandingAmount: 999, dueDate: ASOF, computedStatus: "cancelada" },
+      { outstandingAmount: 999, dueDate: ASOF, computedStatus: "rascunho" },
+    ] as AccountsPayableView[];
+    expect(computePayableAging(apItems, ASOF).every((b) => b.count === 0)).toBe(true);
+  });
+});
+
+describe("computeCashFlowDashboard — período (Missão V4.1, Fase 2/3)", () => {
+  const accounts = [makeAccount({ id: "conta-caixa-fisico", currentBalance: 300 })];
+
+  it("sem periodFrom/periodTo explícitos, cai em asOfDate — igual a entradasHoje/saidasHoje", () => {
+    const movements = [makeMovement({ id: "e1", date: ASOF, type: "entrada", amount: 100 }), makeMovement({ id: "s1", date: ASOF, type: "saida", amount: 30 })];
+    const dashboard = computeCashFlowDashboard(accounts, movements, [], [], ASOF);
+    expect(dashboard.periodFrom).toBe(ASOF);
+    expect(dashboard.periodTo).toBe(ASOF);
+    expect(dashboard.entradasPeriodo).toBe(dashboard.entradasHoje);
+    expect(dashboard.saidasPeriodo).toBe(dashboard.saidasHoje);
+    expect(dashboard.variacaoLiquidaPeriodo).toBe(dashboard.resultadoDia);
+  });
+
+  it("com período explícito, soma entradas/saídas de toda a janela, não só de asOfDate", () => {
+    const movements = [
+      makeMovement({ id: "e1", date: "2026-07-01", type: "entrada", amount: 500 }),
+      makeMovement({ id: "e2", date: ASOF, type: "entrada", amount: 100 }),
+      makeMovement({ id: "fora", date: "2026-06-01", type: "entrada", amount: 999 }),
+      makeMovement({ id: "s1", date: "2026-07-05", type: "saida", amount: 200 }),
+    ];
+    const dashboard = computeCashFlowDashboard(accounts, movements, [], [], ASOF, "2026-07-01", ASOF);
+    expect(dashboard.entradasPeriodo).toBe(600);
+    expect(dashboard.saidasPeriodo).toBe(200);
+    expect(dashboard.variacaoLiquidaPeriodo).toBe(400);
+  });
+});
+
+describe("computeCashLedger — classificação (Missão V4.1, Fase 5)", () => {
+  const noRules: ClassificationRule[] = [];
+  const noClassifications: FinancialClassification[] = [];
+
+  it("sem classifications/rules, nature/isOperational/classificationStatus ficam null (compatibilidade retroativa)", () => {
+    const ledger = computeCashLedger([makeMovement({ nature: "receita" })], []);
+    expect(ledger[0].nature).toBeNull();
+    expect(ledger[0].isOperational).toBeNull();
+    expect(ledger[0].classificationStatus).toBeNull();
+  });
+
+  it("movimento com nature 'receita' resolve para receita_operacional, operacional, classificado", () => {
+    const ledger = computeCashLedger([makeMovement({ nature: "receita" })], [], noClassifications, noRules);
+    expect(ledger[0].nature).toBe("receita_operacional");
+    expect(ledger[0].isOperational).toBe(true);
+    expect(ledger[0].classificationStatus).toBe("classificado");
+  });
+
+  it("movimento sem nature e sem categoria fica pendente e não operacional", () => {
+    const ledger = computeCashLedger([makeMovement({ nature: null, categoryName: null, supplierId: null, partnerId: null })], [], noClassifications, noRules);
+    expect(ledger[0].nature).toBe("nao_classificavel");
+    expect(ledger[0].isOperational).toBe(false);
+    expect(ledger[0].classificationStatus).toBe("pendente");
+  });
+
+  it("transferência resolve deterministicamente pelo type (aporte_socios -> aporte, não operacional, classificado)", () => {
+    const ledger = computeCashLedger([], [makeTransfer({ type: "aporte_socios" })], noClassifications, noRules);
+    expect(ledger[0].nature).toBe("aporte");
+    expect(ledger[0].isOperational).toBe(false);
+    expect(ledger[0].classificationStatus).toBe("classificado");
   });
 });

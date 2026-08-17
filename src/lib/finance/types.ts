@@ -329,6 +329,10 @@ export interface AccountBalanceCoverage {
   totalCount: number;
   classifiedCount: number;
   classifiedPercent: number | null;
+  /** Missão V4.1 — totalCount - classifiedCount, exposto para nunca obrigar a UI a recalcular. */
+  unclassifiedCount: number;
+  /** Missão V4.1 — soma do valor das linhas ainda não conciliadas desta conta. */
+  unclassifiedAmount: number;
   importPeriodFrom: string | null;
   importPeriodTo: string | null;
 }
@@ -580,6 +584,12 @@ export interface CashLedgerEntry {
   responsibleName: string | null;
   documentRef: string | null;
   competenceDate: string | null;
+  /** Missão V4.1, Fase 5 — nature resolvida via resolveClassification/resolveCashMovementNatureClassification/resolveTransferClassification (dre.ts), reaproveitado, nunca recalculado à parte. Null só quando o chamador não passou classifications/rules (ex.: testes antigos). */
+  nature: FinancialNature | null;
+  /** true para receita_operacional/despesa_operacional/custo_direto; false para as demais naturezas (transferência, aporte, retirada, empréstimo, resultado financeiro, etc.); null quando nature é null. */
+  isOperational: boolean | null;
+  /** "classificado" (origin resolvido e sem revisão pendente), "revisao_necessaria" ou "pendente" (sem classificação alguma) — nunca reclassifica nada, só expõe o status já resolvido pela DRE. */
+  classificationStatus: "classificado" | "revisao_necessaria" | "pendente" | null;
   balanceBefore: number | null;
   balanceAfter: number | null;
   notes: string | null;
@@ -609,6 +619,30 @@ export interface CashFlowDashboard {
   maioresReceitas: { description: string; amount: number; date: string }[];
   entradasPorCentroCusto: { costCenterName: string; amount: number }[];
   saidasPorCentroCusto: { costCenterName: string; amount: number }[];
+  /** Missão V4.1 — período selecionado pelo gestor (Fase 2). Quando nenhum é passado, é igual a asOfDate (equivalente a "Hoje", mesmo valor de entradasHoje/saidasHoje). */
+  periodFrom: string;
+  periodTo: string;
+  /** Entradas/saídas realizadas (cash_movements reais) dentro de [periodFrom, periodTo] — nunca inclui transferências entre contas próprias. */
+  entradasPeriodo: number;
+  saidasPeriodo: number;
+  variacaoLiquidaPeriodo: number;
+}
+
+/** Missão V4.1, Fase 2 — janelas fixas do seletor de período do Fluxo de Caixa. */
+export type CashFlowPeriodPreset = "hoje" | "7_dias" | "mes_atual" | "mes_anterior" | "personalizado";
+
+export interface CashFlowPeriodRange {
+  from: string;
+  to: string;
+}
+
+/** Missão V4.1, Fase 6 — faixas de vencimento para Contas a Receber/Pagar, sempre relativas a "hoje" (asOfDate), independentes do período selecionado (Fase 2 só afeta indicadores/movimentações realizadas). */
+export type AgingBucket = "vencida" | "hoje" | "7_dias" | "15_dias" | "30_dias" | "futuro";
+
+export interface AgingBucketSummary {
+  bucket: AgingBucket;
+  count: number;
+  amount: number;
 }
 
 export type CashFlowProjectionWindow = "hoje" | "amanha" | "7_dias" | "15_dias" | "30_dias" | "90_dias";
@@ -620,7 +654,18 @@ export interface CashFlowProjectionPoint {
   saldoProjetado: number;
 }
 
-export type CashFlowAlertLevel = "saldo_negativo" | "conta_zerando" | "fluxo_negativo_futuro" | "conta_sem_movimentacao" | "diferenca_saldo_informado";
+export type CashFlowAlertLevel =
+  | "saldo_negativo"
+  | "conta_zerando"
+  | "fluxo_negativo_futuro"
+  | "conta_sem_movimentacao"
+  | "diferenca_saldo_informado"
+  | "concentracao_pagamentos"
+  | "saida_excepcional"
+  | "queda_entradas"
+  | "conta_a_pagar_vencida"
+  | "conta_a_receber_vencida"
+  | "movimentacao_sem_classificacao";
 
 export interface CashFlowAlert {
   level: CashFlowAlertLevel;

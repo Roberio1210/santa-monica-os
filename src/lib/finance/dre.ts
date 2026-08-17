@@ -170,6 +170,24 @@ export function resolveTransferClassification(type: AccountTransferType): Resolv
 }
 
 /**
+ * Resolve a classificação de um cash_movement: se ele tem `nature` própria (taxa/tarifa/juros/
+ * ajuste/estorno/receita/despesa) e nenhuma classificação manual explícita a sobrescreveu, usa
+ * `resolveCashMovementNatureClassification`; senão cai no fluxo genérico por categoria/fornecedor/
+ * parceiro/regra (`resolveClassification`). Extraído para ser reaproveitado tanto pela fila de
+ * classificação (fetchClassificationQueue) quanto pelo Livro Caixa (Missão V4.1) — nunca duas
+ * implementações do mesmo critério.
+ */
+export function resolveCashMovementClassification(
+  cm: Pick<CashMovement, "nature" | "categoryName" | "supplierId" | "partnerId" | "description">,
+  explicit: FinancialClassification | undefined,
+  rules: ClassificationRule[],
+): ResolvedClassification {
+  return cm.nature && !explicit
+    ? resolveCashMovementNatureClassification(cm.nature)
+    : resolveClassification({ categoryName: cm.categoryName, supplierId: cm.supplierId, partnerId: cm.partnerId, description: cm.description }, explicit, rules);
+}
+
+/**
  * Agrupa um centro de custo na visão gerencial de 3 blocos pedida pelo proprietário. "Lavação"
  * (cc-lavacao) conta como Estética Automotiva — é um subconjunto dela no plano de contas atual.
  * Qualquer outro centro de custo (Administrativo, Estrutura, Marketing, Tecnologia, ou nenhum)

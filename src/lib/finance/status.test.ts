@@ -164,5 +164,19 @@ describe("computeAccountBalanceFromBankStatement", () => {
     expect(result.classifiedPercent).toBeNull();
     expect(result.importPeriodFrom).toBeNull();
     expect(result.importPeriodTo).toBeNull();
+    expect(result.unclassifiedCount).toBe(0);
+    expect(result.unclassifiedAmount).toBe(0);
+  });
+
+  it("Missão V4.1, Fase 5 — expõe quantidade e valor ainda não classificados (tudo que não é 'conciliado')", () => {
+    const result = computeAccountBalanceFromBankStatement([
+      { direction: "entrada", amount: 100, status: "conciliado", date: "2026-07-01" },
+      { direction: "entrada", amount: 250, status: "a_classificar", date: "2026-07-02" },
+      { direction: "saida", amount: 80, status: "nao_conciliado", date: "2026-07-03" },
+      { direction: "entrada", amount: 50, status: "sugerido", date: "2026-07-04" },
+      { direction: "entrada", amount: 999999, status: "ignorado", date: "2026-07-05" },
+    ]);
+    expect(result.unclassifiedCount).toBe(3); // a_classificar + nao_conciliado + sugerido — nunca a ignorada
+    expect(result.unclassifiedAmount).toBe(380); // 250 + 80 + 50, valor absoluto (o campo amount já é positivo)
   });
 });

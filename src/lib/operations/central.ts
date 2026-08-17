@@ -395,6 +395,12 @@ function mapCashFlowAlert(alert: CashFlowAlert): ConsolidatedAlert {
     fluxo_negativo_futuro: "Fluxo projetado negativo",
     conta_sem_movimentacao: "Conta sem movimentação",
     diferenca_saldo_informado: "Diferença entre saldo calculado e informado",
+    concentracao_pagamentos: "Concentração de pagamentos nos próximos 7 dias",
+    saida_excepcional: "Saída excepcionalmente alta",
+    queda_entradas: "Queda de entradas",
+    conta_a_pagar_vencida: "Contas a pagar vencidas",
+    conta_a_receber_vencida: "Contas a receber vencidas",
+    movimentacao_sem_classificacao: "Movimentações sem classificação",
   };
   const severities: Record<CashFlowAlert["level"], ConsolidatedAlertSeverity> = {
     saldo_negativo: "critico",
@@ -402,6 +408,12 @@ function mapCashFlowAlert(alert: CashFlowAlert): ConsolidatedAlert {
     fluxo_negativo_futuro: "critico",
     conta_sem_movimentacao: "informativo",
     diferenca_saldo_informado: "atencao",
+    concentracao_pagamentos: "critico",
+    saida_excepcional: "atencao",
+    queda_entradas: "atencao",
+    conta_a_pagar_vencida: "critico",
+    conta_a_receber_vencida: "atencao",
+    movimentacao_sem_classificacao: "informativo",
   };
   return {
     severity: severities[alert.level],
