@@ -1081,6 +1081,37 @@ export class PostgresFinanceRepository implements FinanceRepository {
     });
   }
 
+  async linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [movement] = await tx.select().from(cashMovementsTable).where(eq(cashMovementsTable.id, cashMovementId)).limit(1);
+      if (!movement) throw new Error(`Movimento de caixa não encontrado: ${cashMovementId}`);
+      if (movement.accountsReceivableId !== null && movement.accountsReceivableId !== accountsReceivableId) {
+        throw new Error(`Movimento de caixa ${cashMovementId} já está vinculado a outra conta a receber (${movement.accountsReceivableId}) — desfaça o vínculo existente antes de revincular.`);
+      }
+
+      const [receivable] = await tx.select().from(accountsReceivableTable).where(eq(accountsReceivableTable.id, accountsReceivableId)).limit(1);
+      if (!receivable) throw new Error(`Conta a receber não encontrada: ${accountsReceivableId}`);
+
+      const [updated] = await tx
+        .update(cashMovementsTable)
+        .set({ accountsReceivableId, updatedAt: new Date() })
+        .where(eq(cashMovementsTable.id, cashMovementId))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "link_to_receivable",
+        entityType: "cash_movement",
+        entityId: updated.id,
+        beforeState: movement,
+        afterState: updated,
+        source: "manual",
+      });
+
+      return this.toCashMovement(updated, tx);
+    });
+  }
+
   async informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance> {
     const db = this.db();
     return db.transaction(async (tx) => {

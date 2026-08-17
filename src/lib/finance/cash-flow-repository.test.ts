@@ -164,6 +164,65 @@ describe("Saldo informado", () => {
   });
 });
 
+describe("linkCashMovementToReceivable — Missão Financeiro V4.2 (regularização IESA março/2026)", () => {
+  it("vincula um cash_movement solto a uma accounts_receivable existente, sem criar nada novo", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-04-10", type: "entrada", amount: 2680, description: "Pix real", financialAccountId: "conta-caixa-fisico" });
+    const [receivable] = await repo.createAccountsReceivable({
+      description: "Parceria IESA/Nissan — fechamento 2026-03",
+      competenceDate: "2026-03-01",
+      dueDate: "2026-04-10",
+      expectedAmount: 2680,
+    });
+
+    const linked = await repo.linkCashMovementToReceivable(movement.id, receivable.id);
+
+    expect(linked.accountsReceivableId).toBe(receivable.id);
+    const allMovements = await repo.listCashMovements();
+    expect(allMovements).toHaveLength(1); // nenhum cash_movement novo foi criado
+  });
+
+  it("é idempotente: vincular ao mesmo AR de novo não lança erro", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-04-10", type: "entrada", amount: 2680, description: "Pix real", financialAccountId: "conta-caixa-fisico" });
+    const [receivable] = await repo.createAccountsReceivable({ description: "x", competenceDate: "2026-03-01", dueDate: "2026-04-10", expectedAmount: 2680 });
+
+    await repo.linkCashMovementToReceivable(movement.id, receivable.id);
+    const secondLink = await repo.linkCashMovementToReceivable(movement.id, receivable.id);
+    expect(secondLink.accountsReceivableId).toBe(receivable.id);
+  });
+
+  it("nunca revincula silenciosamente um movimento já ligado a OUTRA conta a receber", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-04-10", type: "entrada", amount: 2680, description: "Pix real", financialAccountId: "conta-caixa-fisico" });
+    const [receivableA] = await repo.createAccountsReceivable({ description: "A", competenceDate: "2026-03-01", dueDate: "2026-04-10", expectedAmount: 2680 });
+    const [receivableB] = await repo.createAccountsReceivable({ description: "B", competenceDate: "2026-04-01", dueDate: "2026-05-10", expectedAmount: 1360 });
+
+    await repo.linkCashMovementToReceivable(movement.id, receivableA.id);
+    await expect(repo.linkCashMovementToReceivable(movement.id, receivableB.id)).rejects.toThrow(/já está vinculado/);
+  });
+
+  it("lança erro para movimento ou conta a receber inexistentes", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const [receivable] = await repo.createAccountsReceivable({ description: "x", competenceDate: "2026-03-01", dueDate: "2026-04-10", expectedAmount: 2680 });
+    await expect(repo.linkCashMovementToReceivable("inexistente", receivable.id)).rejects.toThrow(/não encontrado/);
+
+    const movement = await repo.createCashMovement({ date: "2026-04-10", type: "entrada", amount: 2680, description: "Pix real", financialAccountId: "conta-caixa-fisico" });
+    await expect(repo.linkCashMovementToReceivable(movement.id, "inexistente")).rejects.toThrow(/não encontrada/);
+  });
+
+  it("registra 'link_to_receivable' no log de auditoria", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-04-10", type: "entrada", amount: 2680, description: "Pix real", financialAccountId: "conta-caixa-fisico" });
+    const [receivable] = await repo.createAccountsReceivable({ description: "x", competenceDate: "2026-03-01", dueDate: "2026-04-10", expectedAmount: 2680 });
+
+    await repo.linkCashMovementToReceivable(movement.id, receivable.id);
+
+    const log = await repo.listAuditLog("cash_movement", movement.id);
+    expect(log.map((e) => e.action)).toEqual(["create", "link_to_receivable"]);
+  });
+});
+
 describe("Auditoria do Fluxo de Caixa", () => {
   it("registra create para lançamento manual e inform_balance para conferência de saldo", async () => {
     const repo = new StaticFinanceRepository({ cashMovements: [] });

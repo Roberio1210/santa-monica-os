@@ -404,6 +404,21 @@ export class StaticFinanceRepository implements FinanceRepository {
     return { ...row };
   }
 
+  async linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement> {
+    const movement = this.cashMovements.find((m) => m.id === cashMovementId);
+    if (!movement) throw new Error(`Movimento de caixa não encontrado: ${cashMovementId}`);
+    if (movement.accountsReceivableId !== null && movement.accountsReceivableId !== accountsReceivableId) {
+      throw new Error(`Movimento de caixa ${cashMovementId} já está vinculado a outra conta a receber (${movement.accountsReceivableId}) — desfaça o vínculo existente antes de revincular.`);
+    }
+    const receivable = this.accountsReceivable.find((r) => r.id === accountsReceivableId);
+    if (!receivable) throw new Error(`Conta a receber não encontrada: ${accountsReceivableId}`);
+
+    const before = { ...movement };
+    movement.accountsReceivableId = accountsReceivableId;
+    this.appendAudit("link_to_receivable", "cash_movement", movement.id, before, movement);
+    return { ...movement };
+  }
+
   async informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance> {
     const account = this.financialAccounts.find((a) => a.id === input.financialAccountId);
     if (!account) throw new Error(`Conta financeira não encontrada: ${input.financialAccountId}`);

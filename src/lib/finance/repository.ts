@@ -89,6 +89,14 @@ export interface FinanceRepository {
   // --- Fluxo de Caixa ---
   /** Lançamento manual (entrada/saída/ajuste/estorno/taxa/tarifa/juros) — gera balanceBefore/After. */
   createCashMovement(input: CreateCashMovementInput): Promise<CashMovement>;
+  /**
+   * Vincula um `cash_movement` JÁ EXISTENTE a uma `accounts_receivable` — para regularizar um
+   * recebimento real que foi lançado antes de sua conta a receber existir (ex.: Missão Financeiro
+   * V4.2, regularização de março/2026 da IESA/Nissan). Nunca cria um novo cash_movement; lança erro
+   * se o movimento já estiver vinculado a OUTRA conta a receber, para nunca sobrescrever um vínculo
+   * real por engano.
+   */
+  linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement>;
   /** Grava o saldo conferido manualmente pelo usuário, para o alerta de divergência. */
   informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance>;
   listAccountTransfers(): Promise<AccountTransfer[]>;
