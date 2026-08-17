@@ -55,8 +55,10 @@ export function IesaClosingCard({ closings }: { closings: IesaMonthlyClosing[] }
           </div>
         )}
         <p className="mt-3 text-xs text-foreground-subtle">
-          Identificado pela descrição real do serviço (&quot;Lavação Parceria IESA&quot;) nas ordens JumpPark — nunca pelo nome do cliente (ausente em 78%
-          das ordens reais desse serviço). Gerar a cobrança nunca presume pagamento individual por ordem; é sempre um fechamento consolidado do mês.
+          Meses com vínculo formal ao parceiro (ordem JumpPark ↔ Grupo IESA/Nissan) somam TODOS os serviços da ordem, não só os nomeados
+          &quot;IESA&quot;. Meses sem vínculo ainda formado usam o reconhecimento textual histórico (&quot;Lavação Parceria IESA&quot;), preservado
+          para não alterar competências já fechadas. Gerar a cobrança nunca presume pagamento individual por ordem; é sempre um fechamento
+          consolidado do mês.
         </p>
       </CardContent>
     </Card>
