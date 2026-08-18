@@ -6,7 +6,7 @@ import { applyMovementDelta } from "@/lib/inventory/movement-math";
 import { parseCsv, parseJson, parsePurchaseImportRow } from "@/lib/inventory/purchase-import-format";
 import { buildPurchaseImportPreview, type PurchaseImportLinePreview } from "@/lib/inventory/purchase-import-preview";
 import { convertPackageToBaseUnit } from "@/lib/inventory/unit-conversion";
-import { STOCK_CONSUMABLE_CLASSIFICATIONS, type InventoryCategory, type ItemClassification, type PurchaseLineDecision } from "@/lib/inventory/types";
+import { STOCK_TRACKED_CLASSIFICATIONS, type InventoryCategory, type ItemClassification, type PurchaseLineDecision } from "@/lib/inventory/types";
 
 /**
  * Importação de Compras Históricas (Missão 23, seções 7–9) — orquestrador de I/O sobre as
@@ -208,18 +208,22 @@ function round2(value: number): number {
 }
 
 /**
- * Etapa 2 — Confirmação. Uma linha por vez, sempre transacional. Nunca cria movimentação de
- * estoque para patrimônio/manutenção/ignorada (seção 9 — nunca misturar patrimônio com consumo
- * químico). Idempotente: uma linha já processada (`status !== "pendente"`) apenas retorna o
- * resultado anterior, nunca reprocessa.
+ * Etapa 2 — Confirmação. Uma linha por vez, sempre transacional. As decisões "patrimonio" e
+ * "despesa_manutencao" nunca criam movimentação de estoque — são para despesas genuinamente sem
+ * controle de quantidade (ex.: serviço de eletricista). Para material controlável fisicamente,
+ * mesmo não sendo "consumo químico" (ex.: ferramenta reutilizável, material de manutenção
+ * consumível), a decisão correta é "criar_produto"/"vincular_existente" — ver
+ * `STOCK_TRACKED_CLASSIFICATIONS` (Missão V4.4) para quais classificações são elegíveis.
+ * Idempotente: uma linha já processada (`status !== "pendente"`) apenas retorna o resultado
+ * anterior, nunca reprocessa.
  */
 export async function confirmPurchaseImportLine(input: ConfirmPurchaseLineInput): Promise<ConfirmPurchaseLineResult> {
   if (!input.performedBy.trim()) throw new Error("Responsável é obrigatório.");
   if (input.decision === "vincular_existente" && !input.linkItemId) throw new Error("Selecione o produto existente para vincular esta linha.");
   if (input.decision === "criar_produto") {
     if (!input.newProduct) throw new Error("Informe categoria, marca e classificação para criar um novo produto.");
-    if (!STOCK_CONSUMABLE_CLASSIFICATIONS.includes(input.newProduct.classification)) {
-      throw new Error("Só é possível criar produto de estoque para classificações de consumo (químico, sólido ou consumível). Use 'patrimônio' ou 'despesa/manutenção' para os demais casos.");
+    if (!STOCK_TRACKED_CLASSIFICATIONS.includes(input.newProduct.classification)) {
+      throw new Error("Esta classificação não é controlada em estoque (ver CLASSIFICATION_STOCK_BEHAVIOR) — use 'ignorar' ou 'despesa/manutenção sem estoque' para os demais casos.");
     }
   }
 

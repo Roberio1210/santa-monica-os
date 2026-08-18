@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { confirmPurchaseImportLine, createPurchaseImportPreview, fetchPurchaseImportPreview, listPurchaseImports, type ConfirmPurchaseLineInput } from "@/lib/inventory/purchase-import-service";
+import { STOCK_TRACKED_CLASSIFICATIONS } from "@/lib/inventory/types";
 
 /**
  * Sem Postgres configurado neste ambiente de teste, toda validação prévia (antes de qualquer
@@ -18,6 +19,19 @@ function confirmInput(overrides: Partial<ConfirmPurchaseLineInput> = {}): Confir
     ...overrides,
   };
 }
+
+describe("STOCK_TRACKED_CLASSIFICATIONS — Missão V4.4 (ferramenta/manutenção passam a ter controle de quantidade, patrimônio continua fora)", () => {
+  it("inclui os 3 consumíveis originais + epi/ferramenta/equipamento/manutencao/material_divulgacao/brinde_cliente", () => {
+    for (const c of ["quimico_volume", "solido_peso", "consumivel_unidade", "epi", "ferramenta", "equipamento", "manutencao", "material_divulgacao", "brinde_cliente"]) {
+      expect(STOCK_TRACKED_CLASSIFICATIONS).toContain(c);
+    }
+  });
+
+  it("nunca inclui patrimonio (escopo já existente, não alterado) nem nao_controlado", () => {
+    expect(STOCK_TRACKED_CLASSIFICATIONS).not.toContain("patrimonio");
+    expect(STOCK_TRACKED_CLASSIFICATIONS).not.toContain("nao_controlado");
+  });
+});
 
 describe("createPurchaseImportPreview — validações antes de qualquer leitura", () => {
   it("exige responsável pela importação", async () => {
@@ -68,10 +82,19 @@ describe("confirmPurchaseImportLine — validações antes de qualquer escrita",
     await expect(confirmPurchaseImportLine(confirmInput({ decision: "criar_produto", newProduct: undefined }))).rejects.toThrow(/categoria, marca e classificação/i);
   });
 
-  it("criar_produto rejeita classificação que não é de consumo controlado (ex.: patrimônio)", async () => {
+  it("criar_produto rejeita classificação que não é controlada em estoque (ex.: patrimônio, escopo já existente)", async () => {
     await expect(
       confirmPurchaseImportLine(confirmInput({ decision: "criar_produto", newProduct: { category: "Outros", brand: "Genérica", classification: "patrimonio" } })),
-    ).rejects.toThrow(/classificações de consumo/i);
+    ).rejects.toThrow(/não é controlada em estoque/i);
+  });
+
+  it("Missão V4.4 — criar_produto ACEITA ferramenta e manutenção (antes rejeitadas), chega até o banco", async () => {
+    await expect(
+      confirmPurchaseImportLine(confirmInput({ decision: "criar_produto", linkItemId: undefined, newProduct: { category: "Outros", brand: "Genérica", classification: "ferramenta" } })),
+    ).rejects.toThrow(/banco/i);
+    await expect(
+      confirmPurchaseImportLine(confirmInput({ decision: "criar_produto", linkItemId: undefined, newProduct: { category: "Outros", brand: "Genérica", classification: "manutencao" } })),
+    ).rejects.toThrow(/banco/i);
   });
 
   it("ignorar, patrimônio, despesa/manutenção e revisar_depois não exigem produto vinculado — chegam até o banco", async () => {

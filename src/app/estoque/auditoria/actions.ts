@@ -6,7 +6,7 @@ import { recordDuplicateDecision, type DuplicatePairDecision } from "@/lib/inven
 import { consolidateItems, type ConsolidationOverrides } from "@/lib/inventory/consolidation";
 import { createPurchaseImportPreview, confirmPurchaseImportLine } from "@/lib/inventory/purchase-import-service";
 import { linkPurchaseImportToExpense } from "@/lib/inventory/purchase-expense-link";
-import { STOCK_CONSUMABLE_CLASSIFICATIONS, type InventoryCategory, type InventoryUnit, type ItemClassification, type PurchaseLineDecision } from "@/lib/inventory/types";
+import { STOCK_TRACKED_CLASSIFICATIONS, type InventoryCategory, type InventoryUnit, type ItemClassification, type PurchaseLineDecision } from "@/lib/inventory/types";
 import type { FinancePaymentMethod } from "@/lib/finance/types";
 
 export interface FormActionState {
@@ -140,8 +140,8 @@ export async function confirmImportLineAction(_prevState: ConfirmLineState, form
       ? { category: newProductCategory as InventoryCategory, brand: newProductBrand, classification: newProductClassification as ItemClassification }
       : undefined;
 
-  if (decision === "criar_produto" && (!newProduct || !STOCK_CONSUMABLE_CLASSIFICATIONS.includes(newProduct.classification))) {
-    return { error: "Para criar produto, informe categoria, marca e uma classificação de consumo (químico, sólido ou consumível).", success: null };
+  if (decision === "criar_produto" && (!newProduct || !STOCK_TRACKED_CLASSIFICATIONS.includes(newProduct.classification))) {
+    return { error: "Para criar produto, informe categoria, marca e uma classificação controlada em estoque.", success: null };
   }
 
   try {

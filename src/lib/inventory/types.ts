@@ -101,6 +101,38 @@ export const itemClassificationLabels: Record<ItemClassification, string> = {
 /** Classificações tratadas como consumo químico/consumível real de estoque — as demais (EPI em diante) nunca entram em cálculos de consumo automático/receita. */
 export const STOCK_CONSUMABLE_CLASSIFICATIONS: ItemClassification[] = ["quimico_volume", "solido_peso", "consumivel_unidade"];
 
+/**
+ * Missão Financeiro V4.4 (correção) — duas perguntas independentes sobre uma classificação:
+ * `tracksQuantity` (a compra deve gerar/atualizar `inventory_items.current_quantity`?) e
+ * `consumable` (o item se esgota com o uso — elegível para `service_consumption_rules`/receita
+ * automática — ou é reutilizável/indefinido, ex.: uma ferramenta que nunca "acaba")? Antes desta
+ * missão, `STOCK_CONSUMABLE_CLASSIFICATIONS` respondia as duas perguntas de uma vez só, o que
+ * impedia corretamente uma ferramenta reutilizável (ex.: luva eletrostática) ou um material de
+ * manutenção consumível (ex.: limpa piso) de ganhar controle de quantidade via compra — mesmo
+ * sendo fisicamente contável. Esta tabela nunca é usada para decidir consumo automático de receita
+ * (isso continua sendo `STOCK_CONSUMABLE_CLASSIFICATIONS`, inalterado) — só para decidir se
+ * `confirmPurchaseImportLine`/`criar_produto` pode gerar `inventory_movements`.
+ */
+export const CLASSIFICATION_STOCK_BEHAVIOR: Record<ItemClassification, { tracksQuantity: boolean; consumable: boolean }> = {
+  quimico_volume: { tracksQuantity: true, consumable: true },
+  solido_peso: { tracksQuantity: true, consumable: true },
+  consumivel_unidade: { tracksQuantity: true, consumable: true },
+  epi: { tracksQuantity: true, consumable: true },
+  ferramenta: { tracksQuantity: true, consumable: false },
+  equipamento: { tracksQuantity: true, consumable: false },
+  /** Patrimônio continua fora do controle de quantidade via compra por decisão de escopo já existente (ver o fluxo dedicado "patrimonio" em `confirmPurchaseImportLine`, que nunca gera `inventory_movements`) — não alterado por esta missão. */
+  patrimonio: { tracksQuantity: false, consumable: false },
+  manutencao: { tracksQuantity: true, consumable: true },
+  material_divulgacao: { tracksQuantity: true, consumable: true },
+  brinde_cliente: { tracksQuantity: true, consumable: true },
+  nao_controlado: { tracksQuantity: false, consumable: false },
+};
+
+/** Classificações elegíveis para `criar_produto` gerar `inventory_movements` (controle de quantidade via compra) — genérico, nunca hardcoded a um produto específico. Ver `CLASSIFICATION_STOCK_BEHAVIOR`. */
+export const STOCK_TRACKED_CLASSIFICATIONS: ItemClassification[] = Object.entries(CLASSIFICATION_STOCK_BEHAVIOR)
+  .filter(([, behavior]) => behavior.tracksQuantity)
+  .map(([classification]) => classification as ItemClassification);
+
 /** Missão 23, seção 8 — decisão do usuário para cada linha da importação de compras, na Etapa 2 (confirmação). */
 export type PurchaseLineDecision = "vincular_existente" | "criar_produto" | "ignorar" | "patrimonio" | "despesa_manutencao" | "revisar_depois";
 
