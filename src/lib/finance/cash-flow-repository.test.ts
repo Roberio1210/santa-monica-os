@@ -223,6 +223,75 @@ describe("linkCashMovementToReceivable — Missão Financeiro V4.2 (regularizaç
   });
 });
 
+describe("linkCashMovementToPayable — Missão Financeiro V4.4 (compras já pagas via extrato)", () => {
+  it("vincula um cash_movement solto a uma accounts_payable existente, sem criar nada novo", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    const [payable] = await repo.createAccountsPayable({ description: "Compra Mercado Livre", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+
+    const linked = await repo.linkCashMovementToPayable(movement.id, payable.id);
+
+    expect(linked.accountsPayableId).toBe(payable.id);
+    const allMovements = await repo.listCashMovements();
+    expect(allMovements).toHaveLength(1); // nenhum cash_movement novo foi criado
+  });
+
+  it("é idempotente: vincular ao mesmo AP de novo não lança erro", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    const [payable] = await repo.createAccountsPayable({ description: "x", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+
+    await repo.linkCashMovementToPayable(movement.id, payable.id);
+    const secondLink = await repo.linkCashMovementToPayable(movement.id, payable.id);
+    expect(secondLink.accountsPayableId).toBe(payable.id);
+  });
+
+  it("nunca revincula silenciosamente um movimento já ligado a OUTRA conta a pagar", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    const [payableA] = await repo.createAccountsPayable({ description: "A", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+    const [payableB] = await repo.createAccountsPayable({ description: "B", categoryId: "despesa-aluguel", competenceDate: "2026-08-17", dueDate: "2026-08-17", originalAmount: 59.9 });
+
+    await repo.linkCashMovementToPayable(movement.id, payableA.id);
+    await expect(repo.linkCashMovementToPayable(movement.id, payableB.id)).rejects.toThrow(/já está vinculado/);
+  });
+
+  it("lança erro para movimento ou conta a pagar inexistentes", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const [payable] = await repo.createAccountsPayable({ description: "x", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+    await expect(repo.linkCashMovementToPayable("inexistente", payable.id)).rejects.toThrow(/não encontrado/);
+
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    await expect(repo.linkCashMovementToPayable(movement.id, "inexistente")).rejects.toThrow(/não encontrada/);
+  });
+
+  it("registra 'link_to_payable' no log de auditoria", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    const [payable] = await repo.createAccountsPayable({ description: "x", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+
+    await repo.linkCashMovementToPayable(movement.id, payable.id);
+
+    const log = await repo.listAuditLog("cash_movement", movement.id);
+    expect(log.map((e) => e.action)).toEqual(["create", "link_to_payable"]);
+  });
+
+  it("combinado com recordPayablePayment sem financialAccountId, marca o AP como pago SEM criar cash_movement adicional", async () => {
+    const repo = new StaticFinanceRepository({ cashMovements: [] });
+    const movement = await repo.createCashMovement({ date: "2026-08-16", type: "saida", amount: 189.79, description: "Pix Mercado Livre", financialAccountId: "conta-caixa-fisico" });
+    const [payable] = await repo.createAccountsPayable({ description: "Compra Mercado Livre", categoryId: "despesa-aluguel", competenceDate: "2026-08-16", dueDate: "2026-08-16", originalAmount: 189.79 });
+
+    const paid = await repo.recordPayablePayment({ accountsPayableId: payable.id, amount: 189.79, paidAt: "2026-08-16", method: "pix" });
+    await repo.linkCashMovementToPayable(movement.id, payable.id);
+
+    expect(paid.status).toBe("paga");
+    expect(paid.paidAmount).toBe(189.79);
+    expect(paid.outstandingAmount).toBe(0);
+    const allMovements = await repo.listCashMovements();
+    expect(allMovements).toHaveLength(1); // recordPayablePayment sem financialAccountId nunca cria cash_movement
+  });
+});
+
 describe("Auditoria do Fluxo de Caixa", () => {
   it("registra create para lançamento manual e inform_balance para conferência de saldo", async () => {
     const repo = new StaticFinanceRepository({ cashMovements: [] });

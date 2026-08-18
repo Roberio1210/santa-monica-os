@@ -97,6 +97,12 @@ export interface FinanceRepository {
    * real por engano.
    */
   linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement>;
+  /**
+   * Simétrico a `linkCashMovementToReceivable`, para o lado de contas a pagar — Missão Financeiro
+   * V4.4: uma compra já paga via Pix (cash_movement real, vindo do extrato) precisa ser vinculada
+   * ao `accounts_payable` correspondente sem gerar um segundo movimento de caixa.
+   */
+  linkCashMovementToPayable(cashMovementId: string, accountsPayableId: string): Promise<CashMovement>;
   /** Grava o saldo conferido manualmente pelo usuário, para o alerta de divergência. */
   informAccountBalance(input: InformAccountBalanceInput): Promise<FinancialAccountBalance>;
   listAccountTransfers(): Promise<AccountTransfer[]>;
