@@ -185,7 +185,26 @@ export class PostgresInventoryRepository implements InventoryRepository {
 
   async updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
+    patch: Partial<
+      Pick<
+        InventoryItem,
+        | "supplier"
+        | "location"
+        | "minimumStock"
+        | "idealStock"
+        | "unitCost"
+        | "classification"
+        | "canonicalItemId"
+        | "consolidatedAt"
+        | "name"
+        | "brand"
+        | "category"
+        | "lastCountDate"
+        | "quantityStatus"
+        | "packageCapacity"
+        | "packageCount"
+      >
+    >,
   ): Promise<InventoryItem> {
     const values: Partial<typeof inventoryItems.$inferInsert> = { updatedAt: new Date() };
     if ("supplier" in patch) values.supplier = patch.supplier ?? null;
@@ -201,6 +220,8 @@ export class PostgresInventoryRepository implements InventoryRepository {
     if ("category" in patch && patch.category !== undefined) values.category = patch.category;
     if ("lastCountDate" in patch && patch.lastCountDate !== undefined) values.lastCountDate = patch.lastCountDate;
     if ("quantityStatus" in patch && patch.quantityStatus !== undefined) values.quantityStatus = patch.quantityStatus;
+    if ("packageCapacity" in patch) values.packageCapacity = patch.packageCapacity !== null && patch.packageCapacity !== undefined ? String(patch.packageCapacity) : null;
+    if ("packageCount" in patch) values.packageCount = patch.packageCount ?? null;
 
     const [row] = await this.db().update(inventoryItems).set(values).where(eq(inventoryItems.id, id)).returning();
     if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);

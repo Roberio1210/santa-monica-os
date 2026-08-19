@@ -42,7 +42,26 @@ export interface InventoryRepository {
    */
   updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
+    patch: Partial<
+      Pick<
+        InventoryItem,
+        | "supplier"
+        | "location"
+        | "minimumStock"
+        | "idealStock"
+        | "unitCost"
+        | "classification"
+        | "canonicalItemId"
+        | "consolidatedAt"
+        | "name"
+        | "brand"
+        | "category"
+        | "lastCountDate"
+        | "quantityStatus"
+        | "packageCapacity"
+        | "packageCount"
+      >
+    >,
   ): Promise<InventoryItem>;
   /**
    * Missão 23 — usada para desativar um item incorporado numa consolidação. Reaproveitada na

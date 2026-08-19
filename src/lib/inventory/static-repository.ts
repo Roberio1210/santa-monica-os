@@ -104,7 +104,26 @@ export class StaticInventoryRepository implements InventoryRepository {
 
   async updateItemDetails(
     id: string,
-    patch: Partial<Pick<InventoryItem, "supplier" | "location" | "minimumStock" | "idealStock" | "unitCost" | "classification" | "canonicalItemId" | "consolidatedAt" | "name" | "brand" | "category" | "lastCountDate" | "quantityStatus">>,
+    patch: Partial<
+      Pick<
+        InventoryItem,
+        | "supplier"
+        | "location"
+        | "minimumStock"
+        | "idealStock"
+        | "unitCost"
+        | "classification"
+        | "canonicalItemId"
+        | "consolidatedAt"
+        | "name"
+        | "brand"
+        | "category"
+        | "lastCountDate"
+        | "quantityStatus"
+        | "packageCapacity"
+        | "packageCount"
+      >
+    >,
   ): Promise<InventoryItem> {
     const item = this.items.find((i) => i.id === id);
     if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);
