@@ -5,10 +5,11 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ClassificationBadge } from "@/components/inventory/classification-badge";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
-import { inventoryCategories } from "@/lib/inventory/types";
-import type { InventoryCategory, InventoryItemView, InventoryStatus, PhysicalState, QuantityStatus } from "@/lib/inventory/types";
+import { inventoryCategories, itemClassificationLabels, itemClassifications } from "@/lib/inventory/types";
+import type { InventoryCategory, InventoryItemView, InventoryStatus, ItemClassification, PhysicalState, QuantityStatus } from "@/lib/inventory/types";
 
 const statusMeta: Record<InventoryStatus, { label: string; variant: "positive" | "warning" | "critical" | "outline" }> = {
   ok: { label: "OK", variant: "positive" },
@@ -37,6 +38,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState<"all" | InventoryCategory>("all");
+  const [classificationFilter, setClassificationFilter] = useState<"all" | "unclassified" | ItemClassification>("all");
   const [physicalStateFilter, setPhysicalStateFilter] = useState<"all" | PhysicalState>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | InventoryStatus>(initialStatus ?? "all");
   const [quantityStatusFilter, setQuantityStatusFilter] = useState<"all" | QuantityStatus>(initialQuantityStatus ?? "all");
@@ -50,11 +52,19 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
   const movementSet = useMemo(() => new Set(itemsWithMovement), [itemsWithMovement]);
   const recipeSet = useMemo(() => new Set(itemsWithRecipe), [itemsWithRecipe]);
   const brandOptions = useMemo(() => Array.from(new Set(items.map((i) => i.brand))).sort((a, b) => a.localeCompare(b, "pt-BR")), [items]);
+  /** Só as classificações que realmente aparecem nos produtos atuais — nunca as 11 teóricas do enum. */
+  const classificationOptions = useMemo(() => {
+    const present = new Set(items.map((i) => i.classification));
+    return itemClassifications.filter((c) => present.has(c));
+  }, [items]);
+  const hasUnclassifiedItems = useMemo(() => items.some((i) => i.classification === null), [items]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     const result = items.filter((item) => {
       if (categoryFilter !== "all" && item.category !== categoryFilter) return false;
+      if (classificationFilter === "unclassified" && item.classification !== null) return false;
+      if (classificationFilter !== "all" && classificationFilter !== "unclassified" && item.classification !== classificationFilter) return false;
       if (brandFilter !== "all" && item.brand !== brandFilter) return false;
       if (physicalStateFilter !== "all" && item.physicalState !== physicalStateFilter) return false;
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
@@ -89,6 +99,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
     search,
     brandFilter,
     categoryFilter,
+    classificationFilter,
     physicalStateFilter,
     statusFilter,
     quantityStatusFilter,
@@ -134,6 +145,20 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                   {category}
                 </option>
               ))}
+            </select>
+            <select
+              value={classificationFilter}
+              onChange={(e) => setClassificationFilter(e.target.value as "all" | "unclassified" | ItemClassification)}
+              className={fieldClasses}
+              aria-label="Filtrar por classificação"
+            >
+              <option value="all">Todas as classificações</option>
+              {classificationOptions.map((c) => (
+                <option key={c} value={c}>
+                  {itemClassificationLabels[c]}
+                </option>
+              ))}
+              {hasUnclassifiedItems ? <option value="unclassified">Não classificados</option> : null}
             </select>
             <select value={physicalStateFilter} onChange={(e) => setPhysicalStateFilter(e.target.value as "all" | PhysicalState)} className={fieldClasses} aria-label="Filtrar por estado físico">
               <option value="all">Líquidos, massas e peças</option>
@@ -203,6 +228,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                     <th className="pb-2 pr-3 font-medium">Produto</th>
                     <th className="pb-2 pr-3 font-medium">Marca</th>
                     <th className="pb-2 pr-3 font-medium">Categoria</th>
+                    <th className="pb-2 pr-3 font-medium">Classificação</th>
                     <th className="pb-2 pr-3 font-medium">Saldo</th>
                     <th className="pb-2 pr-3 font-medium">Embalagem</th>
                     <th className="pb-2 pr-3 font-medium">Medição</th>
@@ -224,6 +250,9 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                       </td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.brand}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.category}</td>
+                      <td className="py-2 pr-3">
+                        <ClassificationBadge classification={item.classification} />
+                      </td>
                       <td className="py-2 pr-3 text-foreground">
                         {item.currentQuantity} {item.unit}
                         {item.fillPercent !== null ? <span className="ml-1 text-xs text-foreground-subtle">({item.fillPercent}%)</span> : null}

@@ -10,11 +10,13 @@ import { CalculationNote } from "@/components/shared/calculation-note";
 import { PeriodSelector } from "@/components/operations/period-selector";
 import { BalanceEvolutionChart } from "@/components/inventory/balance-evolution-chart";
 import { ItemDetailsForm } from "@/components/inventory/item-details-form";
+import { ClassificationBadge } from "@/components/inventory/classification-badge";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { fetchProductDetail } from "@/lib/inventory/product-detail";
 import { fetchProductStockDetail } from "@/lib/inventory/stockGerencial";
 import { computeItemYield, type YieldConfidence } from "@/lib/inventory/yield";
 import { parsePeriodParams, saoPauloDateISO } from "@/lib/utils/timezone";
+import { CLASSIFICATION_STOCK_BEHAVIOR, itemClassificationDescriptions, STOCK_CONSUMABLE_CLASSIFICATIONS } from "@/lib/inventory/types";
 import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
 
 const YIELD_CONFIDENCE_LABEL: Record<YieldConfidence, string> = {
@@ -85,6 +87,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {item.active === false ? <Badge variant="outline">Inativo</Badge> : null}
+            <ClassificationBadge classification={item.classification} />
             <Badge variant={statusMeta[item.status].variant}>{statusMeta[item.status].label}</Badge>
             {item.quantityStatus === "measurement_pending" ? <Badge variant="warning">Medição pendente</Badge> : null}
             {staleBucket ? <Badge variant="outline">{STALE_BUCKET_LABEL[staleBucket]}</Badge> : null}
@@ -197,6 +200,30 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Classificação e comportamento de estoque</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0 text-sm">
+          <div className="flex items-center gap-2">
+            <ClassificationBadge classification={item.classification} />
+          </div>
+          <p className="text-foreground-muted">
+            {item.classification !== null
+              ? itemClassificationDescriptions[item.classification]
+              : "Este produto ainda não tem uma classificação definida — controle de quantidade e elegibilidade de compra/consumo automático ficam indeterminados até que o gestor classifique."}
+          </p>
+          {item.classification !== null ? (
+            <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 border-t border-border-subtle pt-2 sm:grid-cols-2">
+              <Row label="Controla quantidade em estoque" value={CLASSIFICATION_STOCK_BEHAVIOR[item.classification].tracksQuantity ? "Sim" : "Não"} />
+              <Row label="Elegível para compra/entrada" value={CLASSIFICATION_STOCK_BEHAVIOR[item.classification].tracksQuantity ? "Sim" : "Não"} />
+              <Row label="Baixa automática por receita de serviço" value={STOCK_CONSUMABLE_CLASSIFICATIONS.includes(item.classification) ? "Sim" : "Não"} />
+              <Row label="Unidade de controle" value={item.unit} />
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>

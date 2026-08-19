@@ -102,6 +102,28 @@ export const itemClassificationLabels: Record<ItemClassification, string> = {
 export const STOCK_CONSUMABLE_CLASSIFICATIONS: ItemClassification[] = ["quimico_volume", "solido_peso", "consumivel_unidade"];
 
 /**
+ * Missão Financeiro V5.2 — descrição curta do comportamento REAL de cada classificação, para
+ * exibição na UI (lista/detalhe de produtos). Nunca inventa comportamento: cada texto reflete
+ * exatamente `CLASSIFICATION_STOCK_BEHAVIOR` (controla quantidade / é consumível fisicamente) e
+ * `STOCK_CONSUMABLE_CLASSIFICATIONS` (elegibilidade para baixa automática por receita de serviço,
+ * que é mais restrita do que "consumível" em geral — ex.: EPI e manutenção são fisicamente
+ * consumíveis mas nunca entram no motor de receita automática).
+ */
+export const itemClassificationDescriptions: Record<ItemClassification, string> = {
+  quimico_volume: "Produto químico consumível, controlado por volume. Elegível para baixa automática por receita de serviço.",
+  solido_peso: "Produto sólido consumível, controlado por peso. Elegível para baixa automática por receita de serviço.",
+  consumivel_unidade: "Consumível controlado por unidade. Elegível para baixa automática por receita de serviço.",
+  epi: "Equipamento de proteção individual — consumível e controlado fisicamente em estoque, mas não participa do motor de baixa automática por receita de serviço.",
+  ferramenta: "Item reutilizável. Possui controle físico de quantidade, mas nunca sofre baixa automática por consumo.",
+  equipamento: "Equipamento reutilizável. Possui controle físico de quantidade, mas nunca sofre baixa automática por consumo.",
+  patrimonio: "Bem patrimonial — fora do controle de quantidade em estoque; compras deste tipo nunca geram movimentação de estoque.",
+  manutencao: "Material usado na manutenção da estrutura/operação — consumível e controlado fisicamente em estoque, mas não participa do motor de baixa automática por receita de serviço.",
+  material_divulgacao: "Material de divulgação/marketing — consumível e controlado fisicamente em estoque, mas não participa do motor de baixa automática por receita de serviço.",
+  brinde_cliente: "Brinde entregue ao cliente — consumível e controlado fisicamente em estoque, mas não participa do motor de baixa automática por receita de serviço.",
+  nao_controlado: "Item não controlado em estoque — sem rastreamento de quantidade nem elegibilidade de baixa.",
+};
+
+/**
  * Missão Financeiro V4.4 (correção) — duas perguntas independentes sobre uma classificação:
  * `tracksQuantity` (a compra deve gerar/atualizar `inventory_items.current_quantity`?) e
  * `consumable` (o item se esgota com o uso — elegível para `service_consumption_rules`/receita
