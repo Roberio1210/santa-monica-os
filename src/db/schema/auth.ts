@@ -1,32 +1,36 @@
-import { pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { active, externalId, id, notes, source, timestamps } from "./common";
 
 /**
- * Papéis de acesso previstos (seção 7 da execução de fundação técnica). Nenhum usuário real é
- * criado por esta migração — a tabela fica pronta para o primeiro `owner` ser criado manualmente
- * pelo proprietário (ver docs/database-and-auth-setup-guide.md).
+ * Papéis de acesso — Missão de Usuários Individuais (V5.3). Substitui o conjunto especulativo
+ * anterior (owner/manager/parking/detailing/finance/hr/read_only), nunca usado em produção
+ * (tabela sempre teve 0 linhas), por exatamente o que o gestor pediu agora: ADMIN (acesso total)
+ * e OPERACIONAL (acesso restrito às funções do dia a dia). Aditivo a partir daqui — novos papéis
+ * (ex.: gerente, atendimento, financeiro, estoque) devem ser ACRESCENTADOS a este enum quando
+ * forem realmente necessários, nunca antecipados sem uso real (mesma lição que motivou esta troca).
  */
-export const userRoleEnum = pgEnum("user_role", [
-  "owner",
-  "manager",
-  "parking",
-  "detailing",
-  "finance",
-  "hr",
-  "read_only",
-]);
+export const userRoleEnum = pgEnum("user_role", ["admin", "operacional"]);
 
 export const users = pgTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  role: userRoleEnum("role").notNull().default("read_only"),
+  role: userRoleEnum("role").notNull().default("operacional"),
   /**
-   * Hash da senha (ex.: bcrypt/argon2), nunca a senha em texto puro. Null enquanto a
-   * autenticação completa não está habilitada — o gate temporário (APP_ACCESS_*) não usa
-   * esta tabela.
+   * Hash da senha (scrypt, ver src/lib/auth/password.ts), nunca a senha em texto puro.
+   * Fica null enquanto o usuário ainda não definiu a própria senha (ver `passwordSetupToken`).
    */
   passwordHash: text("password_hash"),
+  /**
+   * Token de definição/redefinição de senha (aleatório, de uso único) — permite que o próprio
+   * usuário escolha a senha direto no navegador, sem que ela precise ser digitada, vista ou
+   * transmitida por mais ninguém (nem pelo gestor, nem pelo assistente que cria o usuário).
+   * Null quando não há definição pendente. Limpo (volta a null) assim que a senha é definida.
+   */
+  passwordSetupToken: text("password_setup_token").unique(),
+  passwordSetupTokenExpiresAt: timestamp("password_setup_token_expires_at", { withTimezone: true }),
+  /** Força a troca de senha no próximo login (ex.: após reset administrativo). */
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   active: active(),
   source: source(),

@@ -4,10 +4,10 @@ export interface AuthStatus {
   /** Gate temporário de Basic Auth (middleware.ts), independente de banco. */
   temporaryGateEnabled: boolean;
   /**
-   * Autenticação completa (sessão, papéis, tela de login funcional). Depende de banco
-   * configurado E de implementação adicional (hash de senha, sessão) que ainda não existe —
-   * por isso é sempre `false` nesta versão, mesmo com banco conectado. Ver
-   * docs/database-and-auth-setup-guide.md, seção "Como ativar autenticação".
+   * Autenticação individual (sessão por usuário, papéis ADMIN/OPERACIONAL, login funcional —
+   * Missão de Usuários Individuais V5.3). O código existe e funciona a partir desta missão, mas
+   * só é EXIGIDO pelo middleware quando `INDIVIDUAL_AUTH_ENABLED=true` — ligado deliberadamente
+   * depois de existir pelo menos um usuário ADMIN validado (ver middleware.ts).
    */
   fullAuthConfigured: boolean;
   /** Verdadeiro quando o app está publicamente acessível sem nenhuma proteção. */
@@ -16,7 +16,7 @@ export interface AuthStatus {
 
 export function getAuthStatus(): AuthStatus {
   const temporaryGateEnabled = process.env.APP_ACCESS_ENABLED === "true";
-  const fullAuthConfigured = false;
+  const fullAuthConfigured = process.env.INDIVIDUAL_AUTH_ENABLED === "true";
   return {
     temporaryGateEnabled,
     fullAuthConfigured,

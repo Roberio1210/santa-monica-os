@@ -4,6 +4,12 @@ import { useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
+import type { UserRole } from "@/lib/auth/roles";
+
+export interface CurrentUserSummary {
+  name: string;
+  role: UserRole;
+}
 
 /**
  * O módulo Atendimento (`/atendimento/**`) é mobile-first, pensado como um app nativo — tem sua
@@ -15,7 +21,14 @@ function isMobileFirstRoute(pathname: string | null): boolean {
   return !!pathname && pathname.startsWith("/atendimento");
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+/**
+ * `currentUser` vem do layout raiz (Server Component, `getCurrentUser()`). É `null` sempre que
+ * não há sessão individual — que é o estado de hoje (`INDIVIDUAL_AUTH_ENABLED` desligado) e
+ * também o de qualquer visita antes do login. Nesse caso Sidebar/Header mantêm exatamente o
+ * comportamento anterior a esta missão (menu completo, saudação genérica) — nada muda até a
+ * sessão individual estar realmente ativa.
+ */
+export function AppShell({ children, currentUser }: { children: ReactNode; currentUser: CurrentUserSummary | null }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -25,9 +38,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full">
-      <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
+      <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} role={currentUser?.role ?? null} />
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <Header onOpenMobileMenu={() => setMobileOpen(true)} />
+        <Header onOpenMobileMenu={() => setMobileOpen(true)} currentUser={currentUser} />
         <main className="flex-1 space-y-6 p-4 lg:p-6">{children}</main>
       </div>
     </div>

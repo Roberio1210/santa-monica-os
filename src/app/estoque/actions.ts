@@ -12,6 +12,20 @@ import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { inventoryCategories } from "@/lib/inventory/types";
 import type { InventoryCategory, InventoryUnit, MovementType } from "@/lib/inventory/types";
 import type { FinancePaymentMethod } from "@/lib/finance/types";
+import { getCurrentUser } from "@/lib/auth/session";
+
+/**
+ * Missão de Usuários Individuais (V5.3) — bloqueio em camada de ação, nunca só na UI. `null`
+ * (sem sessão individual — estado de hoje, ou ADMIN) sempre passa; só bloqueia quando existe uma
+ * sessão concreta identificando o papel como operacional.
+ */
+async function assertAdminForAction(): Promise<string | null> {
+  const currentUser = await getCurrentUser();
+  if (currentUser && currentUser.role !== "admin") {
+    return "Sem permissão para esta ação.";
+  }
+  return null;
+}
 
 const FINANCE_PAYMENT_METHODS: FinancePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "transferencia", "outro", "desconhecido"];
 
@@ -260,6 +274,9 @@ export async function recordManualExitAction(_prevState: FormActionState, formDa
 
 /** Edição de metadados complementares do produto (Missão 22, estendida com nome/marca/categoria na Missão de Fechamento de Lacunas Operacionais). */
 export async function updateItemDetailsAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const permissionError = await assertAdminForAction();
+  if (permissionError) return { error: permissionError, success: null };
+
   const itemId = String(formData.get("itemId") ?? "");
   const supplier = parseOptionalString(formData.get("supplier"));
   const location = parseOptionalString(formData.get("location"));
@@ -304,6 +321,9 @@ export async function updateItemDetailsAction(_prevState: FormActionState, formD
  * desativar apenas remove o produto de `listItems()`; histórico e detalhe continuam intactos.
  */
 export async function toggleItemActiveAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const permissionError = await assertAdminForAction();
+  if (permissionError) return { error: permissionError, success: null };
+
   const itemId = String(formData.get("itemId") ?? "");
   const nextActive = String(formData.get("active") ?? "") === "true";
   if (!itemId) return { error: "Produto não identificado.", success: null };

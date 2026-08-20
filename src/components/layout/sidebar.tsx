@@ -6,15 +6,20 @@ import { useState } from "react";
 import { ChevronsLeft, ChevronsRight, Sparkles, X } from "lucide-react";
 import { navItems } from "@/components/navigation/nav-items";
 import { cn } from "@/lib/utils/cn";
+import { isPathAllowedForRole } from "@/lib/auth/permissions";
+import type { UserRole } from "@/lib/auth/roles";
 
 interface SidebarProps {
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  /** `null` = sem sessão individual (estado de hoje) — menu completo, sem filtro, igual sempre foi. */
+  role: UserRole | null;
 }
 
-export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
+export function Sidebar({ mobileOpen, onCloseMobile, role }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const visibleItems = role === null ? navItems : navItems.filter((item) => isPathAllowedForRole(role, item.href));
 
   return (
     <>
@@ -53,7 +58,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (

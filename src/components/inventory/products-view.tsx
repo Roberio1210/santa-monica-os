@@ -32,9 +32,11 @@ interface ProductsViewProps {
   initialQuantityStatus?: QuantityStatus;
   /** Produtos desativados (Missão de Fechamento de Lacunas Operacionais) — nunca somem, só saem da listagem padrão. */
   inactiveItems?: InventoryItemView[];
+  /** Missão de Usuários Individuais (V5.3) — true para o papel operacional: esconde a coluna de custo (os itens já chegam com unitCost=null, isto só remove a coluna vazia da tabela). */
+  hideFinancials?: boolean;
 }
 
-export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMovementByItem, initialStatus, initialQuantityStatus, inactiveItems = [] }: ProductsViewProps) {
+export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMovementByItem, initialStatus, initialQuantityStatus, inactiveItems = [], hideFinancials = false }: ProductsViewProps) {
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState<"all" | InventoryCategory>("all");
@@ -233,7 +235,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                     <th className="pb-2 pr-3 font-medium">Embalagem</th>
                     <th className="pb-2 pr-3 font-medium">Medição</th>
                     <th className="pb-2 pr-3 font-medium">Mínimo</th>
-                    <th className="pb-2 pr-3 font-medium">Custo médio</th>
+                    {!hideFinancials ? <th className="pb-2 pr-3 font-medium">Custo médio</th> : null}
                     <th className="pb-2 pr-3 font-medium">Última movimentação</th>
                     <th className="pb-2 pr-3 font-medium">Fornecedor</th>
                     <th className="pb-2 pr-3 font-medium">Localização</th>
@@ -264,7 +266,7 @@ export function ProductsView({ items, itemsWithMovement, itemsWithRecipe, lastMo
                         {item.quantityStatus === "measurement_pending" ? <Badge variant="warning">Pendente</Badge> : <span className="text-xs text-foreground-subtle">Confirmada</span>}
                       </td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.minimumStock !== null ? `${item.minimumStock} ${item.unit}` : "Estoque mínimo ainda não configurado"}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{item.unitCost !== null ? formatCurrency(item.unitCost) : "Não informado"}</td>
+                      {!hideFinancials ? <td className="py-2 pr-3 text-foreground-muted">{item.unitCost !== null ? formatCurrency(item.unitCost) : "Não informado"}</td> : null}
                       <td className="py-2 pr-3 text-foreground-muted">{lastMovementByItem[item.id] ? formatDateBR(lastMovementByItem[item.id]) : "Sem movimentação"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.supplier ?? "Não informado"}</td>
                       <td className="py-2 pr-3 text-foreground-muted">{item.location ?? "Não informado"}</td>

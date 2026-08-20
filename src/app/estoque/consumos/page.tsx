@@ -3,12 +3,17 @@ import { ConsumptionsView } from "@/components/inventory/consumptions-view";
 import { listConsumptionConfirmations } from "@/lib/jumppark-orders/consumption-history";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { Unavailable } from "@/components/shared/unavailable";
+import { stripFinancialFieldsFromConfirmations } from "@/lib/inventory/operational-view";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ConsumosPage() {
   const configured = isJumpParkConfigured();
-  const confirmations = await listConsumptionConfirmations();
+  const currentUser = await getCurrentUser();
+  let confirmations = await listConsumptionConfirmations();
+  // Missão de Usuários Individuais (V5.3) — cada linha de consumo carrega "knownCost" (custo × quantidade); nunca chega ao operacional, nem no payload da tabela nem no valor exibido.
+  if (currentUser?.role === "operacional") confirmations = stripFinancialFieldsFromConfirmations(confirmations);
 
   return (
     <div className="space-y-6">

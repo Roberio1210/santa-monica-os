@@ -18,6 +18,7 @@ import { computeItemYield, type YieldConfidence } from "@/lib/inventory/yield";
 import { parsePeriodParams, saoPauloDateISO } from "@/lib/utils/timezone";
 import { CLASSIFICATION_STOCK_BEHAVIOR, itemClassificationDescriptions, STOCK_CONSUMABLE_CLASSIFICATIONS } from "@/lib/inventory/types";
 import type { InventoryStatus, MovementType } from "@/lib/inventory/types";
+import { getCurrentUser } from "@/lib/auth/session";
 
 const YIELD_CONFIDENCE_LABEL: Record<YieldConfidence, string> = {
   tecnico: "Técnico (referência inicial, ainda sem amostra real)",
@@ -74,22 +75,40 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
   const [detail, stockDetail] = await Promise.all([fetchProductDetail(id), fetchProductStockDetail(id, period)]);
   if (!detail || !stockDetail.found) notFound();
 
-  const { item, movements, recipes, relatedItems, lastEntryDate, lastConsumptionDate, lastPurchase, autonomy } = detail;
-  const { priceHistory, balanceEvolution, consumptionByPeriod, lossesByPeriod, turnover, staleBucket } = stockDetail;
+  const { item, recipes, relatedItems, lastEntryDate, lastConsumptionDate, autonomy } = detail;
+  let { movements, lastPurchase } = detail;
+  let { priceHistory, consumptionByPeriod, lossesByPeriod } = stockDetail;
+  const { balanceEvolution, turnover, staleBucket } = stockDetail;
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
   const yieldEstimate = computeItemYield(item, movements, recipes.map((r) => r.recipe), saoPauloDateISO());
+
+  // Missão de Usuários Individuais (V5.3) — operacional nunca recebe custo/valor financeiro deste
+  // produto, nem mesmo no payload enviado ao navegador. Nula na origem (depois de já ter usado o
+  // dado real para o cálculo de rendimento acima, que não depende de custo) em vez de só esconder
+  // na JSX: os cartões/tabelas abaixo já sabem exibir "Não informado"/"Sem dado" quando o valor é
+  // null, então nenhuma ramificação de UI nova é necessária.
+  const hideFinancials = (await getCurrentUser())?.role === "operacional";
+  let displayItem = item;
+  if (hideFinancials) {
+    displayItem = { ...item, unitCost: null, stockValue: null };
+    lastPurchase = lastPurchase ? { ...lastPurchase, unitPricePaid: null } : null;
+    priceHistory = [];
+    consumptionByPeriod = consumptionByPeriod ? { ...consumptionByPeriod, estimatedCost: null } : null;
+    lossesByPeriod = lossesByPeriod ? { ...lossesByPeriod, estimatedCost: null } : null;
+    movements = movements.map((m) => ({ ...m, unitPricePaid: null }));
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={item.name}
-        description={`${item.brand} — ${item.category}`}
+        title={displayItem.name}
+        description={`${displayItem.brand} — ${displayItem.category}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {item.active === false ? <Badge variant="outline">Inativo</Badge> : null}
-            <ClassificationBadge classification={item.classification} />
-            <Badge variant={statusMeta[item.status].variant}>{statusMeta[item.status].label}</Badge>
-            {item.quantityStatus === "measurement_pending" ? <Badge variant="warning">Medição pendente</Badge> : null}
+            {displayItem.active === false ? <Badge variant="outline">Inativo</Badge> : null}
+            <ClassificationBadge classification={displayItem.classification} />
+            <Badge variant={statusMeta[displayItem.status].variant}>{statusMeta[displayItem.status].label}</Badge>
+            {displayItem.quantityStatus === "measurement_pending" ? <Badge variant="warning">Medição pendente</Badge> : null}
             {staleBucket ? <Badge variant="outline">{STALE_BUCKET_LABEL[staleBucket]}</Badge> : null}
             <Button asChild variant="outline" size="sm">
               <Link href={`/estoque/compras/${id}`}>Ver compras deste produto</Link>
@@ -101,24 +120,25 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
       <PeriodSelector period={period} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <IndicatorCard label="Saldo atual" value={`${item.currentQuantity} ${item.unit}`} hint={item.fillPercent !== null ? `${item.fillPercent}% da embalagem` : undefined} />
-        <IndicatorCard label="Custo médio" value={item.unitCost !== null ? formatCurrency(item.unitCost) : "Não informado"} />
-        <IndicatorCard label="Valor em estoque" value={item.stockValue !== null ? formatCurrency(item.stockValue) : "Não informado"} />
+        <IndicatorCard label="Saldo atual" value={`${displayItem.currentQuantity} ${displayItem.unit}`} hint={displayItem.fillPercent !== null ? `${displayItem.fillPercent}% da embalagem` : undefined} />
+        <IndicatorCard label="Custo médio" value={displayItem.unitCost !== null ? formatCurrency(displayItem.unitCost) : "Não informado"} />
+        <IndicatorCard label="Valor em estoque" value={displayItem.stockValue !== null ? formatCurrency(displayItem.stockValue) : "Não informado"} />
         <IndicatorCard label="Última entrada" value={lastEntryDate ? formatDateBR(lastEntryDate) : "Sem registro"} />
         <IndicatorCard label="Último consumo" value={lastConsumptionDate ? formatDateBR(lastConsumptionDate) : "Sem registro"} />
         <IndicatorCard
           label="Autonomia estimada"
           value={autonomy.services !== null ? `${autonomy.services} serviço(s)` : autonomy.reason}
-          hint={autonomy.consumptionPerService !== null ? `${autonomy.consumptionPerService} ${item.unit}/serviço` : undefined}
+          hint={autonomy.consumptionPerService !== null ? `${autonomy.consumptionPerService} ${displayItem.unit}/serviço` : undefined}
         />
-        <IndicatorCard label="Estoque mínimo" value={item.minimumStock !== null ? `${item.minimumStock} ${item.unit}` : "Estoque mínimo ainda não configurado"} />
-        <IndicatorCard label="Estoque ideal" value={item.idealStock !== null ? `${item.idealStock} ${item.unit}` : "Estoque ideal ainda não configurado"} />
-        <IndicatorCard label="Última contagem" value={formatDateBR(item.lastCountDate)} />
+        <IndicatorCard label="Estoque mínimo" value={displayItem.minimumStock !== null ? `${displayItem.minimumStock} ${displayItem.unit}` : "Estoque mínimo ainda não configurado"} />
+        <IndicatorCard label="Estoque ideal" value={displayItem.idealStock !== null ? `${displayItem.idealStock} ${displayItem.unit}` : "Estoque ideal ainda não configurado"} />
+        <IndicatorCard label="Última contagem" value={formatDateBR(displayItem.lastCountDate)} />
         <IndicatorCard label="Preço da última compra" value={lastPurchase?.unitPricePaid != null ? formatCurrency(lastPurchase.unitPricePaid) : "Não informado"} />
         <IndicatorCard label="Data da última compra" value={lastPurchase ? formatDateBR(lastPurchase.date) : "Sem registro"} />
       </div>
 
-      <ItemDetailsForm item={item} />
+      {/* Missão de Usuários Individuais (V5.3) — edição de cadastro (custo, classificação, ativo/inativo) é exclusiva de ADMIN; nem o formulário é renderizado para operacional, então o item completo (com custo real) nunca chega ao client bundle nesta página. */}
+      {!hideFinancials ? <ItemDetailsForm item={item} /> : null}
 
       <Card>
         <CardHeader>
@@ -126,15 +146,15 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <IndicatorCard label="Consumo técnico/lavagem" value={yieldEstimate.technicalConsumption !== null ? `${yieldEstimate.technicalConsumption} ${item.unit}` : "Não configurado"} />
+            <IndicatorCard label="Consumo técnico/lavagem" value={yieldEstimate.technicalConsumption !== null ? `${yieldEstimate.technicalConsumption} ${displayItem.unit}` : "Não configurado"} />
             <IndicatorCard
               label="Rendimento estimado"
               value={yieldEstimate.estimatedServicesRemaining !== null ? `${yieldEstimate.estimatedServicesRemaining} lavagem(ns)` : "Não calculável"}
               hint={yieldEstimate.confidence ? YIELD_CONFIDENCE_LABEL[yieldEstimate.confidence] : "Aguardando receita/calibração"}
             />
-            <IndicatorCard label="Consumo 7 dias" value={`${yieldEstimate.consumption7d} ${item.unit}`} />
-            <IndicatorCard label="Consumo 30 dias" value={`${yieldEstimate.consumption30d} ${item.unit}`} />
-            <IndicatorCard label="Média diária" value={`${yieldEstimate.avgDailyConsumption} ${item.unit}/dia`} />
+            <IndicatorCard label="Consumo 7 dias" value={`${yieldEstimate.consumption7d} ${displayItem.unit}`} />
+            <IndicatorCard label="Consumo 30 dias" value={`${yieldEstimate.consumption30d} ${displayItem.unit}`} />
+            <IndicatorCard label="Média diária" value={`${yieldEstimate.avgDailyConsumption} ${displayItem.unit}/dia`} />
             <IndicatorCard label="Previsão de duração" value={yieldEstimate.forecastDays !== null ? `${yieldEstimate.forecastDays} dia(s)` : "Sem consumo recente para prever"} />
           </div>
           {yieldEstimate.confidence ? (
@@ -159,17 +179,17 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
             <CardTitle>Identificação</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 pt-0 text-sm">
-            <Row label="Nome canônico" value={item.name} />
-            <Row label="Nome original" value={item.originalName ?? "Igual ao nome canônico"} />
-            <Row label="Marca" value={item.brand} />
-            <Row label="Categoria" value={item.category} />
-            <Row label="Estado físico" value={{ liquido: "Líquido", massa: "Massa", peca: "Peça" }[item.physicalState]} />
-            <Row label="Unidade-base" value={item.unit} />
-            <Row label="Embalagem" value={item.packageCapacity !== null ? `${item.packageCapacity} ${item.unit} × ${item.packageCount ?? 1}` : "Não informado"} />
-            <Row label="Condição" value={item.condition} />
-            <Row label="Localização" value={item.location ?? "Não informado"} />
-            <Row label="Fornecedor" value={item.supplier ?? "Não informado"} />
-            <Row label="Observações" value={item.notes ?? "—"} />
+            <Row label="Nome canônico" value={displayItem.name} />
+            <Row label="Nome original" value={displayItem.originalName ?? "Igual ao nome canônico"} />
+            <Row label="Marca" value={displayItem.brand} />
+            <Row label="Categoria" value={displayItem.category} />
+            <Row label="Estado físico" value={{ liquido: "Líquido", massa: "Massa", peca: "Peça" }[displayItem.physicalState]} />
+            <Row label="Unidade-base" value={displayItem.unit} />
+            <Row label="Embalagem" value={displayItem.packageCapacity !== null ? `${displayItem.packageCapacity} ${displayItem.unit} × ${displayItem.packageCount ?? 1}` : "Não informado"} />
+            <Row label="Condição" value={displayItem.condition} />
+            <Row label="Localização" value={displayItem.location ?? "Não informado"} />
+            <Row label="Fornecedor" value={displayItem.supplier ?? "Não informado"} />
+            <Row label="Observações" value={displayItem.notes ?? "—"} />
           </CardContent>
         </Card>
 
@@ -207,19 +227,19 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
         </CardHeader>
         <CardContent className="space-y-3 pt-0 text-sm">
           <div className="flex items-center gap-2">
-            <ClassificationBadge classification={item.classification} />
+            <ClassificationBadge classification={displayItem.classification} />
           </div>
           <p className="text-foreground-muted">
-            {item.classification !== null
-              ? itemClassificationDescriptions[item.classification]
+            {displayItem.classification !== null
+              ? itemClassificationDescriptions[displayItem.classification]
               : "Este produto ainda não tem uma classificação definida — controle de quantidade e elegibilidade de compra/consumo automático ficam indeterminados até que o gestor classifique."}
           </p>
-          {item.classification !== null ? (
+          {displayItem.classification !== null ? (
             <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 border-t border-border-subtle pt-2 sm:grid-cols-2">
-              <Row label="Controla quantidade em estoque" value={CLASSIFICATION_STOCK_BEHAVIOR[item.classification].tracksQuantity ? "Sim" : "Não"} />
-              <Row label="Elegível para compra/entrada" value={CLASSIFICATION_STOCK_BEHAVIOR[item.classification].tracksQuantity ? "Sim" : "Não"} />
-              <Row label="Baixa automática por receita de serviço" value={STOCK_CONSUMABLE_CLASSIFICATIONS.includes(item.classification) ? "Sim" : "Não"} />
-              <Row label="Unidade de controle" value={item.unit} />
+              <Row label="Controla quantidade em estoque" value={CLASSIFICATION_STOCK_BEHAVIOR[displayItem.classification].tracksQuantity ? "Sim" : "Não"} />
+              <Row label="Elegível para compra/entrada" value={CLASSIFICATION_STOCK_BEHAVIOR[displayItem.classification].tracksQuantity ? "Sim" : "Não"} />
+              <Row label="Baixa automática por receita de serviço" value={STOCK_CONSUMABLE_CLASSIFICATIONS.includes(displayItem.classification) ? "Sim" : "Não"} />
+              <Row label="Unidade de controle" value={displayItem.unit} />
             </div>
           ) : null}
         </CardContent>
@@ -283,7 +303,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
             ) : (
               <div className="space-y-1 text-sm">
                 <p className="text-foreground">
-                  {consumptionByPeriod.quantity} {item.unit} em {consumptionByPeriod.count} movimentação(ões)
+                  {consumptionByPeriod.quantity} {displayItem.unit} em {consumptionByPeriod.count} movimentação(ões)
                 </p>
                 <p className="text-foreground-muted">Custo estimado: {consumptionByPeriod.estimatedCost !== null ? formatCurrency(consumptionByPeriod.estimatedCost) : "Sem dado"}</p>
               </div>
@@ -302,7 +322,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
             ) : (
               <div className="space-y-1 text-sm">
                 <p className="text-foreground">
-                  {lossesByPeriod.quantity} {item.unit} em {lossesByPeriod.count} movimentação(ões)
+                  {lossesByPeriod.quantity} {displayItem.unit} em {lossesByPeriod.count} movimentação(ões)
                 </p>
                 <p className="text-foreground-muted">Custo estimado: {lossesByPeriod.estimatedCost !== null ? formatCurrency(lossesByPeriod.estimatedCost) : "Sem dado"}</p>
               </div>
@@ -316,7 +336,7 @@ export default async function ProdutoDetalhePage({ params, searchParams }: { par
           </CardHeader>
           <CardContent className="pt-0">
             <p className="text-sm text-foreground">
-              {turnover.reductionQuantity} {item.unit} reduzido(s) em {turnover.reductionCount} movimentação(ões)
+              {turnover.reductionQuantity} {displayItem.unit} reduzido(s) em {turnover.reductionCount} movimentação(ões)
             </p>
             <p className="mt-1 text-xs text-foreground-subtle">{turnover.lastReductionDate ? `Última redução: ${formatDateBR(turnover.lastReductionDate)}` : "Nenhuma redução registrada ainda"}</p>
           </CardContent>

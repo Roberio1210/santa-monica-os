@@ -2,13 +2,14 @@ import { LogIn } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Unavailable } from "@/components/shared/unavailable";
 import { isDatabaseConfigured } from "@/db/client";
+import { LoginForm } from "@/components/auth/login-form";
 
 /**
- * Tela de login preparada, mas desativada por configuração — a autenticação completa (sessão,
- * papéis) depende de banco de dados real e de uma implementação de verificação de senha que
- * ainda não existe (ver docs/database-and-auth-setup-guide.md, seção "Como ativar
- * autenticação"). Enquanto isso, a proteção real do app é o gate temporário do
- * middleware.ts (variáveis APP_ACCESS_*).
+ * Login individual (Missão de Usuários Individuais V5.3) — sessão por cookie assinado (ver
+ * src/lib/auth/session.ts), papel ADMIN/OPERACIONAL. Enquanto `INDIVIDUAL_AUTH_ENABLED` não
+ * estiver ativo, esta tela existe e funciona (quem tiver usuário/senha consegue logar), mas o
+ * middleware ainda não EXIGE sessão para navegar — só o gate temporário (APP_ACCESS_*) protege
+ * o acesso externo, exatamente como antes desta missão. Ver middleware.ts.
  */
 export default function LoginPage() {
   const databaseConfigured = isDatabaseConfigured();
@@ -20,17 +21,12 @@ export default function LoginPage() {
           <LogIn className="h-6 w-6 text-foreground-subtle" />
           <CardTitle>Santa Monica OS</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-center">
+        <CardContent className="space-y-3">
           {databaseConfigured ? (
-            <Unavailable label="Banco de dados detectado, mas o login com sessão ainda não foi implementado nesta fase." />
+            <LoginForm />
           ) : (
-            <Unavailable label="Autenticação completa requer banco de dados configurado. Peça ao proprietário para configurar DATABASE_URL." />
+            <Unavailable label="Autenticação requer banco de dados configurado. Peça ao proprietário para configurar DATABASE_URL." />
           )}
-          <p className="text-xs text-foreground-subtle">
-            Enquanto isso, o acesso ao aplicativo é controlado pelo modo temporário
-            (variáveis <code>APP_ACCESS_*</code> na Vercel) — ver
-            docs/database-and-auth-setup-guide.md.
-          </p>
         </CardContent>
       </Card>
     </div>

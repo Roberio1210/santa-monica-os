@@ -3,6 +3,8 @@ import { ProductsView } from "@/components/inventory/products-view";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { toItemView } from "@/lib/inventory/status";
+import { stripFinancialFieldsFromItems } from "@/lib/inventory/operational-view";
+import { getCurrentUser } from "@/lib/auth/session";
 import type { InventoryStatus, QuantityStatus } from "@/lib/inventory/types";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +24,15 @@ export default async function ProdutosPage({ searchParams }: { searchParams: Pro
     getRecipeRepository().listRecipes(),
   ]);
 
-  const items = rawItems.map(toItemView);
-  const inactiveItems = rawInactiveItems.map(toItemView);
+  const currentUser = await getCurrentUser();
+  const hideFinancials = currentUser?.role === "operacional";
+
+  let items = rawItems.map(toItemView);
+  let inactiveItems = rawInactiveItems.map(toItemView);
+  if (hideFinancials) {
+    items = stripFinancialFieldsFromItems(items);
+    inactiveItems = stripFinancialFieldsFromItems(inactiveItems);
+  }
   const itemsWithMovement = new Set(movements.map((m) => m.itemId));
   const itemsWithRecipe = new Set(recipes.filter((r) => r.isActiveVersion).map((r) => r.itemId));
 
@@ -44,6 +53,7 @@ export default async function ProdutosPage({ searchParams }: { searchParams: Pro
         initialStatus={initialStatus}
         initialQuantityStatus={initialQuantityStatus}
         inactiveItems={inactiveItems}
+        hideFinancials={hideFinancials}
       />
     </div>
   );
