@@ -11,6 +11,9 @@ import {
   type StoneCostModalityRow,
   type StoneCostTransactionDetailRow,
 } from "@/lib/integrations/stone/costAnalysis";
+import { fetchStoneSettlementReconciliation } from "@/lib/finance/bankStatement/stoneSettlementReconciliationService";
+import { fetchFinancialAccounts } from "@/lib/finance/service";
+import type { StoneSettlementReconciliationRow } from "@/lib/finance/bankStatement/stoneSettlementReconciliation";
 
 /**
  * Missão Financeiro V6 — agregador único da seção "Custo real Stone por venda" da tela Stone
@@ -26,11 +29,17 @@ export interface StoneCostAnalysisPageData {
   modalityRows: StoneCostModalityRow[];
   detailRows: StoneCostTransactionDetailRow[];
   worstDay: StoneCostDailyRow | null;
+  /**
+   * Missão V6.2 — conciliação diária venda × crédito real na conta Stone (`bank_statement_lines`,
+   * ver `stoneSettlementReconciliationService.ts`). Vazio até que um extrato real seja importado
+   * para a conta Stone — nunca um erro, só ausência de dado ainda não fornecido.
+   */
+  settlementReconciliation: StoneSettlementReconciliationRow[];
 }
 
 export async function getStoneCostAnalysisPageData(periodFrom: string, periodTo: string): Promise<StoneCostAnalysisPageData> {
   const repo = getStonePersistenceRepository();
-  const records = await repo.listNormalizedTransactionsByCapturedDateRange(periodFrom, periodTo);
+  const [records, financialAccounts] = await Promise.all([repo.listNormalizedTransactionsByCapturedDateRange(periodFrom, periodTo), fetchFinancialAccounts()]);
 
   const summary = summarizePeriodCost(records, periodFrom, periodTo);
   const dailyRows = buildDailyCostBreakdown(records);
@@ -38,5 +47,8 @@ export async function getStoneCostAnalysisPageData(periodFrom: string, periodTo:
   const detailRows = buildTransactionDetailRows(records);
   const worstDay = findWorstCostDay(dailyRows);
 
-  return { periodFrom, periodTo, summary, dailyRows, modalityRows, detailRows, worstDay };
+  const stoneAccount = financialAccounts.find((a) => a.name.toLowerCase() === "stone");
+  const settlementReconciliation = stoneAccount ? await fetchStoneSettlementReconciliation(stoneAccount.id, periodFrom, periodTo) : [];
+
+  return { periodFrom, periodTo, summary, dailyRows, modalityRows, detailRows, worstDay, settlementReconciliation };
 }

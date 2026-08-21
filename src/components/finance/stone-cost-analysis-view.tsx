@@ -180,6 +180,52 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
             </section>
 
             <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-foreground">Conciliação venda × crédito real na conta Stone (Missão V6.2)</h3>
+              <p className="text-xs text-foreground-subtle">
+                Compara o líquido esperado de cada dia de venda contra o que foi efetivamente creditado na conta Stone no dia seguinte (extrato bancário real). Pareamento por data+valor agregado —
+                nunca por NSU/TID (o extrato da Stone não traz esse identificador) — por isso é sempre rotulado como heurístico, nunca uma prova definitiva por transação.
+              </p>
+              {data.settlementReconciliation.length === 0 ? (
+                <EmptyState title="Nenhum extrato da conta Stone importado ainda para este período." description="Importe o extrato em Financeiro > Conta Stone para habilitar esta conciliação." />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
+                        <th className="pb-2 pr-3 font-medium">Data da venda</th>
+                        <th className="pb-2 pr-3 font-medium">Bruto</th>
+                        <th className="pb-2 pr-3 font-medium">MDR</th>
+                        <th className="pb-2 pr-3 font-medium">Líquido esperado</th>
+                        <th className="pb-2 pr-3 font-medium">Data do crédito</th>
+                        <th className="pb-2 pr-3 font-medium">Líquido recebido</th>
+                        <th className="pb-2 pr-3 font-medium">Diferença</th>
+                        <th className="pb-2 pr-3 font-medium">Taxa efetiva total</th>
+                        <th className="pb-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.settlementReconciliation.map((row) => (
+                        <tr key={row.saleDate} className="border-b border-border-subtle last:border-0 hover:bg-background-elevated/50">
+                          <td className="py-2 pr-3 font-medium text-foreground">{formatDateBR(row.saleDate)}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.grossAmount)}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.mdrAmount)}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.netExpected)}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{formatDateBR(row.settlementDate)}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{row.netReceived !== null ? formatCurrency(row.netReceived) : "—"}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{row.difference !== null ? formatCurrency(row.difference) : "—"}</td>
+                          <td className="py-2 pr-3 text-foreground-muted">{row.effectiveTotalRatePercent !== null ? formatPercent(row.effectiveTotalRatePercent, 2) : "—"}</td>
+                          <td className="py-2">
+                            <Badge variant={row.status === "CONFIRMADO" ? "positive" : row.status === "PARCIAL" ? "warning" : "outline"}>{row.status.replace("_", " ")}</Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2">
               <h3 className="text-sm font-semibold text-foreground">Custo por modalidade (forma de pagamento × bandeira × parcelas)</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

@@ -57,6 +57,8 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
       sanitizedHost: null,
       sanitizedPath: null,
       occurredAt: null,
+      prepaymentFeeAmount: existing?.prepaymentFeeAmount ?? null,
+      prepaymentDisbursementAmount: existing?.prepaymentDisbursementAmount ?? null,
       origin: input.origin,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
@@ -84,6 +86,8 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
       sanitizedPath: input.failureDiagnostics?.sanitizedPath ?? null,
       occurredAt: input.failureDiagnostics ? new Date().toISOString() : null,
       fileHash: input.fileHash ?? existing.fileHash,
+      prepaymentFeeAmount: input.prepaymentFeeAmount !== undefined ? input.prepaymentFeeAmount : existing.prepaymentFeeAmount,
+      prepaymentDisbursementAmount: input.prepaymentDisbursementAmount !== undefined ? input.prepaymentDisbursementAmount : existing.prepaymentDisbursementAmount,
       finishedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

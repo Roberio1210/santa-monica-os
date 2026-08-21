@@ -54,6 +54,7 @@ function day(overrides: Partial<NormalizedConciliation> = {}): NormalizedConcili
     advances: [],
     settlements: [],
     financialPositions: [],
+    financialEvents: [],
     terminalSerialNumbers: [],
     ...overrides,
   };

@@ -34,6 +34,7 @@ function conciliation(overrides: Partial<NormalizedConciliation> = {}): Normaliz
     advances: [],
     settlements: [],
     financialPositions: [],
+    financialEvents: [],
     terminalSerialNumbers: [],
     ...overrides,
   };

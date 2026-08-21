@@ -1,4 +1,5 @@
 import { parseCsv } from "@/lib/inventory/purchase-import-format";
+import { isStoneNativeCsvFormat, parseStoneNativeBankStatementCsv } from "@/lib/finance/bankStatement/stoneNativeCsvFormat";
 import type { BankStatementLineDirection } from "@/lib/finance/bankStatement/types";
 
 /**
@@ -48,7 +49,16 @@ function parseAmount(raw: string): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+/**
+ * Missão Financeiro V6.2 (Fase 11) — detecta automaticamente o "Comprovante de Extrato" nativo da
+ * Stone (cabeçalho `Movimentação,Tipo,Valor,Saldo antes,Saldo depois,...`) e delega para
+ * `stoneNativeCsvFormat.ts`, sem exigir nenhuma conversão manual do gestor antes de importar.
+ * Formato genérico (`data/descricao/contraparte/valor/tipo`) continua funcionando exatamente
+ * como antes — nenhum comportamento existente muda.
+ */
 export function parseBankStatementCsv(content: string): RawCsvBankStatementRow[] {
+  if (isStoneNativeCsvFormat(content)) return parseStoneNativeBankStatementCsv(content);
+
   const rows = parseCsv(content);
   return rows.map((raw, index) => {
     const errors: string[] = [];

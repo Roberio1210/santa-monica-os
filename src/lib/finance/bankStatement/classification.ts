@@ -18,6 +18,17 @@ const KEYWORD_RULES: { pattern: RegExp; type: BankStatementLineType; direction?:
   // corrigido para "Maestro | Débito" — ver regra abaixo). Tolerante a 0+ espaços/pipe entre as
   // palavras, nunca casa em saída.
   { pattern: /recebimento.*venda|venda.*recebimento|pix\s*\|?\s*maquininha|liquidação.*venda/i, type: "recebimento_venda_stone", direction: "entrada" },
+  // Missão Financeiro V6.2 — "Recebível de Cartão" é o rótulo usado pelo "Comprovante de Extrato"
+  // nativo da Stone (ver stoneNativeCsvFormat.ts) para o crédito de uma parcela de venda já
+  // liquidada — mesmo fato que "Recebimento vendas" no formato antigo, nome diferente.
+  { pattern: /receb[ií]vel de cart[aã]o/i, type: "recebimento_venda_stone", direction: "entrada" },
+  // Missão Financeiro V6.2 — "Transferência entre contas Stone" vinda de "Stone Principal"
+  // (embutido na descrição reconstruída por stoneNativeCsvFormat.ts) é, por correlação real
+  // D+1 confirmada na auditoria (ver costAnalysis.ts/relatório da missão), o mesmo lote de
+  // liquidação de vendas — checada ANTES da regra genérica de "transferência" abaixo, que trataria
+  // isso como uma transferência entre contas próprias comum. Nunca aplicada a "Transferência entre
+  // contas Stone" de qualquer OUTRA origem que não "Stone Principal" — essa continua genérica.
+  { pattern: /transfer[eê]ncia entre contas stone.*stone principal/i, type: "recebimento_venda_stone", direction: "entrada" },
   // Missão Financeiro V2.2 (item 7D, caso real) — rótulo de bandeira/método de cartão
   // ("Maestro | Débito", "Visa Electron | Débito" etc.) é a mesma estrutura usada em liquidações
   // de venda Stone reais (ex.: "Recebimento vendas / Maestro | Débito"), só que às vezes sem o

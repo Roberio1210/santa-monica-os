@@ -92,6 +92,16 @@ export const stoneImportRuns = pgTable(
     sanitizedPath: text("sanitized_path"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }),
     origin: text("origin").notNull().default("manual"),
+    /**
+     * Missão Financeiro V6.2 (Fase 6) — `FinancialEvents.Event` (container parseado por `xml.ts`
+     * mas até então descartado por `normalize.ts`, igual ao achado da V6.1 com `MdrAmount`/`SaleFee`).
+     * `StoneEventType` 20 = "PrepaymentFee": o valor REAL cobrado pela antecipação naquele dia,
+     * como evento de conta — nunca por parcela (não tem `acquirerTransactionKey`), por isso vive
+     * aqui e não em `stone_normalized_transactions`. Soma de todos os eventos tipo 20 do dia.
+     */
+    prepaymentFeeAmount: numeric("prepayment_fee_amount", { precision: 14, scale: 2 }),
+    /** Mesma fonte — `StoneEventType` 17 "PrepaymentDisbursement" (o principal antecipado, informativo, nunca confundido com a taxa acima). */
+    prepaymentDisbursementAmount: numeric("prepayment_disbursement_amount", { precision: 14, scale: 2 }),
     ...timestamps,
   },
   (table) => [uniqueIndex("stone_import_runs_reference_date_layout_idx").on(table.referenceDate, table.layout)],

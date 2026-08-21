@@ -30,6 +30,8 @@ function run(overrides: Partial<StoneImportRun> = {}): StoneImportRun {
     sanitizedPath: null,
     occurredAt: null,
     origin: "manual",
+    prepaymentFeeAmount: null,
+    prepaymentDisbursementAmount: null,
     createdAt: "2026-07-25T10:00:00.000Z",
     updatedAt: "2026-07-25T10:00:05.000Z",
     ...overrides,

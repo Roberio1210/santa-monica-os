@@ -2,7 +2,8 @@ import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearStoneCache } from "@/lib/integrations/stone/cache";
 import { OFFICIAL_SAMPLE_XML } from "@/lib/integrations/stone/__fixtures__/official-sample";
-import { syncStonePeriod } from "@/lib/integrations/stone/persistence/importRun";
+import { syncStonePeriod, sumPrepaymentEvents } from "@/lib/integrations/stone/persistence/importRun";
+import type { StoneFinancialEvent } from "@/lib/integrations/stone/types";
 import { getStonePersistenceRepository, resetStonePersistenceRepositoryForTests } from "@/lib/integrations/stone/persistence/repository-factory";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -194,5 +195,39 @@ describe("syncStonePeriod — Sprint 7.0, Z4, pipeline de importação real e id
       expect(Number.isFinite(t.grossAmount)).toBe(true);
       expect(Math.round(t.grossAmount * 100)).toBe(t.grossAmount * 100);
     }
+  });
+
+  it("Missão V6.2 (Fase 6) — dia sem evento PrepaymentFee/PrepaymentDisbursement (amostra oficial só tem type=10 Charge) persiste null, nunca 0 fabricado", async () => {
+    process.env.STONE_API_KEY = "test-key";
+    process.env.STONE_ACCOUNT_ID = "900000001";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(gzipResponse(200, OFFICIAL_SAMPLE_XML)));
+
+    await syncStonePeriod({ fromDate: "2026-07-22", toDate: "2026-07-22", origin: "manual" });
+    const run = await getStonePersistenceRepository().getImportRun("2026-07-22", "XML2_4");
+    expect(run?.prepaymentFeeAmount).toBeNull();
+    expect(run?.prepaymentDisbursementAmount).toBeNull();
+  });
+});
+
+function financialEvent(overrides: Partial<StoneFinancialEvent> = {}): StoneFinancialEvent {
+  return { eventId: "EVT-1", description: "Evento", type: 10, previsionPaymentDate: null, amount: 100, linkedMerchant: null, ...overrides };
+}
+
+describe("sumPrepaymentEvents — Missão V6.2 (Fase 6)", () => {
+  it("soma eventos tipo 20 (PrepaymentFee) e tipo 17 (PrepaymentDisbursement) separadamente", () => {
+    const events = [financialEvent({ type: 20, amount: 12.5 }), financialEvent({ type: 20, amount: 3.5 }), financialEvent({ type: 17, amount: 500 }), financialEvent({ type: 10, amount: 999 })];
+    const result = sumPrepaymentEvents(events);
+    expect(result.prepaymentFeeAmount).toBe(16);
+    expect(result.prepaymentDisbursementAmount).toBe(500);
+  });
+
+  it("nenhum evento do tipo -> null, nunca 0 fabricado (ausência de dado ≠ zero)", () => {
+    const result = sumPrepaymentEvents([financialEvent({ type: 10 })]);
+    expect(result.prepaymentFeeAmount).toBeNull();
+    expect(result.prepaymentDisbursementAmount).toBeNull();
+  });
+
+  it("lista vazia -> ambos null", () => {
+    expect(sumPrepaymentEvents([])).toEqual({ prepaymentFeeAmount: null, prepaymentDisbursementAmount: null });
   });
 });

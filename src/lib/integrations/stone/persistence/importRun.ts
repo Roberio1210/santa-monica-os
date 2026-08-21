@@ -5,6 +5,22 @@ import { datesBetween, reconcileStoneWithJumpparkForPeriod } from "@/lib/integra
 import { buildNormalizedTransactionRecords, hashNormalizedConciliation } from "@/lib/integrations/stone/persistence/mapping";
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
 import { buildDivergenceNaturalKey, buildReconciliationNaturalKey, type StoneDivergenceRecord, type StoneReconciliationResultRecord } from "@/lib/integrations/stone/persistence/types";
+import type { StoneFinancialEvent } from "@/lib/integrations/stone/types";
+
+/**
+ * Missão V6.2 (Fase 6) — soma os eventos de conta "PrepaymentFee" (tipo 20, a taxa real de
+ * antecipação daquele dia) e "PrepaymentDisbursement" (tipo 17, o principal antecipado,
+ * informativo) — `null` quando o dia não teve nenhum evento do tipo (nunca 0 fabricado, mesmo
+ * princípio de "ausência de dado ≠ zero" já usado no resto do projeto).
+ */
+export function sumPrepaymentEvents(events: StoneFinancialEvent[]): { prepaymentFeeAmount: number | null; prepaymentDisbursementAmount: number | null } {
+  const fees = events.filter((e) => e.type === 20);
+  const disbursements = events.filter((e) => e.type === 17);
+  return {
+    prepaymentFeeAmount: fees.length > 0 ? Math.round(fees.reduce((sum, e) => sum + e.amount, 0) * 100) / 100 : null,
+    prepaymentDisbursementAmount: disbursements.length > 0 ? Math.round(disbursements.reduce((sum, e) => sum + e.amount, 0) * 100) / 100 : null,
+  };
+}
 
 /**
  * Pipeline real de importação e conciliação (Sprint 7.0, Z4) — único ponto que liga "buscar da
@@ -77,7 +93,18 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
       const records = buildNormalizedTransactionRecords(dayResult.normalized, availableThrough ?? dayResult.referenceDate, run.id);
       await repo.upsertNormalizedTransactions(records);
       transactionsPersisted += records.length;
-      await repo.finishImportRun({ id: run.id, status: "succeeded", recordCount: records.length, errorSanitized: null, failureStatus: null, fileHash: hashNormalizedConciliation(dayResult.normalized), failureDiagnostics: null });
+      const { prepaymentFeeAmount, prepaymentDisbursementAmount } = sumPrepaymentEvents(dayResult.normalized.financialEvents);
+      await repo.finishImportRun({
+        id: run.id,
+        status: "succeeded",
+        recordCount: records.length,
+        errorSanitized: null,
+        failureStatus: null,
+        fileHash: hashNormalizedConciliation(dayResult.normalized),
+        failureDiagnostics: null,
+        prepaymentFeeAmount,
+        prepaymentDisbursementAmount,
+      });
       days.push({ referenceDate: dayResult.referenceDate, status: "succeeded", recordCount: records.length, error: null });
     } else if (dayResult.status === "no_data") {
       // Arquivo ainda não publicado é o caso mais comum e esperado (nunca um erro) — a execução é concluída como sucesso, sem registros.

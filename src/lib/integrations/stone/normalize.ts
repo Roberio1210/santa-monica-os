@@ -1,4 +1,4 @@
-import type { StoneAccountTransaction, StoneConciliationFile, StoneTransaction } from "@/lib/integrations/stone/types";
+import type { StoneAccountTransaction, StoneConciliationFile, StoneFinancialEvent, StoneTransaction } from "@/lib/integrations/stone/types";
 
 /**
  * Normalização Stone → Santa Monica OS (Sprint 7.0, Z2). Separação explícita em três camadas
@@ -140,6 +140,8 @@ export interface NormalizedConciliation {
   advances: NormalizedAdvance[];
   /** Todas as liquidações por parcela do dia (Z3) — nunca só as antecipadas (isso continua em `advances`). */
   settlements: NormalizedSettlement[];
+  /** Missão V6.2 (Fase 6) — `FinancialEvents.Event` bruto, preservado (nunca descartado como antes). Inclui eventos de nível de conta como "PrepaymentFee" (antecipação, tipo 20) e "PrepaymentDisbursement" (tipo 17), sem vínculo com parcela específica. */
+  financialEvents: StoneFinancialEvent[];
   /** Vazio quando o arquivo não tem o container (Layout 2.2, ou dia sem posição registrada). */
   financialPositions: NormalizedFinancialPosition[];
   /** Distintos, coletados de `Poi.SerialNumber` — "estabelecimentos ou terminais, quando disponíveis". */
@@ -231,6 +233,7 @@ export function normalizeConciliation(file: StoneConciliationFile): NormalizedCo
       })),
     advances: file.financialTransactionsAccounts.flatMap(advancesFromAccountTransaction),
     settlements: file.financialTransactionsAccounts.flatMap(settlementsFromAccountTransaction),
+    financialEvents: file.financialEvents,
     financialPositions: file.walletPositions.map((w) => ({ amount: w.amount, category: w.category, walletTypeId: w.walletTypeId })),
     terminalSerialNumbers,
   };

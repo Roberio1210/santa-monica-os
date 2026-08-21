@@ -39,6 +39,10 @@ export interface StoneImportRun {
   sanitizedPath: string | null;
   occurredAt: string | null;
   origin: string;
+  /** Missão V6.2 (Fase 6) — soma dos eventos "PrepaymentFee" (tipo 20, `FinancialEvents.Event`) do dia. `null` quando o dia não teve nenhum evento desse tipo (nunca 0 fabricado). */
+  prepaymentFeeAmount: number | null;
+  /** Mesma fonte — soma de "PrepaymentDisbursement" (tipo 17), informativo. */
+  prepaymentDisbursementAmount: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +64,9 @@ export interface FinishImportRunInput {
   fileHash: string | null;
   /** Diagnóstico estruturado (Sprint 7.1) — `null` em sucesso. */
   failureDiagnostics: StoneFailureDiagnostics | null;
+  /** Missão V6.2 (Fase 6) — `null` quando não há evento do dia (nunca 0 fabricado), omitido (undefined) em `finishImportRun` para falha. */
+  prepaymentFeeAmount?: number | null;
+  prepaymentDisbursementAmount?: number | null;
 }
 
 export type StoneTransactionEventType = "sale" | "cancellation" | "chargeback" | "chargeback_refund";

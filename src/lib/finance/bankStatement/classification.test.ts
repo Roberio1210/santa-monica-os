@@ -65,6 +65,18 @@ describe("inferBankStatementLineType — sugestão inicial, nunca decisão final
   it("'Pix | Maquininha' em SAÍDA nunca é confundido com venda Stone", () => {
     expect(inferBankStatementLineType("Maquininha Stone", "saida")).not.toBe("recebimento_venda_stone");
   });
+
+  it("Missão V6.2 — 'Recebível de Cartão' (rótulo do extrato nativo da Stone) -> recebimento_venda_stone", () => {
+    expect(inferBankStatementLineType("Recebível de Cartão", "entrada")).toBe("recebimento_venda_stone");
+  });
+
+  it("Missão V6.2 — 'Transferência entre contas Stone' vinda de 'Stone Principal' -> recebimento_venda_stone (liquidação, nunca transferência genérica)", () => {
+    expect(inferBankStatementLineType("Transferência entre contas Stone - Stone Principal", "entrada")).toBe("recebimento_venda_stone");
+  });
+
+  it("Missão V6.2 — 'Transferência entre contas Stone' de qualquer OUTRA origem continua transferência genérica (nunca presume liquidação sem 'Stone Principal')", () => {
+    expect(inferBankStatementLineType("Transferência entre contas Stone - Outra Conta", "entrada")).toBe("transferencia_entrada");
+  });
 });
 
 describe("initialStatusForType", () => {

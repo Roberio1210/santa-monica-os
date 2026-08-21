@@ -51,6 +51,8 @@ function toImportRun(row: ImportRunRow): StoneImportRun {
     sanitizedPath: row.sanitizedPath,
     occurredAt: row.occurredAt ? row.occurredAt.toISOString() : null,
     origin: row.origin,
+    prepaymentFeeAmount: row.prepaymentFeeAmount !== null ? Number(row.prepaymentFeeAmount) : null,
+    prepaymentDisbursementAmount: row.prepaymentDisbursementAmount !== null ? Number(row.prepaymentDisbursementAmount) : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -210,6 +212,8 @@ export class StonePostgresRepository implements StonePersistenceRepository {
         sanitizedPath: input.failureDiagnostics?.sanitizedPath ?? null,
         occurredAt: input.failureDiagnostics ? new Date() : null,
         ...(input.fileHash !== null ? { fileHash: input.fileHash } : {}),
+        ...(input.prepaymentFeeAmount !== undefined ? { prepaymentFeeAmount: input.prepaymentFeeAmount !== null ? String(input.prepaymentFeeAmount) : null } : {}),
+        ...(input.prepaymentDisbursementAmount !== undefined ? { prepaymentDisbursementAmount: input.prepaymentDisbursementAmount !== null ? String(input.prepaymentDisbursementAmount) : null } : {}),
         finishedAt: new Date(),
         updatedAt: new Date(),
       })
