@@ -118,6 +118,16 @@ describe("StoneMemoryRepository — transações normalizadas (Sprint 7.0, Z4)",
     const rows = await repo.listNormalizedTransactionsByExpectedDateRange("2026-07-01", "2026-07-31");
     expect(rows.map((r) => r.externalKey)).toEqual(["b"]);
   });
+
+  it("Missão V6 — filtra por intervalo de data da VENDA (capturedAt), nunca a esperada/liquidada", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertNormalizedTransactions([
+      transaction({ externalKey: "a", capturedAt: "2026-01-01T10:00:00.000Z", expectedPaymentDate: "2026-08-15" }),
+      transaction({ externalKey: "b", capturedAt: "2026-07-24T23:59:00.000Z", expectedPaymentDate: "2026-01-01" }),
+    ]);
+    const rows = await repo.listNormalizedTransactionsByCapturedDateRange("2026-07-01", "2026-07-31");
+    expect(rows.map((r) => r.externalKey)).toEqual(["b"]);
+  });
 });
 
 describe("StoneMemoryRepository — resultados de conciliação (Sprint 7.0, Z4)", () => {

@@ -117,6 +117,13 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     return [...this.normalizedTransactions.values()].filter((r) => r.settledPaymentDate !== null && r.settledPaymentDate >= fromDate && r.settledPaymentDate <= toDate);
   }
 
+  async listNormalizedTransactionsByCapturedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]> {
+    return [...this.normalizedTransactions.values()].filter((r) => {
+      const capturedDate = r.capturedAt.slice(0, 10);
+      return capturedDate >= fromDate && capturedDate <= toDate;
+    });
+  }
+
   async getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null> {
     return this.normalizedTransactions.get(externalKey) ?? null;
   }

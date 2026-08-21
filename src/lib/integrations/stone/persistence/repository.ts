@@ -32,6 +32,8 @@ export interface StonePersistenceRepository {
   listNormalizedTransactionsByExpectedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
   /** Missão Financeiro V2.1 — data real de liquidação (nunca a esperada), usada para conciliar o extrato bancário Stone. */
   listNormalizedTransactionsBySettledDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
+  /** Missão Financeiro V6 — data da VENDA (nunca a esperada/liquidada), usada pela análise de custo real Stone (MDR/antecipação) por dia/modalidade. Todas as parcelas de uma mesma venda compartilham o mesmo `capturedAt`. */
+  listNormalizedTransactionsByCapturedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
   /** Missão Financeiro V2 — busca pontual pela chave determinística da parcela (Z2, `identity.ts`), usada ao confirmar uma conciliação como recebível. */
   getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null>;
 
