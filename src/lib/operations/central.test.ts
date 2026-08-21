@@ -18,7 +18,7 @@ function baseOverview(overrides: Partial<CentralOverview> = {}): CentralOverview
     asOfDate: "2026-07-15",
     checkedAt: "2026-07-15T10:00:00.000Z",
     jumpparkConfigured: true,
-    jumppark: { data: { dailyRevenue: 500, vehicles: 4, orders: [] }, error: null, cause: null, recommendedAction: null },
+    jumppark: { data: { dailyRevenue: 500, vehicles: 4, orders: [] }, error: null, cause: null, recommendedAction: null, financialReportUnavailable: false },
     cashFlow: {
       data: {
         dashboard: {
@@ -275,6 +275,7 @@ describe("computeConsolidatedAlerts", () => {
         error: "O token do JumpPark foi rejeitado — provavelmente expirou ou foi revogado.",
         cause: "token_rejeitado",
         recommendedAction: "Renove o token em admin.jumppark.com.br > Configurações > API Aberta e atualize JUMPPARK_API_TOKEN na Vercel.",
+      financialReportUnavailable: false,
       },
     });
     const alerts = computeConsolidatedAlerts(overview);
@@ -287,7 +288,7 @@ describe("computeConsolidatedAlerts", () => {
   it("JumpPark não configurado nunca gera alerta na lista consolidada (é estado esperado, não uma falha)", () => {
     const overview = baseOverview({
       jumpparkConfigured: false,
-      jumppark: { data: null, error: "JumpPark não configurado neste ambiente.", cause: "nao_configurado", recommendedAction: "Configure as variáveis na Vercel." },
+      jumppark: { data: null, error: "JumpPark não configurado neste ambiente.", cause: "nao_configurado", recommendedAction: "Configure as variáveis na Vercel." , financialReportUnavailable: false },
     });
     const alerts = computeConsolidatedAlerts(overview);
     expect(alerts.some((a) => a.module === "JumpPark")).toBe(false);
@@ -295,10 +296,30 @@ describe("computeConsolidatedAlerts", () => {
 
   it("situação geral nunca é 'normal' quando existe um alerta crítico de JumpPark (token rejeitado)", () => {
     const overview = baseOverview({
-      jumppark: { data: null, error: "Token rejeitado.", cause: "token_rejeitado", recommendedAction: "Renove o token." },
+      jumppark: { data: null, error: "Token rejeitado.", cause: "token_rejeitado", recommendedAction: "Renove o token." , financialReportUnavailable: false },
     });
     const alerts = computeConsolidatedAlerts(overview);
     expect(computeSituation(alerts)).toBe("critica");
+  });
+
+  it("Missão V6.1 — relatório financeiro do dia indisponível (endpoint descontinuado) NUNCA gera o alerta crítico de 'falha de conexão', só um informativo, quando os pedidos (núcleo real) estão saudáveis", () => {
+    const overview = baseOverview({
+      jumppark: { data: { dailyRevenue: null, vehicles: 4, orders: [] }, error: null, cause: null, recommendedAction: null, financialReportUnavailable: true },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    const jumpparkAlerts = alerts.filter((a) => a.module === "JumpPark");
+    expect(jumpparkAlerts).toHaveLength(1);
+    expect(jumpparkAlerts[0].severity).toBe("informativo");
+    expect(jumpparkAlerts[0].title).toContain("Relatório financeiro");
+    expect(computeSituation(alerts)).not.toBe("critica"); // nunca eleva a situação geral por causa de um endpoint descontinuado conhecido
+  });
+
+  it("sincronização de pedidos saudável e relatório financeiro OK -> nenhum alerta de JumpPark, nem crítico nem informativo", () => {
+    const overview = baseOverview({
+      jumppark: { data: { dailyRevenue: 500, vehicles: 4, orders: [] }, error: null, cause: null, recommendedAction: null, financialReportUnavailable: false },
+    });
+    const alerts = computeConsolidatedAlerts(overview);
+    expect(alerts.some((a) => a.module === "JumpPark")).toBe(false);
   });
 });
 

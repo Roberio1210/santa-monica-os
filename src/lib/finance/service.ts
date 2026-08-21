@@ -3,7 +3,8 @@ import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
 import { computeDreReport, resolveClassification, resolveCashMovementClassification, resolveTransferClassification } from "@/lib/finance/dre";
 import { fetchJumpParkRevenueCandidates } from "@/lib/finance/jumpparkRevenue";
-import type { JumpParkRevenueCandidateInput, ResolvedClassification } from "@/lib/finance/dre";
+import { fetchStoneFeeCandidatesForDre } from "@/lib/finance/stoneFeeCandidates";
+import type { JumpParkRevenueCandidateInput, ResolvedClassification, StoneFeeCandidateInput } from "@/lib/finance/dre";
 import type {
   AccountingPeriod,
   AccountsPayableView,
@@ -1019,6 +1020,7 @@ export interface DreSourceData {
   rules: ClassificationRule[];
   partners: Partner[];
   jumpParkOrders: JumpParkRevenueCandidateInput[];
+  stoneFeeDays: StoneFeeCandidateInput[];
 }
 
 /**
@@ -1033,7 +1035,7 @@ export interface DreSourceData {
  */
 export async function fetchDreSourceData(): Promise<DreSourceData> {
   const repo = getFinanceRepository();
-  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders] = await Promise.all([
+  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays] = await Promise.all([
     repo.listAccountsPayable(),
     repo.listAccountsReceivable(),
     repo.listCashMovements(),
@@ -1041,8 +1043,9 @@ export async function fetchDreSourceData(): Promise<DreSourceData> {
     repo.listClassificationRules(),
     repo.listPartners(),
     fetchJumpParkRevenueCandidates(),
+    fetchStoneFeeCandidatesForDre(),
   ]);
-  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders };
+  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays };
 }
 
 export async function fetchDreReport(

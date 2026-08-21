@@ -99,6 +99,23 @@ const JUMPPARK_REVENUE_CLASSIFICATION: ResolvedClassification = {
   reviewNeeded: false,
 };
 
+/**
+ * Missão Financeiro V6.1 — custo real Stone (MDR/antecipação) na DRE. Mesmo tratamento de
+ * `resultado_financeiro` já usado para tarifa/taxa bancária/juros (`CASH_MOVEMENT_NATURE_DEFAULTS`):
+ * é um custo de RECEBER a receita via cartão, não uma despesa operacional fixa nem uma dedução da
+ * receita bruta (a receita continua reconhecida no valor cheio, decisão explícita do gestor —
+ * "não reduzir a receita bruta"). Determinística como a receita JumpPark: nunca passa por
+ * `resolveClassification`/reclassificação manual, porque não é um lançamento que um humano possa
+ * editar — é derivado 1:1 de `stone_normalized_transactions` a cada cálculo.
+ */
+const STONE_FEE_CLASSIFICATION: ResolvedClassification = {
+  dreLine: "resultado_financeiro",
+  nature: "resultado_financeiro",
+  includeInDre: true,
+  origin: "regra_automatica",
+  reviewNeeded: false,
+};
+
 export interface ResolvedClassification {
   dreLine: DreLine;
   nature: FinancialNature;
@@ -247,6 +264,20 @@ export interface JumpParkRevenueCandidateInput {
   plateMasked: string | null;
 }
 
+/**
+ * Missão Financeiro V6.1 — um dia com custo Stone real. `mdrAmount`/`advanceFeeAmount` só devem
+ * ser passados quando o respectivo `RowsCount` é > 0 (decisão do gestor: "ausência de dado ≠
+ * zero" — nunca gera um lançamento de R$0 para um dia sem antecipação confirmada, só omite a
+ * linha daquele componente naquele dia).
+ */
+export interface StoneFeeCandidateInput {
+  date: string;
+  mdrAmount: number;
+  mdrRowsCount: number;
+  advanceFeeAmount: number;
+  advanceRowsCount: number;
+}
+
 export interface DreComputationInput {
   regime: DreRegime;
   competenceFrom: string;
@@ -261,6 +292,8 @@ export interface DreComputationInput {
   partners?: Partner[];
   /** Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhuma receita JumpPark reconhecida — retrocompatível). */
   jumpParkOrders?: JumpParkRevenueCandidateInput[];
+  /** Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhum custo Stone reconhecido — retrocompatível, nunca altera relatórios já auditados antes desta missão). */
+  stoneFeeDays?: StoneFeeCandidateInput[];
 }
 
 /**
@@ -305,9 +338,11 @@ export function computeDreReport(input: DreComputationInput): DreReport {
     const resolved =
       candidate.sourceKind === "jumppark_service_order"
         ? JUMPPARK_REVENUE_CLASSIFICATION
-        : candidate.cashMovementNature && !explicit
-          ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
-          : resolveClassification(candidate, explicit, input.rules);
+        : candidate.sourceKind === "stone_fee"
+          ? STONE_FEE_CLASSIFICATION
+          : candidate.cashMovementNature && !explicit
+            ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
+            : resolveClassification(candidate, explicit, input.rules);
 
     const item: DreLineItem = {
       sourceKind: candidate.sourceKind,
@@ -566,7 +601,7 @@ function buildManagerialCandidates(input: DreComputationInput): DreCandidate[] {
       cashMovementNature: m.nature,
     }));
 
-  return [...obligationCandidates, ...cashCandidates, ...buildJumpParkCandidates(input)];
+  return [...obligationCandidates, ...cashCandidates, ...buildJumpParkCandidates(input), ...buildStoneFeeCandidates(input)];
 }
 
 /**
@@ -608,6 +643,55 @@ function buildJumpParkCandidates(input: DreComputationInput): DreCandidate[] {
         supplierId: null,
         partnerId: null,
         absAmount: order.servicesAmount,
+        cashMovementNature: null,
+      });
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Missão Financeiro V6.1 — custo real Stone (MDR + antecipação D+1) direto de
+ * `stone_normalized_transactions` (nunca de um `cash_movements`/`accounts_payable` que precisaria
+ * ser criado à parte — evitaria duplicar o mesmo custo em dois lugares). Duas linhas por dia
+ * (MDR/antecipação), cada uma só quando `RowsCount > 0` naquele dia — "ausência de dado ≠ zero",
+ * mesmo princípio já usado no resto de `computeDreReport` para receita/custos/despesas.
+ *
+ * MDR é sempre real (`fee_amount`, calculado uma vez em `persistence/mapping.ts`, nunca reestimado
+ * aqui). Antecipação só existe nos dias com liquidação/dado oficial da Stone já importado (ver
+ * `costAnalysis.ts` — hoje 0 dias reais têm essa cobertura; a linha aparece automaticamente assim
+ * que a cobertura melhorar, sem nenhuma mudança de código).
+ */
+function buildStoneFeeCandidates(input: DreComputationInput): DreCandidate[] {
+  const candidates: DreCandidate[] = [];
+  for (const day of input.stoneFeeDays ?? []) {
+    if (day.mdrRowsCount > 0) {
+      candidates.push({
+        sourceKind: "stone_fee",
+        sourceId: `${day.date}:mdr`,
+        date: day.date,
+        description: `Taxas Stone (MDR) — ${day.date}`,
+        partyName: "Stone",
+        categoryName: "Taxas Stone/Adquirente",
+        costCenterName: null,
+        supplierId: null,
+        partnerId: null,
+        absAmount: day.mdrAmount,
+        cashMovementNature: null,
+      });
+    }
+    if (day.advanceRowsCount > 0) {
+      candidates.push({
+        sourceKind: "stone_fee",
+        sourceId: `${day.date}:antecipacao`,
+        date: day.date,
+        description: `Antecipação de recebíveis (Stone) — ${day.date}`,
+        partyName: "Stone",
+        categoryName: "Antecipação de recebíveis (Stone)",
+        costCenterName: null,
+        supplierId: null,
+        partnerId: null,
+        absAmount: day.advanceFeeAmount,
         cashMovementNature: null,
       });
     }

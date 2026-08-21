@@ -10,17 +10,17 @@ import { cn } from "@/lib/utils/cn";
 import { formatCurrency, formatDateBR, formatPercent } from "@/lib/utils/format";
 import type { PeriodRange } from "@/lib/utils/timezone";
 import type { StoneCostAnalysisPageData } from "@/lib/integrations/stone/costAnalysisPageData";
-import type { StoneAdvanceDataStatus, StoneCostMethod } from "@/lib/integrations/stone/costAnalysis";
+import { computeCostPerHundredReais, groupDetailRowsBySale, type StoneAdvanceDataStatus, type StoneCostMethod } from "@/lib/integrations/stone/costAnalysis";
 import type { StoneNormalizedTransactionRecord } from "@/lib/integrations/stone/persistence/types";
 
 const fieldClasses = "h-9 rounded-lg border border-border bg-background-elevated px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50";
 
-const advanceStatusLabels: Record<StoneAdvanceDataStatus, string> = {
-  completo: "Antecipação confirmada em 100% das parcelas",
-  parcial: "Antecipação confirmada só em parte das parcelas",
-  indisponivel: "Antecipação ainda sem dado (liquidação não importada)",
+const statusLabels: Record<StoneAdvanceDataStatus, string> = {
+  completo: "confirmado em 100% das parcelas",
+  parcial: "confirmado em parte das parcelas",
+  indisponivel: "ainda sem dado real disponível",
 };
-const advanceStatusVariants: Record<StoneAdvanceDataStatus, "positive" | "warning" | "outline"> = {
+const statusVariants: Record<StoneAdvanceDataStatus, "positive" | "warning" | "outline"> = {
   completo: "positive",
   parcial: "warning",
   indisponivel: "outline",
@@ -55,7 +55,10 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
     });
   }, [data.detailRows, detailSearch, eventFilter]);
 
+  const groupedSales = useMemo(() => groupDetailRowsBySale(filteredDetailRows), [filteredDetailRows]);
+
   const { summary } = data;
+  const costPerHundred = computeCostPerHundredReais(summary);
 
   return (
     <Card>
@@ -63,8 +66,8 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
         <div>
           <CardTitle>Custo real Stone por venda</CardTitle>
           <p className="mt-1 text-xs text-foreground-subtle">
-            MDR e antecipação D+1 calculados só a partir de dados reais já importados — nunca uma taxa estimada. Base: {summary.installmentRowsCount} parcela(s) de venda entre{" "}
-            {formatDateBR(data.periodFrom)} e {formatDateBR(data.periodTo)}.
+            Bruto, MDR, antecipação D+1, outras taxas e líquido — sempre a partir de dados reais já importados, nunca uma taxa estimada. Base: {summary.installmentRowsCount} parcela(s) de venda
+            entre {formatDateBR(data.periodFrom)} e {formatDateBR(data.periodTo)}.
           </p>
         </div>
         <PeriodSelector period={period} />
@@ -75,22 +78,44 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatCard label="Vendas brutas" value={formatCurrency(summary.grossAmountTotal)} hint={`${summary.salesCount} venda(s) — ${summary.installmentRowsCount} parcela(s)`} />
-              <StatCard label="MDR (sempre real)" value={formatCurrency(summary.mdrFeeTotal)} hint={summary.effectiveMdrRatePercent !== null ? `${formatPercent(summary.effectiveMdrRatePercent, 2)} do bruto` : "—"} />
+              <StatCard label="Bruto vendido" value={formatCurrency(summary.grossAmountTotal)} hint={`${summary.salesCount} venda(s) — ${summary.installmentRowsCount} parcela(s)`} />
               <StatCard
-                label="Antecipação confirmada"
-                value={formatCurrency(summary.advanceFeeConfirmedTotal)}
-                hint={`${summary.settledRowsCount} de ${summary.installmentRowsCount} parcela(s) liquidadas`}
+                label="MDR"
+                value={summary.mdrRowsCount > 0 ? formatCurrency(summary.mdrFeeTotal) : "—"}
+                hint={summary.effectiveMdrRatePercent !== null ? `${formatPercent(summary.effectiveMdrRatePercent, 2)} do bruto — ${summary.mdrRowsCount}/${summary.installmentRowsCount} parcela(s)` : "não separável (taxa combinada)"}
               />
               <StatCard
-                label="Custo total confirmado"
-                value={formatCurrency(summary.totalConfirmedCost)}
-                hint={summary.effectiveTotalRatePercent !== null ? `${formatPercent(summary.effectiveTotalRatePercent, 2)} do bruto` : "taxa efetiva total indisponível — cobertura parcial"}
+                label="Antecipação"
+                value={summary.advanceRowsCount > 0 ? formatCurrency(summary.advanceFeeConfirmedTotal) : "—"}
+                hint={`${statusLabels[summary.advanceDataStatus]} (${summary.advanceRowsCount}/${summary.installmentRowsCount})`}
               />
+              <StatCard
+                label="Outras taxas"
+                value={summary.otherFeesTotal !== null ? formatCurrency(summary.otherFeesTotal) : "não decomponível"}
+                hint={summary.otherFeesTotal !== null ? `identificável em ${summary.otherFeesRowsCount}/${summary.installmentRowsCount} parcela(s)` : "sem dado real que permita isolar esse valor"}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <StatCard label="Custo total" value={formatCurrency(summary.totalConfirmedCost)} hint={`${statusLabels[summary.totalCostDataStatus]}`} />
+              <StatCard label="Líquido recebido" value={formatCurrency(summary.netReceivedTotal)} hint={`${statusLabels[summary.netReceivedDataStatus]}`} />
+              <StatCard label="Taxa efetiva total" value={summary.effectiveTotalRatePercent !== null ? formatPercent(summary.effectiveTotalRatePercent, 2) : "indisponível"} hint="custo total / bruto — só com 100% confirmado" />
+            </div>
+
+            <div className="rounded-lg border border-border bg-background-elevated px-4 py-3 text-sm">
+              {costPerHundred !== null ? (
+                <p>
+                  Para cada <span className="font-semibold">R$ 100</span> vendidos, a Santa Mônica paga <span className="font-semibold text-foreground">R$ {costPerHundred.toFixed(2)}</span> à
+                  Stone neste período.
+                </p>
+              ) : (
+                <p className="text-foreground-subtle">
+                  Ainda não é possível afirmar quanto a Santa Mônica paga por R$ 100 vendidos de forma 100% confirmada — custo total {statusLabels[summary.totalCostDataStatus]} neste período.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={advanceStatusVariants[summary.advanceDataStatus]}>{advanceStatusLabels[summary.advanceDataStatus]}</Badge>
+              <Badge variant={statusVariants[summary.totalCostDataStatus]}>Custo total {statusLabels[summary.totalCostDataStatus]}</Badge>
               {summary.cancellations.count > 0 ? (
                 <Badge variant="warning">
                   {summary.cancellations.count} cancelamento(s) — {formatCurrency(summary.cancellations.grossAmountTotal)} (fora dos totais acima)
@@ -104,9 +129,6 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
               {summary.pixSalesCount > 0 ? <Badge variant="outline">{summary.pixSalesCount} venda(s) Pix</Badge> : null}
             </div>
             <p className="text-xs text-foreground-subtle">{summary.totalConfirmedCostLabel}</p>
-            <p className="text-xs text-foreground-subtle">
-              &quot;Outras taxas&quot; (além de MDR e antecipação): sem campo próprio nos dados persistidos da Stone hoje — indisponível, não estimado.
-            </p>
 
             {data.worstDay ? (
               <p className="text-xs text-foreground-muted">
@@ -126,8 +148,10 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
                       <th className="pb-2 pr-3 font-medium">Bruto</th>
                       <th className="pb-2 pr-3 font-medium">MDR</th>
                       <th className="pb-2 pr-3 font-medium">Antecipação</th>
+                      <th className="pb-2 pr-3 font-medium">Outras taxas</th>
                       <th className="pb-2 pr-3 font-medium">Custo total</th>
-                      <th className="pb-2 font-medium">Cobertura antecipação</th>
+                      <th className="pb-2 pr-3 font-medium">Líquido</th>
+                      <th className="pb-2 font-medium">Taxa efetiva</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -136,11 +160,17 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
                         <td className="py-2 pr-3 font-medium text-foreground">{formatDateBR(row.date)}</td>
                         <td className="py-2 pr-3 text-foreground-muted">{row.salesCount}</td>
                         <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.grossAmountTotal)}</td>
-                        <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.mdrFeeTotal)}</td>
-                        <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.advanceFeeConfirmedTotal)}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{row.mdrRowsCount > 0 ? formatCurrency(row.mdrFeeTotal) : "—"}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{row.advanceRowsCount > 0 ? formatCurrency(row.advanceFeeConfirmedTotal) : "—"}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{row.otherFeesTotal !== null ? formatCurrency(row.otherFeesTotal) : "—"}</td>
                         <td className="py-2 pr-3 font-medium text-foreground">{formatCurrency(row.totalConfirmedCost)}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.netReceivedTotal)}</td>
                         <td className="py-2">
-                          <Badge variant={advanceStatusVariants[row.advanceDataStatus]}>{row.settledRowsCount}/{row.installmentRowsCount}</Badge>
+                          {row.effectiveTotalRatePercent !== null ? (
+                            formatPercent(row.effectiveTotalRatePercent, 2)
+                          ) : (
+                            <Badge variant={statusVariants[row.totalCostDataStatus]}>{row.effectiveMdrRatePercent !== null ? `${formatPercent(row.effectiveMdrRatePercent, 2)} (só MDR)` : "—"}</Badge>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -161,7 +191,8 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
                       <th className="pb-2 pr-3 font-medium">Bruto</th>
                       <th className="pb-2 pr-3 font-medium">MDR</th>
                       <th className="pb-2 pr-3 font-medium">Taxa MDR</th>
-                      <th className="pb-2 font-medium">Antecipação</th>
+                      <th className="pb-2 pr-3 font-medium">Antecipação</th>
+                      <th className="pb-2 font-medium">Custo total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -173,17 +204,18 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
                         <td className="py-2 pr-3 text-foreground-muted">{row.modality.installments}x</td>
                         <td className="py-2 pr-3 text-foreground-muted">{row.installmentRowsCount}</td>
                         <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.grossAmountTotal)}</td>
-                        <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.mdrFeeTotal)}</td>
+                        <td className="py-2 pr-3 text-foreground-muted">{row.mdrRowsCount > 0 ? formatCurrency(row.mdrFeeTotal) : "—"}</td>
                         <td className="py-2 pr-3 text-foreground-muted">{row.effectiveMdrRatePercent !== null ? formatPercent(row.effectiveMdrRatePercent, 2) : "—"}</td>
-                        <td className="py-2">
-                          {row.settledRowsCount > 0 ? (
+                        <td className="py-2 pr-3">
+                          {row.advanceRowsCount > 0 ? (
                             <span className="text-foreground-muted">
-                              {formatCurrency(row.advanceFeeConfirmedTotal)} ({row.settledRowsCount}/{row.installmentRowsCount})
+                              {formatCurrency(row.advanceFeeConfirmedTotal)} ({row.advanceRowsCount}/{row.installmentRowsCount})
                             </span>
                           ) : (
                             <span className="text-foreground-subtle">sem dado</span>
                           )}
                         </td>
+                        <td className="py-2 font-medium text-foreground">{formatCurrency(row.totalConfirmedCost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -192,7 +224,7 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
             </section>
 
             <section className="space-y-2">
-              <h3 className="text-sm font-semibold text-foreground">Detalhe por parcela</h3>
+              <h3 className="text-sm font-semibold text-foreground">Detalhe por venda</h3>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
@@ -211,48 +243,69 @@ export function StoneCostAnalysisView({ data, period }: { data: StoneCostAnalysi
                 </select>
               </div>
 
-              {filteredDetailRows.length === 0 ? (
+              {groupedSales.size === 0 ? (
                 <EmptyState title="Nenhuma parcela para os filtros atuais." />
               ) : (
-                <div className="max-h-[32rem] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-background">
-                      <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
-                        <th className="pb-2 pr-3 font-medium">Data venda</th>
-                        <th className="pb-2 pr-3 font-medium">Chave</th>
-                        <th className="pb-2 pr-3 font-medium">Evento</th>
-                        <th className="pb-2 pr-3 font-medium">Modalidade</th>
-                        <th className="pb-2 pr-3 font-medium">Bruto</th>
-                        <th className="pb-2 pr-3 font-medium">MDR</th>
-                        <th className="pb-2 pr-3 font-medium">Líquido esperado</th>
-                        <th className="pb-2 pr-3 font-medium">Liquidado</th>
-                        <th className="pb-2 font-medium">Antecipação</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredDetailRows.map((row) => (
-                        <tr key={row.externalKey} className="border-b border-border-subtle last:border-0 hover:bg-background-elevated/50">
-                          <td className="py-2 pr-3 text-foreground-muted">{formatDateBR(row.capturedAt.slice(0, 10))}</td>
-                          <td className="py-2 pr-3 font-mono text-xs text-foreground-subtle">{row.acquirerTransactionKey}</td>
-                          <td className="py-2 pr-3">
-                            <Badge variant={eventTypeVariants[row.eventType]}>{eventTypeLabels[row.eventType]}</Badge>
-                          </td>
-                          <td className="py-2 pr-3 text-foreground-muted">
-                            {methodLabels[row.modality.method]} {row.modality.installments}x
-                          </td>
-                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.grossAmount)}</td>
-                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.mdrFeeAmount)}</td>
-                          <td className="py-2 pr-3 text-foreground-muted">{formatCurrency(row.netExpectedAmount)}</td>
-                          <td className="py-2 pr-3 text-foreground-muted">{row.settledAmount !== null ? formatCurrency(row.settledAmount) : "—"}</td>
-                          <td className="py-2 text-foreground-muted">{row.advanceFeeAmount !== null ? formatCurrency(row.advanceFeeAmount) : "sem dado"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="max-h-[36rem] space-y-3 overflow-auto">
+                  {[...groupedSales.entries()].map(([saleKey, rows]) => {
+                    const first = rows[0];
+                    const saleGross = rows.reduce((sum, r) => sum + r.grossAmount, 0);
+                    const saleCost = rows.reduce((sum, r) => sum + r.breakdown.totalCostAmount, 0);
+                    const saleNet = rows.reduce((sum, r) => sum + r.breakdown.netReceivedAmount, 0);
+                    return (
+                      <div key={saleKey} className="rounded-lg border border-border-subtle p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <div>
+                            <span className="font-medium text-foreground">{formatCurrency(saleGross)}</span>{" "}
+                            <span className="text-foreground-muted">
+                              — {methodLabels[first.modality.method]} {first.modality.installments}x — {formatDateBR(first.capturedAt.slice(0, 10))}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={eventTypeVariants[first.eventType]}>{eventTypeLabels[first.eventType]}</Badge>
+                            <span className="text-xs text-foreground-subtle">
+                              custo total {formatCurrency(saleCost)} — líquido {formatCurrency(saleNet)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border-subtle text-left text-foreground-subtle">
+                                <th className="pb-1 pr-3 font-medium">Parcela</th>
+                                <th className="pb-1 pr-3 font-medium">Bruto</th>
+                                <th className="pb-1 pr-3 font-medium">MDR</th>
+                                <th className="pb-1 pr-3 font-medium">Antecipação</th>
+                                <th className="pb-1 pr-3 font-medium">Outras taxas</th>
+                                <th className="pb-1 pr-3 font-medium">Custo total</th>
+                                <th className="pb-1 font-medium">Líquido</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row) => (
+                                <tr key={row.externalKey} className="border-b border-border-subtle last:border-0">
+                                  <td className="py-1 pr-3 text-foreground-muted">{row.installmentNumber}</td>
+                                  <td className="py-1 pr-3 text-foreground-muted">{formatCurrency(row.breakdown.grossAmount)}</td>
+                                  <td className="py-1 pr-3 text-foreground-muted">{row.breakdown.mdrAmount !== null ? formatCurrency(row.breakdown.mdrAmount) : "—"}</td>
+                                  <td className="py-1 pr-3 text-foreground-muted">{row.breakdown.advanceFeeAmount !== null ? formatCurrency(row.breakdown.advanceFeeAmount) : "sem dado"}</td>
+                                  <td className="py-1 pr-3 text-foreground-muted">{row.breakdown.otherFeesAmount !== null ? formatCurrency(row.breakdown.otherFeesAmount) : "—"}</td>
+                                  <td className="py-1 pr-3 font-medium text-foreground">
+                                    {formatCurrency(row.breakdown.totalCostAmount)}
+                                    {!row.breakdown.totalCostComplete ? <span className="ml-1 text-foreground-subtle">(só MDR)</span> : null}
+                                  </td>
+                                  <td className="py-1 text-foreground-muted">{formatCurrency(row.breakdown.netReceivedAmount)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <p className="text-xs text-foreground-subtle">
-                {filteredDetailRows.length} de {data.detailRows.length} parcela(s)
+                {filteredDetailRows.length} parcela(s) em {groupedSales.size} venda(s)
               </p>
             </section>
           </>

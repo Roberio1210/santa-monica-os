@@ -25,7 +25,7 @@ function buildHighlights(overview: CentralOverview, alerts: ConsolidatedAlert[])
 
   highlights.push("Agenda real ainda não integrada.");
 
-  if (overview.jumppark.data) {
+  if (overview.jumppark.data && overview.jumppark.data.dailyRevenue !== null) {
     highlights.push(`Faturamento operacional hoje: ${formatCurrency(overview.jumppark.data.dailyRevenue)}.`);
   }
 

@@ -704,10 +704,10 @@ export type ClassificationOrigin = "regra_automatica" | "herdada_categoria" | "h
  * `jumppark_service_orders` (nunca persistida em accounts_receivable), para o gestor distinguir na
  * DRE o que veio da operação real (JumpPark) do que veio de conciliação bancária/AR manual.
  */
-export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer" | "jumppark_service_order";
+export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer" | "jumppark_service_order" | "stone_fee";
 
 /** Subconjunto de `ClassificationSourceKind` que pode ser classificado manualmente via `classifyEntity` — receita JumpPark é sempre determinística (ver `dre.ts`), nunca reclassificável manualmente. */
-export type ManuallyClassifiableSourceKind = Exclude<ClassificationSourceKind, "jumppark_service_order">;
+export type ManuallyClassifiableSourceKind = Exclude<ClassificationSourceKind, "jumppark_service_order" | "stone_fee">;
 
 export interface FinancialClassification {
   id: string;

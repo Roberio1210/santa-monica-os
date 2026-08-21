@@ -135,6 +135,27 @@ export const stoneNormalizedTransactions = pgTable(
     expectedPaymentDate: date("expected_payment_date"),
     settledPaymentDate: date("settled_payment_date"),
     settledAmount: numeric("settled_amount", { precision: 14, scale: 2 }),
+    /**
+     * Missão Financeiro V6.1 — `Installment.MdrAmount` (lado `FinancialTransactions`, o mesmo
+     * container que já alimenta esta linha), só presente quando `FeeType !== 2` (taxas
+     * discriminadas). Valor OFICIAL da Stone, nunca derivado por subtração como `fee_amount`
+     * (que continua existindo, calculado por `gross - net`, para nunca quebrar leitura antiga).
+     */
+    mdrAmountStone: numeric("mdr_amount_stone", { precision: 14, scale: 2 }),
+    /**
+     * Missão Financeiro V6.1 — `Installment.SaleFee` (mesmo container), só presente quando
+     * `FeeType === 2`: taxa ÚNICA combinada (MDR + antecipação já embutida na mesma cobrança,
+     * segundo a doc oficial da Stone). Quando preenchida, não existe MDR "puro" separável — é o
+     * custo total real da parcela, num único número oficial.
+     */
+    saleFeeCombined: numeric("sale_fee_combined", { precision: 14, scale: 2 }),
+    /**
+     * Missão Financeiro V6.1 — `Installment.AdvanceRateAmount` (lado `FinancialTransactionsAccounts`,
+     * container de liquidação/antecipação — nunca o mesmo de `mdr_amount_stone`/`sale_fee_combined`
+     * acima). Valor OFICIAL de antecipação D+1 informado pela própria Stone quando o container de
+     * contas trouxe essa parcela — mais autoritativo que o cálculo derivado `net_amount - settled_amount`.
+     */
+    advanceFeeAmountStone: numeric("advance_fee_amount_stone", { precision: 14, scale: 2 }),
     sourceFile: text("source_file").notNull(),
     importRunId: uuid("import_run_id").references(() => stoneImportRuns.id),
     ...timestamps,

@@ -49,7 +49,7 @@ export function TodayPanel({ overview, alertsCount }: { overview: CentralOvervie
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <TodayCard
           label="Faturamento operacional hoje"
-          value={overview.jumppark.data ? formatCurrency(overview.jumppark.data.dailyRevenue) : "Informação indisponível"}
+          value={overview.jumppark.data && overview.jumppark.data.dailyRevenue !== null ? formatCurrency(overview.jumppark.data.dailyRevenue) : "Informação indisponível"}
           icon={DollarSign}
           href={overview.jumppark.data ? "/movimentacoes?period=today" : null}
         />

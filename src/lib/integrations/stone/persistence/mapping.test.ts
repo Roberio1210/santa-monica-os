@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildNormalizedTransactionRecords, buildSourceFileName, hashNormalizedConciliation } from "@/lib/integrations/stone/persistence/mapping";
-import type { NormalizedConciliation, NormalizedExpectedPayment, NormalizedSaleTransaction, NormalizedSettlement } from "@/lib/integrations/stone/normalize";
+import type { NormalizedAdvance, NormalizedConciliation, NormalizedExpectedPayment, NormalizedSaleTransaction, NormalizedSettlement } from "@/lib/integrations/stone/normalize";
 import type { StoneTransaction } from "@/lib/integrations/stone/types";
 
 function stoneSale(overrides: Partial<NormalizedSaleTransaction> & { initiatorTransactionKey?: string | null } = {}): NormalizedSaleTransaction {
@@ -18,7 +18,10 @@ function stoneSale(overrides: Partial<NormalizedSaleTransaction> & { initiatorTr
     brandId: 1,
     terminalSerialNumber: "TERM-1",
     cancellations: [],
-    raw: { initiatorTransactionKey } as unknown as StoneTransaction,
+    raw: {
+      initiatorTransactionKey,
+      installments: [{ installmentNumber: 1, grossAmount: 100, netAmount: 97, previsionPaymentDate: "2026-07-25", saleFee: null, mdrAmount: null, originalPaymentDate: null, suspendedByChargeback: null, chargeback: null, chargebackRefund: null }],
+    } as unknown as StoneTransaction,
     ...rest,
   };
 }
@@ -121,5 +124,67 @@ describe("buildNormalizedTransactionRecords — Sprint 7.0, Z4", () => {
   it("registra o arquivo de origem no formato confirmado", () => {
     const records = buildNormalizedTransactionRecords(conciliation(), "2026-07-24", null);
     expect(records[0].sourceFile).toBe("900000001-20260724-XML2_4-without_reversals.xml");
+  });
+});
+
+function advance(overrides: Partial<NormalizedAdvance> = {}): NormalizedAdvance {
+  return { saleExternalReference: "NSU-1", installmentNumber: 1, advanceFeeAmount: 1.5, originalExpectedPaymentDate: "2026-07-26", settledPaymentDate: "2026-07-25", ...overrides };
+}
+
+describe("buildNormalizedTransactionRecords — campos oficiais Stone (Missão V6.1)", () => {
+  it("extrai mdrAmount oficial de sale.raw.installments (FeeType != 2) por número de parcela, nunca confundido com feeAmount derivado", () => {
+    const day = conciliation({
+      sales: [stoneSale({ raw: { initiatorTransactionKey: "INIT-1", installments: [{ installmentNumber: 1, mdrAmount: 3.5, saleFee: null }] } as never })],
+    });
+    const records = buildNormalizedTransactionRecords(day, "2026-07-24", null);
+    expect(records[0].mdrAmountStone).toBe(3.5);
+    expect(records[0].saleFeeCombined).toBeNull();
+    // o derivado continua existindo em paralelo, sem ser sobrescrito pelo oficial
+    expect(records[0].feeAmount).toBeCloseTo(3, 2);
+  });
+
+  it("extrai saleFeeCombined oficial quando FeeType == 2 (taxa única combinada)", () => {
+    const day = conciliation({
+      sales: [stoneSale({ raw: { initiatorTransactionKey: "INIT-1", installments: [{ installmentNumber: 1, mdrAmount: null, saleFee: 4.2 }] } as never })],
+    });
+    const records = buildNormalizedTransactionRecords(day, "2026-07-24", null);
+    expect(records[0].saleFeeCombined).toBe(4.2);
+    expect(records[0].mdrAmountStone).toBeNull();
+  });
+
+  it("sem campo oficial na parcela correspondente -> mdrAmountStone/saleFeeCombined null (nunca inventa)", () => {
+    const records = buildNormalizedTransactionRecords(conciliation(), "2026-07-24", null);
+    expect(records[0].mdrAmountStone).toBeNull();
+    expect(records[0].saleFeeCombined).toBeNull();
+  });
+
+  it("casa o número da parcela certo — parcela 2 nunca herda o campo oficial da parcela 1", () => {
+    const day = conciliation({
+      sales: [
+        stoneSale({
+          raw: {
+            initiatorTransactionKey: "INIT-1",
+            installments: [
+              { installmentNumber: 1, mdrAmount: 3, saleFee: null },
+              { installmentNumber: 2, mdrAmount: 5, saleFee: null },
+            ],
+          } as never,
+        }),
+      ],
+      expectedPayments: [expectedPayment({ installmentNumber: 2, grossAmount: 100, amount: 95 })],
+    });
+    const records = buildNormalizedTransactionRecords(day, "2026-07-24", null);
+    expect(records[0].mdrAmountStone).toBe(5); // pegou a parcela 2, não a 1
+  });
+
+  it("extrai advanceFeeAmountStone oficial de day.advances por saleExternalReference+installmentNumber", () => {
+    const day = conciliation({ advances: [advance({ advanceFeeAmount: 2.1 })] });
+    const records = buildNormalizedTransactionRecords(day, "2026-07-24", null);
+    expect(records[0].advanceFeeAmountStone).toBe(2.1);
+  });
+
+  it("sem advance correspondente -> advanceFeeAmountStone null", () => {
+    const records = buildNormalizedTransactionRecords(conciliation(), "2026-07-24", null);
+    expect(records[0].advanceFeeAmountStone).toBeNull();
   });
 });

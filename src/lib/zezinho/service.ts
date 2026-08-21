@@ -222,6 +222,11 @@ export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer>
 
     case "faturamento_hoje":
       if (!overview.jumppark.data) return { text: "Ainda não tenho dados suficientes sobre o faturamento de hoje — o JumpPark não está conectado ou a consulta falhou.", links: [] };
+      if (overview.jumppark.data.dailyRevenue === null)
+        return {
+          text: `O relatório financeiro do dia do JumpPark está indisponível (endpoint descontinuado) — mas a sincronização de pedidos está saudável: ${overview.jumppark.data.vehicles} veículo(s) atendido(s) hoje.`,
+          links: [{ label: "Ver movimentações", href: "/movimentacoes?period=today" }],
+        };
       return {
         text: `Hoje (${formatDateBR(asOfDate)}) o faturamento operacional foi ${formatCurrency(overview.jumppark.data.dailyRevenue)}, com ${overview.jumppark.data.vehicles} veículo(s) atendido(s).`,
         links: [{ label: "Ver movimentações", href: "/movimentacoes?period=today" }],

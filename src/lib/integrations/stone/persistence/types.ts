@@ -93,6 +93,12 @@ export interface StoneNormalizedTransactionRecord {
   expectedPaymentDate: string | null;
   settledPaymentDate: string | null;
   settledAmount: number | null;
+  /** Missão V6.1 — `Installment.MdrAmount` oficial da Stone (lado vendas), só quando `FeeType !== 2`. Nunca confundir com `feeAmount` (derivado por subtração). */
+  mdrAmountStone: number | null;
+  /** Missão V6.1 — `Installment.SaleFee` oficial da Stone (taxa única combinada MDR+antecipação), só quando `FeeType === 2`. */
+  saleFeeCombined: number | null;
+  /** Missão V6.1 — `Installment.AdvanceRateAmount` oficial da Stone (lado contas/liquidação), mais autoritativo que `netAmount - settledAmount`. */
+  advanceFeeAmountStone: number | null;
   sourceFile: string;
   importRunId: string | null;
 }

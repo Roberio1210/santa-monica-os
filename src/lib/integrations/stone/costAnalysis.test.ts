@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   classifyModality,
   computeInstallmentAdvanceFee,
+  computeInstallmentCostBreakdown,
+  computeCostPerHundredReais,
   summarizePeriodCost,
   buildDailyCostBreakdown,
   buildModalityCostBreakdown,
   buildTransactionDetailRows,
+  groupDetailRowsBySale,
   findWorstCostDay,
+  findBestCostDay,
+  findWorstModality,
+  findBestModality,
 } from "@/lib/integrations/stone/costAnalysis";
 import type { StoneNormalizedTransactionRecord } from "@/lib/integrations/stone/persistence/types";
 
@@ -33,6 +39,9 @@ function makeRecord(overrides: Partial<StoneNormalizedTransactionRecord> = {}): 
     expectedPaymentDate: "2026-08-15",
     settledPaymentDate: null,
     settledAmount: null,
+    mdrAmountStone: null,
+    saleFeeCombined: null,
+    advanceFeeAmountStone: null,
     sourceFile: "estabelecimento-1-20260810-XML2_4-without_reversals.xml",
     importRunId: "run-1",
     ...overrides,
@@ -56,7 +65,76 @@ describe("classifyModality", () => {
   });
 });
 
-describe("computeInstallmentAdvanceFee", () => {
+describe("computeInstallmentCostBreakdown — hierarquia de autoridade (Missão V6.1)", () => {
+  it("settledAmount presente (liquidação real) é sempre a fonte mais forte, mesmo com campos oficiais também presentes", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, netAmount: 97, settledAmount: 95.5, mdrAmountStone: 3, advanceFeeAmountStone: 1.4 }));
+    expect(b.totalCostAmount).toBeCloseTo(4.5, 2); // 100 - 95.5
+    expect(b.totalCostComplete).toBe(true);
+    expect(b.netReceivedAmount).toBe(95.5);
+    expect(b.netReceivedComplete).toBe(true);
+    expect(b.mdrAmount).toBe(3); // usa o oficial quando disponível
+    expect(b.advanceSource).toBe("oficial_stone"); // usa advanceFeeAmountStone em vez de derivar de novo
+  });
+
+  it("settledAmount presente sem nenhum campo oficial -> MDR/antecipação derivados, mas custo total/líquido continuam exatos (via liquidação real)", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, netAmount: 97, settledAmount: 95.5 }));
+    expect(b.mdrSource).toBe("derivado");
+    expect(b.mdrAmount).toBeCloseTo(3, 2); // gross - net
+    expect(b.advanceSource).toBe("derivado");
+    expect(b.advanceFeeAmount).toBeCloseTo(1.5, 2); // net - settled
+    expect(b.totalCostAmount).toBeCloseTo(4.5, 2);
+    expect(b.totalCostComplete).toBe(true);
+    expect(b.otherFeesAmount).toBeNull(); // sem base oficial para decompor um resíduo
+  });
+
+  it("saleFeeCombined presente (FeeType=2) -> custo total é a taxa única, MDR/antecipação NÃO são separáveis", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, saleFeeCombined: 4.2 }));
+    expect(b.mdrAmount).toBeNull();
+    expect(b.advanceFeeAmount).toBeNull();
+    expect(b.otherFeesAmount).toBeNull();
+    expect(b.totalCostAmount).toBe(4.2);
+    expect(b.totalCostComplete).toBe(true);
+    expect(b.netReceivedAmount).toBeCloseTo(95.8, 2);
+  });
+
+  it("mdrAmountStone + advanceFeeAmountStone oficiais (sem settledAmount) -> custo total completo, decomposto", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, mdrAmountStone: 3, advanceFeeAmountStone: 1.5 }));
+    expect(b.mdrSource).toBe("oficial_stone");
+    expect(b.advanceSource).toBe("oficial_stone");
+    expect(b.totalCostAmount).toBeCloseTo(4.5, 2);
+    expect(b.totalCostComplete).toBe(true);
+    expect(b.netReceivedAmount).toBeCloseTo(95.5, 2);
+  });
+
+  it("só mdrAmountStone oficial, sem antecipação -> custo total é só um PISO (totalCostComplete=false), nunca apresentado como total real", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, mdrAmountStone: 3 }));
+    expect(b.mdrSource).toBe("oficial_stone");
+    expect(b.advanceFeeAmount).toBeNull();
+    expect(b.totalCostAmount).toBe(3);
+    expect(b.totalCostComplete).toBe(false);
+    expect(b.netReceivedComplete).toBe(false);
+  });
+
+  it("nenhum campo oficial e sem liquidação (realidade real de 100% das parcelas até 21/08/2026) -> só MDR derivado, custo total é piso", () => {
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, netAmount: 97 }));
+    expect(b.mdrSource).toBe("derivado");
+    expect(b.mdrAmount).toBeCloseTo(3, 2);
+    expect(b.advanceFeeAmount).toBeNull();
+    expect(b.totalCostAmount).toBeCloseTo(3, 2);
+    expect(b.totalCostComplete).toBe(false);
+    expect(b.netReceivedAmount).toBe(97); // líquido esperado, não o final
+    expect(b.netReceivedComplete).toBe(false);
+  });
+
+  it("outras taxas: resíduo identificável quando liquidação real diverge de MDR+antecipação oficiais somados", () => {
+    // bruto 100, liquidado 90 (custo total real = 10), MDR oficial 3, antecipação oficial 1.5 -> resíduo (outras taxas) = 10 - 3 - 1.5 = 5.5
+    const b = computeInstallmentCostBreakdown(makeRecord({ grossAmount: 100, netAmount: 97, settledAmount: 90, mdrAmountStone: 3, advanceFeeAmountStone: 1.5 }));
+    expect(b.otherFeesAmount).toBeCloseTo(5.5, 2);
+    expect(b.otherFeesSource).toBe("liquidacao_real");
+  });
+});
+
+describe("computeInstallmentAdvanceFee — compat V6", () => {
   it("settledAmount presente -> antecipação = netAmount - settledAmount", () => {
     const fee = computeInstallmentAdvanceFee(makeRecord({ netAmount: 97, settledAmount: 95.5 }));
     expect(fee).toBeCloseTo(1.5, 2);
@@ -74,7 +152,7 @@ describe("computeInstallmentAdvanceFee", () => {
 });
 
 describe("summarizePeriodCost", () => {
-  it("MDR sempre confirmado; antecipação 'completo' quando 100% das parcelas de venda têm liquidação", () => {
+  it("MDR sempre confirmado; custo total 'completo' quando 100% das parcelas de venda têm liquidação", () => {
     const records = [
       makeRecord({ grossAmount: 100, feeAmount: 3, netAmount: 97, settledAmount: 95.5 }),
       makeRecord({ grossAmount: 200, feeAmount: 6, netAmount: 194, settledAmount: 192 }),
@@ -87,6 +165,7 @@ describe("summarizePeriodCost", () => {
     expect(summary.advanceDataStatus).toBe("completo");
     expect(summary.advanceFeeConfirmedTotal).toBeCloseTo(1.5 + 2, 2);
     expect(summary.totalConfirmedCost).toBeCloseTo(9 + 3.5, 2);
+    expect(summary.totalCostDataStatus).toBe("completo");
     expect(summary.effectiveTotalRatePercent).not.toBeNull();
   });
 
@@ -94,19 +173,35 @@ describe("summarizePeriodCost", () => {
     const records = [makeRecord({ settledAmount: 95.5 }), makeRecord({ settledAmount: null })];
     const summary = summarizePeriodCost(records, "2026-08-01", "2026-08-31");
     expect(summary.advanceDataStatus).toBe("parcial");
-    expect(summary.unsettledRowsCount).toBe(1);
+    expect(summary.totalCostDataStatus).toBe("parcial");
+    expect(summary.installmentRowsCount - summary.advanceRowsCount).toBe(1);
     expect(summary.effectiveTotalRatePercent).toBeNull();
     // MDR nunca deixa de ser reportado, mesmo sem liquidação de nenhuma parcela.
     expect(summary.effectiveMdrRatePercent).not.toBeNull();
   });
 
-  it("nenhuma parcela liquidada -> status 'indisponivel', antecipação zerada mas MDR intacto", () => {
+  it("nenhuma parcela liquidada/oficial -> status 'indisponivel', antecipação zerada mas MDR intacto (custo total = piso = MDR)", () => {
     const records = [makeRecord({ settledAmount: null }), makeRecord({ settledAmount: null })];
     const summary = summarizePeriodCost(records, "2026-08-01", "2026-08-31");
     expect(summary.advanceDataStatus).toBe("indisponivel");
     expect(summary.advanceFeeConfirmedTotal).toBe(0);
     expect(summary.totalConfirmedCost).toBe(summary.mdrFeeTotal);
+    expect(summary.totalCostDataStatus).toBe("indisponivel");
     expect(summary.totalConfirmedCostLabel).toContain("apenas MDR");
+  });
+
+  it("outras taxas: null (não decomponível) quando não há liquidação/oficiais suficientes para isolar o resíduo", () => {
+    const summary = summarizePeriodCost([makeRecord()], "2026-08-01", "2026-08-31");
+    expect(summary.otherFeesTotal).toBeNull();
+    expect(summary.otherFeesStatus).toBe("indisponivel");
+  });
+
+  it("saleFeeCombined (taxa única) não contribui para mdrFeeTotal — mdrRowsCount exclui essas parcelas", () => {
+    const records = [makeRecord({ grossAmount: 100, saleFeeCombined: 4.2 }), makeRecord({ grossAmount: 100, feeAmount: 3, netAmount: 97 })];
+    const summary = summarizePeriodCost(records, "2026-08-01", "2026-08-31");
+    expect(summary.mdrRowsCount).toBe(1); // só a segunda parcela tem MDR separável
+    expect(summary.mdrFeeTotal).toBe(3);
+    expect(summary.totalConfirmedCost).toBeCloseTo(4.2 + 3, 2); // a taxa combinada entra no custo total mesmo sem MDR separado
   });
 
   it("cancelamentos e chargebacks nunca entram nos totais principais — reportados à parte", () => {
@@ -163,6 +258,18 @@ describe("summarizePeriodCost", () => {
   });
 });
 
+describe("computeCostPerHundredReais", () => {
+  it("null quando custo total não está 100% confirmado — nunca uma projeção a partir de dado parcial", () => {
+    const summary = summarizePeriodCost([makeRecord()], "2026-08-01", "2026-08-31");
+    expect(computeCostPerHundredReais(summary)).toBeNull();
+  });
+
+  it("calcula R$ por R$100 quando custo total está completo", () => {
+    const summary = summarizePeriodCost([makeRecord({ grossAmount: 100, netAmount: 97, settledAmount: 95.5 })], "2026-08-01", "2026-08-31");
+    expect(computeCostPerHundredReais(summary)).toBeCloseTo(4.5, 2);
+  });
+});
+
 describe("buildDailyCostBreakdown", () => {
   it("agrupa por data de captura (capturedAt), ordenado cronologicamente, só eventType=sale", () => {
     const records = [
@@ -179,18 +286,20 @@ describe("buildDailyCostBreakdown", () => {
   });
 });
 
-describe("findWorstCostDay", () => {
-  it("retorna o dia com maior custo total confirmado", () => {
+describe("findWorstCostDay / findBestCostDay", () => {
+  it("retorna o dia com maior e o com menor custo total confirmado", () => {
     const records = [
       makeRecord({ capturedAt: "2026-08-10T09:00:00.000Z", grossAmount: 100, feeAmount: 3 }),
       makeRecord({ capturedAt: "2026-08-11T09:00:00.000Z", grossAmount: 1000, feeAmount: 40 }),
     ];
-    const worst = findWorstCostDay(buildDailyCostBreakdown(records));
-    expect(worst?.date).toBe("2026-08-11");
+    const daily = buildDailyCostBreakdown(records);
+    expect(findWorstCostDay(daily)?.date).toBe("2026-08-11");
+    expect(findBestCostDay(daily)?.date).toBe("2026-08-10");
   });
 
   it("lista vazia -> null, nunca um dia inventado", () => {
     expect(findWorstCostDay([])).toBeNull();
+    expect(findBestCostDay([])).toBeNull();
   });
 });
 
@@ -217,8 +326,25 @@ describe("buildModalityCostBreakdown", () => {
   });
 });
 
-describe("buildTransactionDetailRows", () => {
-  it("inclui todos os eventTypes (a UI decide o que filtrar), ordenado por capturedAt", () => {
+describe("findWorstModality / findBestModality", () => {
+  it("retorna a modalidade com maior e a com menor taxa MDR efetiva", () => {
+    const records = [
+      makeRecord({ paymentMethod: "debito", brandId: "1", installmentNumber: 1, grossAmount: 100, feeAmount: 1 }),
+      makeRecord({ paymentMethod: "credito", brandId: "1", installmentNumber: 4, grossAmount: 100, feeAmount: 6 }),
+    ];
+    const modalities = buildModalityCostBreakdown(records);
+    expect(findWorstModality(modalities)?.modality.method).toBe("credito");
+    expect(findBestModality(modalities)?.modality.method).toBe("debito");
+  });
+
+  it("lista vazia -> null", () => {
+    expect(findWorstModality([])).toBeNull();
+    expect(findBestModality([])).toBeNull();
+  });
+});
+
+describe("buildTransactionDetailRows / groupDetailRowsBySale", () => {
+  it("inclui todos os eventTypes (a UI decide o que filtrar), ordenado por capturedAt e depois parcela", () => {
     const records = [
       makeRecord({ capturedAt: "2026-08-12T09:00:00.000Z", eventType: "sale" }),
       makeRecord({ capturedAt: "2026-08-10T09:00:00.000Z", eventType: "cancellation" }),
@@ -227,9 +353,21 @@ describe("buildTransactionDetailRows", () => {
     expect(rows.map((r) => r.eventType)).toEqual(["cancellation", "sale"]);
   });
 
-  it("expõe advanceFeeAmount null quando não liquidada, número quando liquidada", () => {
+  it("expõe breakdown.advanceFeeAmount null quando não liquidada, número quando liquidada", () => {
     const rows = buildTransactionDetailRows([makeRecord({ settledAmount: null }), makeRecord({ netAmount: 97, settledAmount: 95.5 })]);
-    expect(rows[0].advanceFeeAmount).toBeNull();
-    expect(rows[1].advanceFeeAmount).toBeCloseTo(1.5, 2);
+    expect(rows[0].breakdown.advanceFeeAmount).toBeNull();
+    expect(rows[1].breakdown.advanceFeeAmount).toBeCloseTo(1.5, 2);
+  });
+
+  it("agrupa parcelas da mesma venda (abrir uma venda e ver as N parcelas)", () => {
+    const records = [
+      makeRecord({ acquirerTransactionKey: "venda-1", installmentNumber: 1 }),
+      makeRecord({ acquirerTransactionKey: "venda-1", installmentNumber: 2 }),
+      makeRecord({ acquirerTransactionKey: "venda-2", installmentNumber: 1 }),
+    ];
+    const grouped = groupDetailRowsBySale(buildTransactionDetailRows(records));
+    expect(grouped.size).toBe(2);
+    expect(grouped.get("venda-1")).toHaveLength(2);
+    expect(grouped.get("venda-2")).toHaveLength(1);
   });
 });

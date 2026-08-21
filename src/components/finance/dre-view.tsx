@@ -30,6 +30,7 @@ const sourceKindLabels: Record<ClassificationSourceKind, string> = {
   cash_movement: "Movimentação de Caixa",
   account_transfer: "Transferência entre Contas",
   jumppark_service_order: "JumpPark",
+  stone_fee: "Stone (custo real)",
 };
 
 const regimeLabels: Record<DreRegime, string> = {

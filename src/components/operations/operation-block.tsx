@@ -26,7 +26,8 @@ export function OperationBlock({ overview }: { overview: CentralOverview }) {
   const parkingRevenue = orders.reduce((sum, o) => sum + o.parkingAmount, 0);
   const servicesRevenue = orders.reduce((sum, o) => sum + o.servicesAmount, 0);
   const additionalsCount = orders.reduce((sum, o) => sum + o.services.length, 0);
-  const averageTicket = overview.jumppark.data && orders.length > 0 ? overview.jumppark.data.dailyRevenue / orders.length : null;
+  const dailyRevenue = overview.jumppark.data?.dailyRevenue ?? null;
+  const averageTicket = dailyRevenue !== null && orders.length > 0 ? dailyRevenue / orders.length : null;
   const topServices = computeTopServices(overview);
 
   return (

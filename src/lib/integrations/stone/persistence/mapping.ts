@@ -32,6 +32,10 @@ export function buildNormalizedTransactionRecords(day: NormalizedConciliation, d
   const settlementByKey = new Map<string, { date: string; amount: number }>();
   for (const s of day.settlements) settlementByKey.set(receivableKey(s.saleExternalReference, s.installmentNumber), { date: s.settledPaymentDate, amount: s.netAmount });
 
+  /** Missão V6.1 — `AdvanceRateAmount` oficial (lado `FinancialTransactionsAccounts`), nunca derivado. Container distinto de `settlements` acima, mas mesma origem (`day.advances`). */
+  const advanceFeeByKey = new Map<string, number>();
+  for (const a of day.advances) advanceFeeByKey.set(receivableKey(a.saleExternalReference, a.installmentNumber), a.advanceFeeAmount);
+
   const totalCancelledSales = new Set<string>();
   const partiallyCancelledKeys = new Set<string>();
   for (const sale of day.sales) {
@@ -55,6 +59,14 @@ export function buildNormalizedTransactionRecords(day: NormalizedConciliation, d
     const settlement = settlementByKey.get(key) ?? null;
     const cancelled = totalCancelledSales.has(ep.saleExternalReference) || partiallyCancelledKeys.has(key);
     const chargeback = chargedBackKeys.has(key);
+
+    // Missão V6.1 — campos OFICIAIS da Stone (nunca derivados por subtração), lidos do `raw`
+    // preservado por `normalize.ts`. `mdrAmount`/`saleFee` são mutuamente exclusivos por
+    // `FeeType` (doc oficial): nunca os dois preenchidos na mesma parcela.
+    const rawInstallment = sale.raw.installments.find((i) => i.installmentNumber === ep.installmentNumber) ?? null;
+    const mdrAmountStone = rawInstallment?.mdrAmount ?? null;
+    const saleFeeCombined = rawInstallment?.saleFee ?? null;
+    const advanceFeeAmountStone = advanceFeeByKey.get(key) ?? null;
 
     const receivableState = classifyReceivableState({
       expectedPaymentDate: ep.expectedPaymentDate,
@@ -94,6 +106,9 @@ export function buildNormalizedTransactionRecords(day: NormalizedConciliation, d
       expectedPaymentDate: ep.expectedPaymentDate,
       settledPaymentDate: settlement?.date ?? null,
       settledAmount: settlement?.amount ?? null,
+      mdrAmountStone,
+      saleFeeCombined,
+      advanceFeeAmountStone,
       sourceFile,
       importRunId,
     });

@@ -2,21 +2,34 @@ import type { StoneNormalizedTransactionRecord } from "@/lib/integrations/stone/
 import { mapStoneBrandIdToFeeTableBrand, type StoneFeeTableBrand } from "@/lib/integrations/stone/feeTable";
 
 /**
- * Missão Financeiro V6 — custo real Stone por venda (MDR + antecipação D+1). Funções puras
- * (nenhum I/O aqui), consomem `StoneNormalizedTransactionRecord[]` já carregados por
- * `capturedAt` (data da VENDA, nunca a esperada/liquidada — ver `repository.ts`).
+ * Missão Financeiro V6/V6.1 — custo real Stone por venda (MDR + antecipação D+1 + outras taxas).
+ * Funções puras (nenhum I/O aqui), consomem `StoneNormalizedTransactionRecord[]` já carregados
+ * por `capturedAt` (data da VENDA, nunca a esperada/liquidada — ver `repository.ts`).
  *
- * Modelo de dois níveis, decisão explícita do gestor ("nunca inventar/estimar taxa"):
- *   1. MDR (`feeAmount`) — SEMPRE real, presente em toda parcela de venda. Fonte da verdade.
- *   2. Antecipação — só existe onde `settledAmount` foi persistido (liquidação já ocorreu e foi
- *      importada). Calculada como `netAmount - settledAmount` (o que a Stone reteve a mais por
- *      pagar D+1 em vez do prazo padrão da bandeira/parcelas). Nas parcelas sem `settledAmount`,
- *      o custo de antecipação é DESCONHECIDO — nunca extrapolado a partir das que têm.
+ * Missão V6.1 (Fase 1/2) descobriu que a Stone envia, no MESMO arquivo já sincronizado, campos
+ * oficiais até então descartados por `persistence/mapping.ts`: `Installment.MdrAmount`/`SaleFee`
+ * (lado `FinancialTransactions`, sempre presente na venda) e `AdvanceRateAmount` (lado
+ * `FinancialTransactionsAccounts`, container de liquidação). Esses campos agora são persistidos
+ * (`mdrAmountStone`/`saleFeeCombined`/`advanceFeeAmountStone`) e têm PRIORIDADE sobre qualquer
+ * valor derivado por subtração — nunca o contrário. Hierarquia por parcela, da mais para a menos
+ * autoritativa (nunca inventa/estima o que não está numa destas fontes):
  *
- * "Outras taxas" (mencionadas na tabela contratual como categoria) não têm campo próprio em
- * `stone_normalized_transactions` — o XML bruto da Stone tem outros campos (`SaleFee` completo),
- * mas só MDR e a liquidação sobrevivem à persistência (`persistence/mapping.ts`). Reportado como
- * indisponível, nunca estimado.
+ *   1. `settledAmount` presente (liquidação real já importada) → líquido recebido = o valor
+ *      exatamente liquidado; custo total = bruto - liquidado. O mais forte de todos: dinheiro que
+ *      realmente entrou, sem depender de somar componentes arredondados.
+ *   2. `saleFeeCombined` presente (Stone cobra 1 taxa única combinando MDR+antecipação, FeeType 2)
+ *      → custo total = essa taxa única; MDR e antecipação NÃO são separáveis nesse regime (nunca
+ *      forçar uma divisão arbitrária de um valor que a própria Stone não divide).
+ *   3. `mdrAmountStone` presente (FeeType separado) → MDR = valor oficial; antecipação = oficial
+ *      (`advanceFeeAmountStone`) quando presente, senão desconhecida.
+ *   4. Nenhum campo oficial presente (realidade de 100% das parcelas reais até 21/08/2026,
+ *      confirmada por auditoria) → mesmo comportamento da V6: MDR = `feeAmount` (bruto-líquido,
+ *      real porém derivado), antecipação desconhecida, custo total = só MDR (rotulado como tal,
+ *      nunca apresentado como custo total completo).
+ *
+ * "Outras taxas" só é reportada como número quando IDENTIFICÁVEL por subtração entre dois valores
+ * reais (ex.: custo total via liquidação real menos MDR oficial menos antecipação oficial) — caso
+ * contrário fica `null` com status explícito, nunca 0 assumido nem estimativa.
  *
  * Somas monetárias em centavos (inteiros) até o resultado final — mesmo padrão de
  * `reconciliationSummary.ts` — para nunca acumular erro de ponto flutuante.
@@ -47,17 +60,129 @@ function modalityKey(modality: StoneCostModality): string {
   return `${modality.method}|${modality.brand ?? "sem_bandeira_mapeada"}|${modality.installments}`;
 }
 
-/** Antecipação da parcela — `null` quando ainda não liquidada (dado real ainda não existe, nunca estimado). */
+/** Fonte de cada componente do custo — sempre exibida junto do número (decisão do gestor: nunca um valor sem proveniência). */
+export type StoneCostFieldSource = "liquidacao_real" | "oficial_stone" | "derivado" | "indisponivel";
+
+export interface StoneInstallmentCostBreakdown {
+  grossAmount: number;
+  /** `null` só quando a taxa vem embutida numa cobrança única (`saleFeeCombined`) — nesse regime não existe MDR separável. */
+  mdrAmount: number | null;
+  mdrSource: StoneCostFieldSource;
+  advanceFeeAmount: number | null;
+  advanceSource: StoneCostFieldSource;
+  /** Só preenchido quando sobra um resíduo identificável entre custo total (via liquidação real) e MDR+antecipação oficiais — nunca 0 assumido por padrão. */
+  otherFeesAmount: number | null;
+  otherFeesSource: StoneCostFieldSource;
+  /** MDR + antecipação + outras taxas (ou a taxa combinada, ou bruto-liquidado quando há liquidação real) — sempre um número, mas só é o custo total DE VERDADE quando `totalCostComplete === true`. */
+  totalCostAmount: number;
+  /** `false` = valor acima é só um piso conhecido (ex.: só MDR), nunca o custo total real da parcela. */
+  totalCostComplete: boolean;
+  netReceivedAmount: number;
+  netReceivedComplete: boolean;
+}
+
+/** Decompõe uma parcela seguindo a hierarquia de autoridade documentada no topo do arquivo. Pura, nunca estima o que não está numa das fontes reais. */
+export function computeInstallmentCostBreakdown(record: StoneNormalizedTransactionRecord): StoneInstallmentCostBreakdown {
+  // Reaproveita o `feeAmount` já persistido (sempre = max(0, gross-net), calculado uma única vez em `persistence/mapping.ts`) em vez de recalcular aqui — nunca duas fontes de verdade para o mesmo número.
+  const derivedMdr = record.feeAmount;
+
+  if (record.settledAmount !== null) {
+    const totalCostCents = toCents(record.grossAmount) - toCents(record.settledAmount);
+    const mdrAmount = record.mdrAmountStone ?? derivedMdr;
+    const mdrSource: StoneCostFieldSource = record.mdrAmountStone !== null ? "oficial_stone" : "derivado";
+    const advanceFeeAmount = record.advanceFeeAmountStone ?? centsToAmount(toCents(record.netAmount) - toCents(record.settledAmount));
+    const advanceSource: StoneCostFieldSource = record.advanceFeeAmountStone !== null ? "oficial_stone" : "derivado";
+    const residualCents = totalCostCents - toCents(mdrAmount) - toCents(advanceFeeAmount);
+    const otherFeesIdentifiable = mdrSource === "oficial_stone" || record.advanceFeeAmountStone !== null;
+    return {
+      grossAmount: record.grossAmount,
+      mdrAmount,
+      mdrSource,
+      advanceFeeAmount,
+      advanceSource,
+      otherFeesAmount: otherFeesIdentifiable ? centsToAmount(residualCents) : null,
+      otherFeesSource: otherFeesIdentifiable ? "liquidacao_real" : "indisponivel",
+      totalCostAmount: centsToAmount(totalCostCents),
+      totalCostComplete: true,
+      netReceivedAmount: record.settledAmount,
+      netReceivedComplete: true,
+    };
+  }
+
+  if (record.saleFeeCombined !== null) {
+    return {
+      grossAmount: record.grossAmount,
+      mdrAmount: null,
+      mdrSource: "indisponivel",
+      advanceFeeAmount: null,
+      advanceSource: "indisponivel",
+      otherFeesAmount: null,
+      otherFeesSource: "indisponivel",
+      totalCostAmount: record.saleFeeCombined,
+      totalCostComplete: true,
+      netReceivedAmount: centsToAmount(toCents(record.grossAmount) - toCents(record.saleFeeCombined)),
+      netReceivedComplete: true,
+    };
+  }
+
+  if (record.mdrAmountStone !== null) {
+    const mdrAmount = record.mdrAmountStone;
+    if (record.advanceFeeAmountStone !== null) {
+      const totalCostCents = toCents(mdrAmount) + toCents(record.advanceFeeAmountStone);
+      return {
+        grossAmount: record.grossAmount,
+        mdrAmount,
+        mdrSource: "oficial_stone",
+        advanceFeeAmount: record.advanceFeeAmountStone,
+        advanceSource: "oficial_stone",
+        otherFeesAmount: null,
+        otherFeesSource: "indisponivel",
+        totalCostAmount: centsToAmount(totalCostCents),
+        totalCostComplete: true,
+        netReceivedAmount: centsToAmount(toCents(record.grossAmount) - totalCostCents),
+        netReceivedComplete: true,
+      };
+    }
+    return {
+      grossAmount: record.grossAmount,
+      mdrAmount,
+      mdrSource: "oficial_stone",
+      advanceFeeAmount: null,
+      advanceSource: "indisponivel",
+      otherFeesAmount: null,
+      otherFeesSource: "indisponivel",
+      totalCostAmount: mdrAmount,
+      totalCostComplete: false,
+      netReceivedAmount: centsToAmount(toCents(record.grossAmount) - toCents(mdrAmount)),
+      netReceivedComplete: false,
+    };
+  }
+
+  return {
+    grossAmount: record.grossAmount,
+    mdrAmount: derivedMdr,
+    mdrSource: "derivado",
+    advanceFeeAmount: null,
+    advanceSource: "indisponivel",
+    otherFeesAmount: null,
+    otherFeesSource: "indisponivel",
+    totalCostAmount: derivedMdr,
+    totalCostComplete: false,
+    netReceivedAmount: record.netAmount,
+    netReceivedComplete: false,
+  };
+}
+
+/** Compat V6 — antecipação isolada da parcela (`null` quando indisponível). Mantido para os call-sites/testes existentes; internamente delega para `computeInstallmentCostBreakdown`. */
 export function computeInstallmentAdvanceFee(record: StoneNormalizedTransactionRecord): number | null {
-  if (record.settledAmount === null) return null;
-  return centsToAmount(toCents(record.netAmount) - toCents(record.settledAmount));
+  return computeInstallmentCostBreakdown(record).advanceFeeAmount;
 }
 
 export type StoneAdvanceDataStatus = "completo" | "parcial" | "indisponivel";
 
-function classifyAdvanceDataStatus(settledRows: number, totalRows: number): StoneAdvanceDataStatus {
-  if (totalRows === 0 || settledRows === 0) return "indisponivel";
-  if (settledRows === totalRows) return "completo";
+function classifyCompletionStatus(completeRows: number, totalRows: number): StoneAdvanceDataStatus {
+  if (totalRows === 0 || completeRows === 0) return "indisponivel";
+  if (completeRows === totalRows) return "completo";
   return "parcial";
 }
 
@@ -66,79 +191,120 @@ interface CostAccumulator {
   installmentRowsCount: number;
   distinctSaleKeys: Set<string>;
   grossCents: number;
-  mdrFeeCents: number;
-  netExpectedCents: number;
-  settledRowsCount: number;
-  settledAmountCents: number;
-  advanceFeeConfirmedCents: number;
+  mdrCents: number;
+  mdrRowsCount: number;
+  advanceCents: number;
+  advanceRowsCount: number;
+  otherFeesCents: number;
+  otherFeesRowsCount: number;
+  totalCostCents: number;
+  totalCostCompleteRowsCount: number;
+  netReceivedCents: number;
+  netReceivedCompleteRowsCount: number;
 }
 
 function newAccumulator(): CostAccumulator {
-  return { installmentRowsCount: 0, distinctSaleKeys: new Set(), grossCents: 0, mdrFeeCents: 0, netExpectedCents: 0, settledRowsCount: 0, settledAmountCents: 0, advanceFeeConfirmedCents: 0 };
+  return {
+    installmentRowsCount: 0,
+    distinctSaleKeys: new Set(),
+    grossCents: 0,
+    mdrCents: 0,
+    mdrRowsCount: 0,
+    advanceCents: 0,
+    advanceRowsCount: 0,
+    otherFeesCents: 0,
+    otherFeesRowsCount: 0,
+    totalCostCents: 0,
+    totalCostCompleteRowsCount: 0,
+    netReceivedCents: 0,
+    netReceivedCompleteRowsCount: 0,
+  };
 }
 
 function accumulate(acc: CostAccumulator, record: StoneNormalizedTransactionRecord): void {
+  const breakdown = computeInstallmentCostBreakdown(record);
   acc.installmentRowsCount += 1;
   acc.distinctSaleKeys.add(record.acquirerTransactionKey);
   acc.grossCents += toCents(record.grossAmount);
-  acc.mdrFeeCents += toCents(record.feeAmount);
-  acc.netExpectedCents += toCents(record.netAmount);
-  if (record.settledAmount !== null) {
-    acc.settledRowsCount += 1;
-    acc.settledAmountCents += toCents(record.settledAmount);
-    acc.advanceFeeConfirmedCents += toCents(record.netAmount) - toCents(record.settledAmount);
+  if (breakdown.mdrAmount !== null) {
+    acc.mdrCents += toCents(breakdown.mdrAmount);
+    acc.mdrRowsCount += 1;
   }
+  if (breakdown.advanceFeeAmount !== null) {
+    acc.advanceCents += toCents(breakdown.advanceFeeAmount);
+    acc.advanceRowsCount += 1;
+  }
+  if (breakdown.otherFeesAmount !== null) {
+    acc.otherFeesCents += toCents(breakdown.otherFeesAmount);
+    acc.otherFeesRowsCount += 1;
+  }
+  acc.totalCostCents += toCents(breakdown.totalCostAmount);
+  if (breakdown.totalCostComplete) acc.totalCostCompleteRowsCount += 1;
+  acc.netReceivedCents += toCents(breakdown.netReceivedAmount);
+  if (breakdown.netReceivedComplete) acc.netReceivedCompleteRowsCount += 1;
 }
 
 export interface StoneCostFigures {
   installmentRowsCount: number;
   salesCount: number;
   grossAmountTotal: number;
+  /** Soma de MDR nas parcelas onde é separável (exclui parcelas com taxa combinada — ver `mdrRowsCount`). */
   mdrFeeTotal: number;
-  netExpectedTotal: number;
-  settledRowsCount: number;
-  unsettledRowsCount: number;
-  settledAmountTotal: number;
+  mdrRowsCount: number;
   advanceFeeConfirmedTotal: number;
+  advanceRowsCount: number;
   advanceDataStatus: StoneAdvanceDataStatus;
-  /** MDR (sempre real) + antecipação confirmada (só das parcelas liquidadas). Nunca inclui antecipação estimada. */
+  /** Só não-nulo quando identificável por subtração entre valores reais (liquidação real vs. MDR+antecipação oficiais). */
+  otherFeesTotal: number | null;
+  otherFeesRowsCount: number;
+  otherFeesStatus: StoneAdvanceDataStatus;
+  /** MDR + antecipação + outras taxas (ou liquidação real, ou taxa combinada) — sempre a melhor estimativa real disponível por parcela, nunca inventada. */
   totalConfirmedCost: number;
-  /** Explica a composição do total acima — obrigatório exibir junto do número (decisão do gestor: nunca um valor sem a proveniência). */
+  totalCostDataStatus: StoneAdvanceDataStatus;
+  /** Explica a composição do total acima — obrigatório exibir junto do número. */
   totalConfirmedCostLabel: string;
-  /** MDR / bruto — sempre calculável. `null` só quando `grossAmountTotal === 0`. */
+  netReceivedTotal: number;
+  netReceivedDataStatus: StoneAdvanceDataStatus;
+  /** MDR confirmado / bruto — sempre calculável a partir das parcelas com MDR separável. `null` só quando `grossAmountTotal === 0`. */
   effectiveMdrRatePercent: number | null;
-  /** (MDR + antecipação confirmada) / bruto — só quando 100% das parcelas do período têm liquidação; caso contrário `null` (nunca uma taxa efetiva parcial disfarçada de total). */
+  /** Custo total / bruto — só quando 100% das parcelas do período têm custo total completo (`totalCostDataStatus === "completo"`); nunca uma taxa parcial disfarçada de total. */
   effectiveTotalRatePercent: number | null;
 }
 
 function figuresFromAccumulator(acc: CostAccumulator): StoneCostFigures {
-  const advanceDataStatus = classifyAdvanceDataStatus(acc.settledRowsCount, acc.installmentRowsCount);
-  const totalConfirmedCostCents = acc.mdrFeeCents + acc.advanceFeeConfirmedCents;
+  const advanceDataStatus = classifyCompletionStatus(acc.advanceRowsCount, acc.installmentRowsCount);
+  const otherFeesStatus = classifyCompletionStatus(acc.otherFeesRowsCount, acc.installmentRowsCount);
+  const totalCostDataStatus = classifyCompletionStatus(acc.totalCostCompleteRowsCount, acc.installmentRowsCount);
+  const netReceivedDataStatus = classifyCompletionStatus(acc.netReceivedCompleteRowsCount, acc.installmentRowsCount);
   const grossAmountTotal = centsToAmount(acc.grossCents);
-  const mdrFeeTotal = centsToAmount(acc.mdrFeeCents);
+  const mdrFeeTotal = centsToAmount(acc.mdrCents);
 
   const totalConfirmedCostLabel =
-    advanceDataStatus === "completo"
-      ? "Custo total confirmado (MDR + antecipação — 100% das parcelas do período já liquidadas)"
-      : advanceDataStatus === "parcial"
-        ? `Custo total confirmado — MDR de todas as ${acc.installmentRowsCount} parcelas + antecipação confirmada apenas das ${acc.settledRowsCount} já liquidadas (${acc.installmentRowsCount - acc.settledRowsCount} ainda sem liquidação importada)`
-        : "Custo total confirmado — apenas MDR (nenhuma parcela do período tem liquidação importada; composição de antecipação indisponível)";
+    totalCostDataStatus === "completo"
+      ? "Custo total confirmado (100% das parcelas do período com liquidação real, taxa combinada ou MDR+antecipação oficiais da Stone)"
+      : totalCostDataStatus === "parcial"
+        ? `Custo total confirmado — ${acc.totalCostCompleteRowsCount} de ${acc.installmentRowsCount} parcela(s) totalmente decompostas; as demais entram só pelo MDR (piso conhecido, nunca o custo total real dessas parcelas)`
+        : "Custo total confirmado — apenas MDR de todas as parcelas (nenhuma tem antecipação/liquidação real disponível ainda; este número é um piso, não o custo total real)";
 
   return {
     installmentRowsCount: acc.installmentRowsCount,
     salesCount: acc.distinctSaleKeys.size,
     grossAmountTotal,
     mdrFeeTotal,
-    netExpectedTotal: centsToAmount(acc.netExpectedCents),
-    settledRowsCount: acc.settledRowsCount,
-    unsettledRowsCount: acc.installmentRowsCount - acc.settledRowsCount,
-    settledAmountTotal: centsToAmount(acc.settledAmountCents),
-    advanceFeeConfirmedTotal: centsToAmount(acc.advanceFeeConfirmedCents),
+    mdrRowsCount: acc.mdrRowsCount,
+    advanceFeeConfirmedTotal: centsToAmount(acc.advanceCents),
+    advanceRowsCount: acc.advanceRowsCount,
     advanceDataStatus,
-    totalConfirmedCost: centsToAmount(totalConfirmedCostCents),
+    otherFeesTotal: acc.otherFeesRowsCount > 0 ? centsToAmount(acc.otherFeesCents) : null,
+    otherFeesRowsCount: acc.otherFeesRowsCount,
+    otherFeesStatus,
+    totalConfirmedCost: centsToAmount(acc.totalCostCents),
+    totalCostDataStatus,
     totalConfirmedCostLabel,
-    effectiveMdrRatePercent: grossAmountTotal !== 0 ? Math.round((mdrFeeTotal / grossAmountTotal) * 10000) / 100 : null,
-    effectiveTotalRatePercent: grossAmountTotal !== 0 && advanceDataStatus === "completo" ? Math.round((totalConfirmedCostCents / acc.grossCents) * 10000) / 100 : null,
+    netReceivedTotal: centsToAmount(acc.netReceivedCents),
+    netReceivedDataStatus,
+    effectiveMdrRatePercent: grossAmountTotal !== 0 && acc.mdrRowsCount > 0 ? Math.round((mdrFeeTotal / grossAmountTotal) * 10000) / 100 : null,
+    effectiveTotalRatePercent: grossAmountTotal !== 0 && totalCostDataStatus === "completo" ? Math.round((acc.totalCostCents / acc.grossCents) * 10000) / 100 : null,
   };
 }
 
@@ -183,6 +349,12 @@ export function summarizePeriodCost(records: StoneNormalizedTransactionRecord[],
   };
 }
 
+/** Para cada R$ 100 vendidos, quanto a Santa Mônica paga à Stone — só quando o custo total do período está 100% confirmado (nunca uma projeção a partir de dado parcial). */
+export function computeCostPerHundredReais(summary: StoneCostPeriodSummary): number | null {
+  if (summary.totalCostDataStatus !== "completo" || summary.grossAmountTotal === 0) return null;
+  return Math.round((summary.totalConfirmedCost / summary.grossAmountTotal) * 100 * 100) / 100;
+}
+
 export interface StoneCostDailyRow extends StoneCostFigures {
   date: string;
 }
@@ -202,10 +374,16 @@ export function buildDailyCostBreakdown(records: StoneNormalizedTransactionRecor
     .map(([date, acc]) => ({ date, ...figuresFromAccumulator(acc) }));
 }
 
-/** O dia com maior custo total confirmado (MDR + antecipação onde disponível) — `null` se não houver nenhuma venda no período. */
+/** O dia com maior custo total confirmado (MDR + antecipação/outras taxas onde disponível) — `null` se não houver nenhuma venda no período. */
 export function findWorstCostDay(dailyRows: StoneCostDailyRow[]): StoneCostDailyRow | null {
   if (dailyRows.length === 0) return null;
   return dailyRows.reduce((worst, row) => (row.totalConfirmedCost > worst.totalConfirmedCost ? row : worst));
+}
+
+/** O dia com menor custo total confirmado (entre os que têm venda) — útil para "melhor modalidade/dia" no relatório. `null` se vazio. */
+export function findBestCostDay(dailyRows: StoneCostDailyRow[]): StoneCostDailyRow | null {
+  if (dailyRows.length === 0) return null;
+  return dailyRows.reduce((best, row) => (row.totalConfirmedCost < best.totalConfirmedCost ? row : best));
 }
 
 export interface StoneCostModalityRow extends StoneCostFigures {
@@ -228,23 +406,35 @@ export function buildModalityCostBreakdown(records: StoneNormalizedTransactionRe
     .map(({ modality, acc }) => ({ modality, ...figuresFromAccumulator(acc) }));
 }
 
+/** A modalidade com maior taxa MDR efetiva (entre as que têm MDR calculável) — usada pelo relatório "pior modalidade". `null` se nenhuma tiver taxa calculável. */
+export function findWorstModality(modalityRows: StoneCostModalityRow[]): StoneCostModalityRow | null {
+  const withRate = modalityRows.filter((m) => m.effectiveMdrRatePercent !== null);
+  if (withRate.length === 0) return null;
+  return withRate.reduce((worst, row) => ((row.effectiveMdrRatePercent as number) > (worst.effectiveMdrRatePercent as number) ? row : worst));
+}
+
+/** A modalidade com menor taxa MDR efetiva (entre as que têm MDR calculável) — usada pelo relatório "melhor modalidade". `null` se nenhuma tiver taxa calculável. */
+export function findBestModality(modalityRows: StoneCostModalityRow[]): StoneCostModalityRow | null {
+  const withRate = modalityRows.filter((m) => m.effectiveMdrRatePercent !== null);
+  if (withRate.length === 0) return null;
+  return withRate.reduce((best, row) => ((row.effectiveMdrRatePercent as number) < (best.effectiveMdrRatePercent as number) ? row : best));
+}
+
 export interface StoneCostTransactionDetailRow {
   externalKey: string;
   acquirerTransactionKey: string;
   capturedAt: string;
   eventType: StoneNormalizedTransactionRecord["eventType"];
   modality: StoneCostModality;
+  installmentNumber: number;
   grossAmount: number;
-  mdrFeeAmount: number;
-  netExpectedAmount: number;
-  settledAmount: number | null;
-  advanceFeeAmount: number | null;
+  breakdown: StoneInstallmentCostBreakdown;
   expectedPaymentDate: string | null;
   settledPaymentDate: string | null;
   receivableState: StoneNormalizedTransactionRecord["receivableState"];
 }
 
-/** Uma linha por parcela — base da visão "detalhe por venda" (Fase 6). Inclui todos os `eventType` (a UI decide o que filtrar/exibir). */
+/** Uma linha por parcela — base da visão "detalhe por venda". Inclui todos os `eventType` (a UI decide o que filtrar/exibir). */
 export function buildTransactionDetailRows(records: StoneNormalizedTransactionRecord[]): StoneCostTransactionDetailRow[] {
   return records
     .map((r) => ({
@@ -253,14 +443,23 @@ export function buildTransactionDetailRows(records: StoneNormalizedTransactionRe
       capturedAt: r.capturedAt,
       eventType: r.eventType,
       modality: classifyModality(r),
+      installmentNumber: r.installmentNumber,
       grossAmount: r.grossAmount,
-      mdrFeeAmount: r.feeAmount,
-      netExpectedAmount: r.netAmount,
-      settledAmount: r.settledAmount,
-      advanceFeeAmount: computeInstallmentAdvanceFee(r),
+      breakdown: computeInstallmentCostBreakdown(r),
       expectedPaymentDate: r.expectedPaymentDate,
       settledPaymentDate: r.settledPaymentDate,
       receivableState: r.receivableState,
     }))
-    .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
+    .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.installmentNumber - b.installmentNumber);
+}
+
+/** Agrupa as linhas de detalhe por venda (`acquirerTransactionKey`) — usado pela visão "abrir uma venda e ver as N parcelas". */
+export function groupDetailRowsBySale(rows: StoneCostTransactionDetailRow[]): Map<string, StoneCostTransactionDetailRow[]> {
+  const bySale = new Map<string, StoneCostTransactionDetailRow[]>();
+  for (const row of rows) {
+    const bucket = bySale.get(row.acquirerTransactionKey) ?? [];
+    bucket.push(row);
+    bySale.set(row.acquirerTransactionKey, bucket);
+  }
+  return bySale;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDreReport, computeDreVariationPercent, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
-import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
+import type { JumpParkRevenueCandidateInput, StoneFeeCandidateInput } from "@/lib/finance/dre";
 import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification, Partner } from "@/lib/finance/types";
 
 function makeAR(overrides: Partial<AccountsReceivable>): AccountsReceivable {
@@ -1078,5 +1078,140 @@ describe("Receita JumpPark no regime gerencial — Missão V3.1", () => {
       jumpParkOrders: [order],
     });
     expect(caixa.receitaBruta).toBeNull();
+  });
+});
+
+function makeStoneFeeDay(overrides: Partial<StoneFeeCandidateInput>): StoneFeeCandidateInput {
+  return { date: "2026-07-10", mdrAmount: 30, mdrRowsCount: 5, advanceFeeAmount: 0, advanceRowsCount: 0, ...overrides };
+}
+
+describe("Custo real Stone na DRE (resultado financeiro) — Missão V6.1", () => {
+  it("MDR entra como dedução no resultado financeiro, NUNCA reduz a receita bruta", () => {
+    const ar = makeAR({ expectedAmount: 1000, categoryName: "Lavação", costCenterName: "Estética Automotiva", partnerId: null });
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [ar],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [makeStoneFeeDay({ mdrAmount: 36.3, mdrRowsCount: 5 })],
+    });
+    expect(report.receitaBruta).toBe(1000); // receita continua bruta, intacta
+    expect(report.resultadoFinanceiro.amount).toBe(-36.3); // custo Stone aparece como dedução no resultado financeiro
+    expect(report.naoClassificados).toHaveLength(0); // determinístico, nunca cai em pendente
+  });
+
+  it("antecipação só aparece como linha própria quando advanceRowsCount > 0 — ausência de dado ≠ zero", () => {
+    const reportSemAntecipacao = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [makeStoneFeeDay({ mdrAmount: 10, mdrRowsCount: 1, advanceFeeAmount: 0, advanceRowsCount: 0 })],
+    });
+    expect(reportSemAntecipacao.resultadoFinanceiro.items.some((i) => i.description.includes("Antecipação"))).toBe(false);
+    expect(reportSemAntecipacao.resultadoFinanceiro.amount).toBe(-10); // só MDR
+
+    const reportComAntecipacao = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [makeStoneFeeDay({ mdrAmount: 10, mdrRowsCount: 1, advanceFeeAmount: 4, advanceRowsCount: 1 })],
+    });
+    expect(reportComAntecipacao.resultadoFinanceiro.items.some((i) => i.description.includes("Antecipação"))).toBe(true);
+    expect(reportComAntecipacao.resultadoFinanceiro.amount).toBe(-14); // MDR + antecipação
+  });
+
+  it("sem `stoneFeeDays` informado (parâmetro opcional), comportamento retrocompatível — nenhum custo Stone lançado", () => {
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+    });
+    expect(report.resultadoFinanceiro.amount).toBe(0);
+  });
+
+  it("regime de competência/caixa puros nunca leem stoneFeeDays — só o regime gerencial usa essa fonte (mesmo padrão do JumpPark)", () => {
+    const day = makeStoneFeeDay({ mdrAmount: 999, mdrRowsCount: 1 });
+    const competencia = computeDreReport({
+      regime: "competencia",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [day],
+    });
+    expect(competencia.resultadoFinanceiro.amount).toBe(0);
+
+    const caixa = computeDreReport({
+      regime: "caixa",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [day],
+    });
+    expect(caixa.resultadoFinanceiro.amount).toBe(0);
+  });
+
+  it("dia fora do período filtrado nunca entra no total — mesmo filtro de competência de todo o resto da DRE", () => {
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [makeStoneFeeDay({ date: "2026-06-15", mdrAmount: 999, mdrRowsCount: 1 })],
+    });
+    expect(report.resultadoFinanceiro.amount).toBe(0);
+  });
+
+  it("nunca duplica: cada dia gera no máximo 2 candidatos (MDR + antecipação), nunca um por parcela", () => {
+    const report = computeDreReport({
+      regime: "gerencial",
+      competenceFrom: "2026-07-01",
+      competenceTo: "2026-07-31",
+      costCenterGroup: "consolidado",
+      accountsPayable: [],
+      accountsReceivable: [],
+      cashMovements: [],
+      classifications: emptyClassifications,
+      rules: emptyRules,
+      stoneFeeDays: [makeStoneFeeDay({ mdrAmount: 100, mdrRowsCount: 40, advanceFeeAmount: 20, advanceRowsCount: 40 })],
+    });
+    expect(report.resultadoFinanceiro.items.filter((i) => i.description.includes("Stone") || i.description.includes("Antecipação"))).toHaveLength(2);
   });
 });

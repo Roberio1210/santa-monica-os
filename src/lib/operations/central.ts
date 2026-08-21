@@ -28,7 +28,12 @@ export interface SectionResult<T> {
 }
 
 export interface JumpParkTodayData {
-  dailyRevenue: number;
+  /**
+   * Missão V6.1 — `null` quando `/reports/financial` (endpoint descontinuado pela JumpPark,
+   * ver `financialReportUnavailable` abaixo) falhou, mesmo com a sincronização de pedidos
+   * (`/serviceorders/export/json`) saudável. Ausência de dado nunca vira R$0 fabricado.
+   */
+  dailyRevenue: number | null;
   vehicles: number;
   orders: OperationOrder[];
 }
@@ -39,6 +44,13 @@ export interface JumpParkSectionResult {
   error: string | null;
   cause: JumpParkDiagnosticsCause;
   recommendedAction: string | null;
+  /**
+   * Missão V6.1 — `true` quando a sincronização de pedidos (o núcleo real da integração) está
+   * saudável, mas o relatório financeiro do dia (`/reports/financial`, endpoint descontinuado
+   * pela JumpPark desde 04/08/2026) falhou isoladamente. Nunca confundido com uma falha real de
+   * conexão (`error`/`cause` continuam `null` neste caso — só este flag liga).
+   */
+  financialReportUnavailable: boolean;
 }
 
 export interface CentralOverview {
@@ -70,10 +82,38 @@ async function settle<T>(promise: Promise<T>): Promise<SectionResult<T>> {
 async function settleJumpPark(promise: Promise<JumpParkTodayData>): Promise<JumpParkSectionResult> {
   try {
     const data = await promise;
-    return { data, error: null, cause: null, recommendedAction: null };
+    return { data, error: null, cause: null, recommendedAction: null, financialReportUnavailable: false };
   } catch (err) {
     const { message, cause, recommendedAction } = classifyJumpParkError(err);
-    return { data: null, error: message, cause, recommendedAction };
+    return { data: null, error: message, cause, recommendedAction, financialReportUnavailable: false };
+  }
+}
+
+/**
+ * Missão V6.1 — núcleo real da integração (pedidos, `/serviceorders/export/json`) e o relatório
+ * financeiro do dia (`/reports/financial`, descontinuado pela JumpPark desde 04/08/2026, ver
+ * docs/jumppark-integration-audit-2026-08-04.md) são buscados SEPARADAMENTE, nunca mais num único
+ * `Promise.all` — antes, uma falha isolada do relatório (sempre 404 hoje) derrubava a resposta
+ * inteira e o dashboard mostrava "JumpPark com falha de conexão" mesmo com a sincronização de
+ * pedidos 100% saudável (confirmado via `jumppark_sync_logs`). Se os PEDIDOS falharem, o problema
+ * é real e continua reportado como antes (`error`/`cause` preenchidos). Se só o relatório
+ * financeiro falhar, a seção continua com `data` preenchido (pedidos reais) e `dailyRevenue: null`
+ * — nunca fabrica R$0, e nunca esconde a limitação (`financialReportUnavailable: true`).
+ */
+async function settleJumpParkToday(asOfDate: string): Promise<JumpParkSectionResult> {
+  let orders: OperationOrder[];
+  try {
+    orders = await fetchTodayOperations(asOfDate);
+  } catch (err) {
+    const { message, cause, recommendedAction } = classifyJumpParkError(err);
+    return { data: null, error: message, cause, recommendedAction, financialReportUnavailable: false };
+  }
+
+  try {
+    const daily = await fetchDailyFinancial(asOfDate);
+    return { data: { dailyRevenue: daily.total, vehicles: orders.length, orders }, error: null, cause: null, recommendedAction: null, financialReportUnavailable: false };
+  } catch {
+    return { data: { dailyRevenue: null, vehicles: orders.length, orders }, error: null, cause: null, recommendedAction: null, financialReportUnavailable: true };
   }
 }
 
@@ -85,16 +125,10 @@ async function settleJumpPark(promise: Promise<JumpParkTodayData>): Promise<Jump
 export async function fetchCentralOverview(asOfDate: string): Promise<CentralOverview> {
   const jumpparkConfigured = isJumpParkConfigured();
 
-  const jumpparkPromise: Promise<JumpParkTodayData> = jumpparkConfigured
-    ? Promise.all([fetchDailyFinancial(asOfDate), fetchTodayOperations(asOfDate)]).then(([daily, orders]) => ({
-        dailyRevenue: daily.total,
-        vehicles: orders.length,
-        orders,
-      }))
-    : Promise.reject(new JumpParkNotConfiguredError());
+  const jumpparkPromise: Promise<JumpParkSectionResult> = jumpparkConfigured ? settleJumpParkToday(asOfDate) : settleJumpPark(Promise.reject(new JumpParkNotConfiguredError()));
 
   const [jumppark, cashFlow, apOverview, arOverview, classificationQueue, inventory, inventoryQuality, ordersConsumption] = await Promise.all([
-    settleJumpPark(jumpparkPromise),
+    jumpparkPromise,
     settle(fetchCashFlowOverview(asOfDate)),
     settle(fetchAccountsPayableOverview(asOfDate)),
     settle(fetchAccountsReceivableOverview(asOfDate)),
@@ -368,6 +402,17 @@ export function computeConsolidatedAlerts(overview: CentralOverview): Consolidat
       severity: critical.includes(cause) ? "critico" : "atencao",
       title: titles[cause],
       description: overview.jumppark.recommendedAction ? `${overview.jumppark.error} ${overview.jumppark.recommendedAction}` : overview.jumppark.error,
+      date: null,
+      module: "JumpPark",
+      href: "/configuracoes/status",
+    });
+  }
+
+  if (overview.jumpparkConfigured && overview.jumppark.financialReportUnavailable) {
+    alerts.push({
+      severity: "informativo",
+      title: "Relatório financeiro do dia (JumpPark) indisponível",
+      description: "Endpoint /reports/financial descontinuado pela JumpPark — a sincronização de pedidos continua saudável, só o faturamento do dia nesta tela fica sem esse número.",
       date: null,
       module: "JumpPark",
       href: "/configuracoes/status",
