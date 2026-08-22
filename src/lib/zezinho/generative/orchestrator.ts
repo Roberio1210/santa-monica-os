@@ -32,6 +32,19 @@ export interface GenerativeAnswer {
   toolsCalled: string[];
 }
 
+/**
+ * Missão Z2.1 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de canal
+ * interno ("analysis...raciocínio...assistantfinal...resposta") como texto literal na resposta,
+ * em vez de o provider separar `reasoningText` de `text` corretamente. Nunca mostrar esse
+ * raciocínio ao usuário — quando o marcador aparece, mantém só o que vem depois dele.
+ */
+function stripLeakedReasoningChannel(text: string): string {
+  const marker = "assistantfinal";
+  const idx = text.lastIndexOf(marker);
+  if (idx === -1) return text.trim();
+  return text.slice(idx + marker.length).trim();
+}
+
 export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole): Promise<GenerativeAnswer | null> {
   const config = getGenerativeConfig();
   if (!config.enabled) return null;
@@ -63,7 +76,7 @@ export async function answerGenerative(freeText: string, history: GenerativeMess
       outputTokens: result.usage.outputTokens ?? null,
     });
 
-    return { text: result.text, toolsCalled };
+    return { text: stripLeakedReasoningChannel(result.text), toolsCalled };
   } catch (error) {
     logGenerativeInteraction({
       role,

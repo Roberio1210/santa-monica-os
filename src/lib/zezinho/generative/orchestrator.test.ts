@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Missão Z2 — testes do orquestrador. `generateText`/`stepCountIs` (o pacote "ai") são
- * MOCKADOS AQUI DELIBERADAMENTE — nenhuma credencial de IA existe neste ambiente (auditoria da
- * missão), e a regra explícita é "não usar mock como se fosse IA real". Estes testes NUNCA
- * provam que um modelo generativo entende linguagem natural — provam que a ORQUESTRAÇÃO (RBAC
- * chega até a chamada real, fallback nunca quebra o app, observabilidade nunca vaza segredo)
- * está correta para qualquer resposta que um provider real venha a dar. A prova de compreensão
- * genuína depende de uma chamada real, ainda não possível (ver relatório final da missão).
+ * MOCKADOS AQUI DELIBERADAMENTE — a regra explícita da missão é "não usar mock como se fosse IA
+ * real". Estes testes NUNCA provam que um modelo generativo entende linguagem natural — provam
+ * que a ORQUESTRAÇÃO (RBAC chega até a chamada real, fallback nunca quebra o app,
+ * observabilidade nunca vaza segredo) está correta para qualquer resposta que um provider real
+ * venha a dar. A prova de compreensão genuína veio de chamadas reais na Missão Z2.1 (ver
+ * relatório final) — o teste de `stripLeakedReasoningChannel` abaixo existe porque uma dessas
+ * chamadas reais (openai/gpt-oss-20b, formato Harmony) revelou esse vazamento de verdade.
  */
 
 const generateTextMock = vi.fn();
@@ -49,6 +50,29 @@ describe("answerGenerative", () => {
     const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
     const result = await answerGenerative("Quanto temos de V-Floc?", [], "operacional");
     expect(result).toEqual({ text: "Temos 3,7 litros de V-Floc.", toolsCalled: ["inventory_lookup"] });
+  });
+
+  it("Missão Z2.1 (bug real encontrado em produção) — remove o vazamento do canal de raciocínio do formato Harmony (openai/gpt-oss-20b) antes de responder ao usuário", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({
+      text: 'analysisO usuário perguntou sobre o clima, a tool disse não configurado, devo responder honestamente.assistantfinalDesculpe, mas não tenho acesso à previsão do tempo neste momento.',
+      toolCalls: [],
+      steps: [{}],
+      usage: { inputTokens: 10, outputTokens: 10 },
+    });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("Vai chover?", [], "operacional");
+    expect(result?.text).toBe("Desculpe, mas não tenho acesso à previsão do tempo neste momento.");
+    expect(result?.text).not.toContain("analysis");
+    expect(result?.text).not.toContain("assistantfinal");
+  });
+
+  it("texto sem o marcador do formato Harmony passa intacto (nunca corta resposta de outros modelos)", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({ text: "Resposta normal, sem nenhum canal interno.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("oi", [], "operacional");
+    expect(result?.text).toBe("Resposta normal, sem nenhum canal interno.");
   });
 
   it("provider falha (ex.: sem crédito no Gateway) -> retorna null, NUNCA lança — o chamador cai no pipeline determinístico", async () => {
