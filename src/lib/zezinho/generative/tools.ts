@@ -8,6 +8,10 @@ import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolId } from "@/lib/zezinho/tools/types";
 import { periodInputSchema, resolvePeriodInput, type PeriodInput } from "@/lib/zezinho/generative/periodInput";
 import { lookupInventoryItems, lookupCrmCustomers } from "@/lib/zezinho/generative/lookups";
+import { searchServiceCatalog } from "@/lib/services/catalog";
+import { COMPANY_INFO } from "@/lib/company/info";
+import { fetchCapacityForDate } from "@/lib/planning/service";
+import { saoPauloDateISO, addDaysIso } from "@/lib/utils/timezone";
 
 /**
  * Missão Z2 — schemas de tool-calling para o modelo generativo. Ponte fina sobre o mesmo
@@ -155,7 +159,92 @@ function buildLookupTools(role: UserRole): ToolSet {
   };
 }
 
+const serviceCatalogSearchInputSchema = z.object({
+  busca: z.string().optional().describe("Nome do serviço ou palavra relacionada (ex.: 'polimento', 'gold', 'motor') — omitir para listar tudo."),
+  porte: z.enum(["hatch", "sedan", "suv", "caminhonete"]).optional().describe("Porte do veículo, quando o serviço variar de preço por porte."),
+  categoria: z.string().optional().describe("Categoria comercial (ex.: 'Pacote', 'Polimento', 'Vidros')."),
+});
+
+/** snake_case do banco -> texto legível, nunca uma tradução que invente conteúdo (ex.: "pre_lavagem" -> "pre lavagem"). */
+function humanizeStep(step: string): string {
+  return step.replace(/_/g, " ");
+}
+
+const agendaAvailabilityInputSchema = z.object({
+  dia: z.enum(["hoje", "amanha"]).default("hoje").describe("Dia da consulta de disponibilidade."),
+});
+
+/**
+ * Missão Z3 — categoria B (catálogo comercial), C (institucional) e a conexão real com a
+ * agenda (`/planejamento`, nunca a agenda mock de `/agenda`). Todas seguras para os dois papéis:
+ * preço comercial, endereço/horário e disponibilidade de agenda não são dado financeiro
+ * gerencial — nenhuma redação por role necessária aqui.
+ */
+function buildKnowledgeTools(): ToolSet {
+  return {
+    service_catalog_search: tool({
+      description:
+        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço real, descrição e etapas incluídas quando cadastradas. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor.",
+      inputSchema: serviceCatalogSearchInputSchema,
+      execute: async ({ busca, porte, categoria }) => {
+        const results = await searchServiceCatalog({ query: busca, vehicleCategory: porte, category: categoria });
+        return {
+          servicos: results.map((s) => ({
+            nome: s.name,
+            categoria: s.category,
+            preco_unico: s.defaultPrice,
+            precos_por_variante: s.priceVariants.map((v) => ({ porte: v.vehicleCategory, variante: v.variantLabel, preco: v.price })),
+            descricao_curta: s.shortDescription,
+            descricao_detalhada: s.detailedDescription,
+            tempo_estimado_minutos: s.estimatedDurationMinutes,
+            beneficios: s.benefits,
+            indicacoes: s.indications,
+            restricoes: s.restrictions,
+            depende_de_avaliacao_presencial: s.requiresInspection,
+            etapas_incluidas: s.operationalSteps.length > 0 ? s.operationalSteps.map(humanizeStep) : null,
+          })),
+        };
+      },
+    }),
+    company_info: tool({
+      description: "Informações institucionais da Santa Mônica: endereço, WhatsApp, Instagram, site e horário de funcionamento.",
+      inputSchema: z.object({}),
+      execute: async () => ({
+        nome: COMPANY_INFO.name,
+        endereco: COMPANY_INFO.address,
+        whatsapp: COMPANY_INFO.whatsapp,
+        instagram: COMPANY_INFO.instagram,
+        site: COMPANY_INFO.website,
+        horario_semana: COMPANY_INFO.businessHours.weekdays,
+        horario_sabado: COMPANY_INFO.businessHours.saturday,
+        horario_domingo: COMPANY_INFO.businessHours.sunday,
+      }),
+    }),
+    agenda_availability: tool({
+      description: "Consulta a disponibilidade real da agenda (boxes/capacidade) para hoje ou amanhã — nunca a agenda ilustrativa de /agenda.",
+      inputSchema: agendaAvailabilityInputSchema,
+      execute: async ({ dia }) => {
+        const todayIso = saoPauloDateISO();
+        const dateIso = dia === "amanha" ? addDaysIso(todayIso, 1) : todayIso;
+        const prep = await fetchCapacityForDate(dateIso);
+        if (!prep.capacity.configured) {
+          return { configurado: false, mensagem: "A capacidade de boxes ainda não foi configurada neste ambiente." };
+        }
+        return {
+          configurado: true,
+          dia,
+          boxes_disponiveis: prep.capacity.boxesCount,
+          minutos_disponiveis: prep.capacity.availableMinutes,
+          percentual_ocupado: prep.capacity.percentOccupied,
+          veiculos_agendados: prep.vehicleCount,
+          previsao_por_servico: prep.forecast.calculable ? prep.forecast.entries.map((e) => ({ servico: e.serviceName, cabem: e.canFit })) : null,
+        };
+      },
+    }),
+  };
+}
+
 /** Ponto único de montagem — tudo que o modelo generativo pode chamar para este papel, e nada além disso. */
 export function buildZezinhoTools(role: UserRole): ToolSet {
-  return { ...buildRegistryTools(role), ...buildLookupTools(role) };
+  return { ...buildRegistryTools(role), ...buildLookupTools(role), ...buildKnowledgeTools() };
 }

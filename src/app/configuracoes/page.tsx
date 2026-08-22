@@ -13,6 +13,7 @@ import { mercadoLivreIntegration } from "@/lib/integrations/mercadolivre";
 import { whatsappIntegration } from "@/lib/integrations/whatsapp";
 import { camerasIntegration } from "@/lib/integrations/cameras";
 import type { IntegrationMeta } from "@/lib/integrations/types";
+import { COMPANY_INFO } from "@/lib/company/info";
 
 const integrations: IntegrationMeta[] = [
   metaIntegration,
@@ -51,15 +52,15 @@ export default async function ConfiguracoesPage() {
         <CardContent className="grid grid-cols-1 gap-3 pt-0 text-sm sm:grid-cols-2">
           <div>
             <p className="text-xs text-foreground-subtle">Nome</p>
-            <p className="text-foreground">Sta Monica Estética Automotiva</p>
+            <p className="text-foreground">{COMPANY_INFO.name}</p>
           </div>
           <div>
             <p className="text-xs text-foreground-subtle">Local</p>
-            <p className="text-foreground">Santa Mônica — Florianópolis, SC</p>
+            <p className="text-foreground">{COMPANY_INFO.neighborhood} — {COMPANY_INFO.city}, {COMPANY_INFO.state}</p>
           </div>
           <div>
             <p className="text-xs text-foreground-subtle">Domínio</p>
-            <p className="text-foreground">esteticastamonica.com.br</p>
+            <p className="text-foreground">{COMPANY_INFO.website}</p>
           </div>
           <div>
             <p className="text-xs text-foreground-subtle">Fonte oficial de dados</p>

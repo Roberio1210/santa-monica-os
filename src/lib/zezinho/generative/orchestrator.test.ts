@@ -67,6 +67,20 @@ describe("answerGenerative", () => {
     expect(result?.text).not.toContain("assistantfinal");
   });
 
+  it("Missão Z3 (segunda variante real encontrada em produção) — remove também o marcador literal '<|channel|>final<|message|>'", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({
+      text: "<|channel|>final<|message|>O Pacote Gold para SUV custa R$ 240,00.",
+      toolCalls: [],
+      steps: [{}],
+      usage: { inputTokens: 10, outputTokens: 10 },
+    });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("Quanto custa a Gold para SUV?", [], "operacional");
+    expect(result?.text).toBe("O Pacote Gold para SUV custa R$ 240,00.");
+    expect(result?.text).not.toContain("<|channel|>");
+  });
+
   it("texto sem o marcador do formato Harmony passa intacto (nunca corta resposta de outros modelos)", async () => {
     process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
     generateTextMock.mockResolvedValue({ text: "Resposta normal, sem nenhum canal interno.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });

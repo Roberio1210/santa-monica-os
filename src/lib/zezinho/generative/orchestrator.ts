@@ -33,16 +33,26 @@ export interface GenerativeAnswer {
 }
 
 /**
- * Missão Z2.1 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de canal
- * interno ("analysis...raciocínio...assistantfinal...resposta") como texto literal na resposta,
- * em vez de o provider separar `reasoningText` de `text` corretamente. Nunca mostrar esse
- * raciocínio ao usuário — quando o marcador aparece, mantém só o que vem depois dele.
+ * Missão Z2.1/Z3 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de canal
+ * interno como texto literal na resposta, em pelo menos duas variações observadas em produção:
+ * "analysis...raciocínio...assistantfinal...resposta" (texto puro) e
+ * "<|channel|>final<|message|>...resposta" (tokens de controle literais). Nunca mostrar esse
+ * raciocínio ao usuário — quando qualquer um dos marcadores aparece, mantém só o que vem depois
+ * do ÚLTIMO marcador encontrado (o mais à direita = o canal final de verdade).
  */
 function stripLeakedReasoningChannel(text: string): string {
-  const marker = "assistantfinal";
-  const idx = text.lastIndexOf(marker);
-  if (idx === -1) return text.trim();
-  return text.slice(idx + marker.length).trim();
+  const markers = ["<|channel|>final<|message|>", "assistantfinal"];
+  let bestIdx = -1;
+  let bestMarkerLength = 0;
+  for (const marker of markers) {
+    const idx = text.lastIndexOf(marker);
+    if (idx > bestIdx) {
+      bestIdx = idx;
+      bestMarkerLength = marker.length;
+    }
+  }
+  if (bestIdx === -1) return text.trim();
+  return text.slice(bestIdx + bestMarkerLength).trim();
 }
 
 export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole): Promise<GenerativeAnswer | null> {

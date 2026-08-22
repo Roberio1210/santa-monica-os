@@ -122,13 +122,17 @@ export async function fetchPlanningBoard(rangeKey: PlanningRangeKey | null): Pro
   return { days, tomorrowPreparation, nextClient };
 }
 
-async function fetchTomorrowPreparation(): Promise<PlanningBoard["tomorrowPreparation"]> {
+/**
+ * Missão Z3 (Zézinho generativo) — generaliza o cálculo que `fetchTomorrowPreparation` já fazia
+ * só para "amanhã", para qualquer data (hoje incluído) — usado pela tool `agenda_availability`
+ * para responder "tem vaga hoje?"/"consigo encaixar uma SUV?" com a mesma fonte real usada pelo
+ * /planejamento, nunca uma agenda mock. `dateIso` no formato YYYY-MM-DD.
+ */
+export async function fetchCapacityForDate(dateIso: string): Promise<PlanningBoard["tomorrowPreparation"]> {
   const repo = getPlanningRepository();
-  const todayIso = saoPauloDateISO();
-  const tomorrowIso = addDaysIso(todayIso, 1);
 
   const [rows, config, completedOrders, packageNames] = await Promise.all([
-    repo.listAppointmentsInRange(tomorrowIso, tomorrowIso),
+    repo.listAppointmentsInRange(dateIso, dateIso),
     repo.getActiveCapacityConfig(),
     repo.listCompletedSingleServiceOrders(),
     fetchPackageServiceNames(),
@@ -141,6 +145,12 @@ async function fetchTomorrowPreparation(): Promise<PlanningBoard["tomorrowPrepar
 
   const views = await Promise.all(occupying.map(toView));
   return computeTomorrowPreparation(views, capacity, forecast);
+}
+
+async function fetchTomorrowPreparation(): Promise<PlanningBoard["tomorrowPreparation"]> {
+  const todayIso = saoPauloDateISO();
+  const tomorrowIso = addDaysIso(todayIso, 1);
+  return fetchCapacityForDate(tomorrowIso);
 }
 
 export async function fetchNextClient(): Promise<NextClientCard | null> {

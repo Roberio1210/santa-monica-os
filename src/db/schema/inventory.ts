@@ -304,15 +304,59 @@ export const services = pgTable("services", {
   id: id(),
   name: text("name").notNull(),
   category: text("category"),
-  /** Preço padrão do serviço. Null quando não cadastrado — nunca inventado. */
+  /** Preço padrão do serviço — só quando o serviço tem UM preço único (sem variação por porte/tier). Serviços com variação usam `servicePriceVariants`, e este campo fica null. Nunca inventado. */
   defaultPrice: numeric("default_price", { precision: 12, scale: 2 }),
   active: active(),
   source: source(),
   /** Slug estável (ex.: "lavacao-parceria-iesa"), único, para seed idempotente. */
   externalId: text("external_id").unique(),
   notes: notes(),
+  /**
+   * Missão Z3 (base de conhecimento do Zézinho) — campos de catálogo comercial, todos opcionais e
+   * null até o gestor confirmar o dado real (nunca inferidos por dedução do nome do serviço).
+   */
+  shortDescription: text("short_description"),
+  detailedDescription: text("detailed_description"),
+  estimatedDurationMinutes: integer("estimated_duration_minutes"),
+  /** Texto livre, um benefício por linha — null até confirmação do gestor. */
+  benefits: text("benefits"),
+  indications: text("indications"),
+  restrictions: text("restrictions"),
+  /** `true` quando o resultado real depende de avaliação presencial do veículo (ex.: polimento em risco profundo) — nunca usado para prometer resultado sem inspeção. */
+  requiresInspection: boolean("requires_inspection").notNull().default(false),
+  /** Ordem de exibição sugerida — nunca um dado de negócio, só uma dica de UI/resposta. Null = sem preferência. */
+  displayOrder: integer("display_order"),
   ...timestamps,
 });
+
+/**
+ * Missão Z3 — preço varia por porte de veículo e/ou por outra dimensão comercial (tier de cera,
+ * duração da vitrificação, janela de horário do estacionamento etc.). `services.defaultPrice`
+ * continua servindo para o caso simples (um preço só); esta tabela existe porque uma única
+ * coluna nunca conseguiria representar "Bronze Hatch R$100 / SUV R$140", por exemplo — nunca
+ * duplica `services`, só adiciona a dimensão de preço que faltava.
+ */
+export const servicePriceVariants = pgTable(
+  "service_price_variants",
+  {
+    id: id(),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id),
+    /** Porte do veículo, quando essa for a dimensão de variação — null quando não se aplica (ex.: variação só por tier de cera/duração). */
+    vehicleCategory: vehicleCategoryEnum("vehicle_category"),
+    /** Segunda dimensão de variação em texto livre (ex.: "Sem cera", "1 ano", "08h-18h Fração") — null quando a variação é só por porte. */
+    variantLabel: text("variant_label"),
+    price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+    displayOrder: integer("display_order"),
+    active: active(),
+    source: source(),
+    /** `${serviceExternalId}:${vehicleCategory ?? "-"}:${variantLabel ?? "-"}` — idempotência do seed. */
+    externalId: text("external_id").unique(),
+    notes: notes(),
+    ...timestamps,
+  },
+);
 
 /**
  * Missão do Catálogo Técnico Mestre — desacopla ETAPA de SERVIÇO: declara que um serviço

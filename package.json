@@ -24,7 +24,8 @@
     "db:seed:organizational-beliefs": "tsx src/db/seed/organizational-beliefs.ts",
     "db:seed:base-recipes-etapa": "tsx src/db/seed/base-recipes-etapa.ts",
     "db:seed:jumppark-service-mappings-confirm": "tsx src/db/seed/jumppark-service-mappings-confirm.ts",
-    "db:seed:import-historical-spreadsheet": "tsx src/db/seed/import-historical-spreadsheet.ts"
+    "db:seed:import-historical-spreadsheet": "tsx src/db/seed/import-historical-spreadsheet.ts",
+    "db:seed:service-catalog-prices-2026-08": "tsx src/db/seed/service-catalog-prices-2026-08.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",
