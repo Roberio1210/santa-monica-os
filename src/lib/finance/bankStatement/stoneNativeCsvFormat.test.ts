@@ -51,10 +51,11 @@ describe("parseStoneNativeBankStatementCsv", () => {
     expect(line.counterparty).toBe("Gabriel de Abreu Goncalves da Silva");
   });
 
-  it("Transação (Pix via maquininha, com tarifa real) -> descrição embute 'Pix Maquininha' para a classificação existente reconhecer, nunca um tipo inventado", () => {
+  it("Transação (Pix via maquininha, com tarifa real) -> descrição embute 'Pix recebido' para classificar como pix_recebido, NUNCA 'Pix Maquininha' (colide com liquidação de cartão do formato antigo — bug real corrigido na Missão V6.3)", () => {
     const [line] = parseStoneNativeBankStatementCsv(`${HEADER}\n${TRANSACAO_ROW}`);
     expect(line.amount).toBe(45);
-    expect(line.description).toContain("Pix Maquininha");
+    expect(line.description).toContain("Pix recebido");
+    expect(line.description).not.toMatch(/pix\s*\|?\s*maquininha/i);
     expect(line.counterparty).toBe("DAIANA LETICIA PARISOTTO");
   });
 

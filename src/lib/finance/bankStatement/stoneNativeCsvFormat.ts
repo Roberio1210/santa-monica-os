@@ -56,11 +56,16 @@ function resolveCounterparty(row: Record<string, string>, direction: BankStateme
  * "Transação" (Crédito, com tarifa proporcional pequena) é a Stone processando um Pix recebido
  * diretamente na maquininha — canal real de venda que nunca aparece em `stone_normalized_transactions`
  * (o layout XML de conciliação só cobre débito/cartão de crédito, ver `PIX_NOTE` em
- * `reconciliationSummary.ts`). Embutir "Pix" na descrição reconstruída deixa a classificação
- * existente (`inferBankStatementLineType`) reconhecer automaticamente, sem inventar um tipo novo.
+ * `reconciliationSummary.ts`). Embutir "Pix recebido" (nunca "Pix Maquininha" — Missão V6.2/6.3,
+ * bug real encontrado: "Pix Maquininha" colide com a regra de card settlement de
+ * `classification.ts`, que existe para o formato ANTIGO do extrato, "Pix | Maquininha" — isso
+ * fazia essa venda Pix em tempo real ser somada por engano na liquidação D+1 de cartão,
+ * inflando o "líquido recebido" do dia seguinte) na descrição reconstruída deixa a classificação
+ * existente (`inferBankStatementLineType`) reconhecer como `pix_recebido`, nunca como liquidação de
+ * cartão — sem inventar um tipo novo.
  */
 function describeNativeType(tipo: string, counterparty: string | null): string {
-  const label = tipo.trim().toLowerCase() === "transação" ? "Transação (Pix Maquininha)" : tipo.trim();
+  const label = tipo.trim().toLowerCase() === "transação" ? "Transação (Pix recebido na maquininha)" : tipo.trim();
   return counterparty ? `${label} - ${counterparty}` : label;
 }
 

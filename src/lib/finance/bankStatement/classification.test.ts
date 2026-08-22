@@ -77,6 +77,10 @@ describe("inferBankStatementLineType — sugestão inicial, nunca decisão final
   it("Missão V6.2 — 'Transferência entre contas Stone' de qualquer OUTRA origem continua transferência genérica (nunca presume liquidação sem 'Stone Principal')", () => {
     expect(inferBankStatementLineType("Transferência entre contas Stone - Outra Conta", "entrada")).toBe("transferencia_entrada");
   });
+
+  it("Missão V6.3 (bug real corrigido) — 'Transação (Pix recebido na maquininha)' é pix_recebido, NUNCA recebimento_venda_stone — misturar essa venda em tempo real com liquidação D+1 de cartão inflava o líquido recebido do dia seguinte", () => {
+    expect(inferBankStatementLineType("Transação (Pix recebido na maquininha) - Fulano", "entrada")).toBe("pix_recebido");
+  });
 });
 
 describe("initialStatusForType", () => {
