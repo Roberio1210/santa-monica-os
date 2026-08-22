@@ -41,6 +41,7 @@ function basePlan(overrides: Partial<ManagerialPlan>): ManagerialPlan {
     limitations: [],
     contextQuality: NEUTRAL_QUALITY,
     context: context({}),
+    roleBlocked: false,
     ...overrides,
   };
 }

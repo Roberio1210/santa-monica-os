@@ -15,6 +15,7 @@ import { deriveRisksAndOpportunities } from "@/lib/zezinho/reasoning/risksAndOpp
 import { normalize } from "@/lib/zezinho/date-parser";
 import type { EvidencedClaim, Fact, Recommendation } from "@/lib/zezinho/reasoning/types";
 import type { ToolId, ToolResult } from "@/lib/zezinho/tools/types";
+import type { UserRole } from "@/lib/auth/roles";
 
 /**
  * Planejador gerencial (Sprint 4.0, Z3) — o "cérebro de planejamento" pedido no checkpoint:
@@ -46,6 +47,13 @@ export interface ManagerialPlan {
   limitations: string[];
   contextQuality: ContextQuality;
   context: OperationalContext;
+  /**
+   * Missão Z1 — `true` quando TODA capacidade solicitada correspondeu a uma ferramenta bloqueada
+   * para o papel do chamador (nunca quando a pergunta é mista: nesse caso a resposta segue com o
+   * que sobrou de seguro, sem revelar que algo foi ocultado). O narrador usa isto para responder
+   * com a frase natural de restrição em vez de um "sem dados" confuso.
+   */
+  roleBlocked: boolean;
 }
 
 /**
@@ -90,14 +98,15 @@ export function objectiveForPlan(intents: ManagerialIntent[], entities: Pick<Ext
  * do planejador gerencial (Sprint 4.0, Z3). Não decide o texto final: prepara material gerencial
  * (fatos, riscos, oportunidades, recomendações, qualidade do contexto) para o narrador.
  */
-export async function buildManagerialPlan(rawText: string, memory: ReasoningSession): Promise<ManagerialPlan> {
+export async function buildManagerialPlan(rawText: string, memory: ReasoningSession, role: UserRole): Promise<ManagerialPlan> {
   const classification = classifyManagerial(rawText);
   const entities: ExtractedEntities = extractEntities(rawText);
 
   const capabilitiesRequested = Array.from(new Set(classification.businessIntents.flatMap((intent) => capabilitiesForIntent(intent, entities.topic))));
 
-  const context = await buildOperationalContext(capabilitiesRequested, entities, memory);
+  const context = await buildOperationalContext(capabilitiesRequested, entities, memory, role);
   const contextQuality = computeContextQuality(context);
+  const roleBlocked = context.toolResults.length > 0 && context.toolResults.every((r) => r.status === "insufficient_permission");
 
   const facts = extractFacts(context.toolResults);
   const findings = deriveFindings(facts);
@@ -136,5 +145,6 @@ export async function buildManagerialPlan(rawText: string, memory: ReasoningSess
     limitations,
     contextQuality,
     context,
+    roleBlocked,
   };
 }

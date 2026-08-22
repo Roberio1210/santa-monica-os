@@ -69,7 +69,11 @@ export async function runDirector(director: Director, entities: ExtractedEntitie
   }
 
   const resolvedEntities = resolveEntitiesFor(director, entities, memory);
-  const context = await buildOperationalContext(director.ownedCapabilities, resolvedEntities, memory);
+  // `runDiretoria`/`runDirector` (Reunião de Diretoria) é uma ferramenta de análise estratégica
+  // do próprio dono do negócio, sem rota/cron/UI em produção hoje (ver auditoria Zézinho V1) — não
+  // é uma superfície que responde a um usuário autenticado qualquer, então não há "role de sessão"
+  // a resolver aqui; equivalente a admin por natureza (nunca exposta a `operacional`).
+  const context = await buildOperationalContext(director.ownedCapabilities, resolvedEntities, memory, "admin");
   const confidence = computeContextQuality(context);
 
   const facts = extractFacts(context.toolResults);

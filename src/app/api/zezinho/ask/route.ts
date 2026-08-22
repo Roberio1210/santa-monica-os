@@ -4,12 +4,19 @@ import { isValidIsoDate } from "@/lib/utils/timezone";
 import type { ReasoningSession } from "@/lib/zezinho/memory/types";
 import { OBJECTIVE_DATA_AVAILABILITY, type BusinessObjective } from "@/lib/zezinho/objective/types";
 import type { PeriodRange } from "@/lib/utils/timezone";
+import { getCurrentUser } from "@/lib/auth/session";
+import { resolveZezinhoCallerRole } from "@/lib/zezinho/auth/access";
 
 /**
  * Único endpoint do chat do Zézinho — recebe texto livre + memória conversacional (mantida no
  * cliente, nunca persistida no servidor) e retorna a resposta. O modelo (quando houver um
  * provedor de IA configurado no futuro) nunca acessa banco, token ou variável de ambiente
  * diretamente: só este endpoint, que só chama funções internas autorizadas (answerFreeText).
+ *
+ * Missão Z1 — a role usada em toda a resposta vem EXCLUSIVAMENTE de `getCurrentUser()` (sessão
+ * autenticada, cookie httpOnly já validado contra o banco). O corpo da requisição nunca é
+ * consultado para decidir identidade/role — não existe (e nunca existiu) um campo `role` aceito
+ * aqui, então não há vetor para o cliente forjar privilégio.
  */
 
 const VALID_OBJECTIVES = new Set(Object.keys(OBJECTIVE_DATA_AVAILABILITY));
@@ -64,7 +71,9 @@ export async function POST(request: Request) {
 
   const startedAt = Date.now();
   try {
-    const { answer, nextContext } = await answerFreeText(safeText, sanitizeContext(context));
+    const user = await getCurrentUser();
+    const role = resolveZezinhoCallerRole(user);
+    const { answer, nextContext } = await answerFreeText(safeText, sanitizeContext(context), role);
     return NextResponse.json({ answer, nextContext, durationMs: Date.now() - startedAt });
   } catch (error) {
     return NextResponse.json(

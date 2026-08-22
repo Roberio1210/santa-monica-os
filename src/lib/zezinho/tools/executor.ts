@@ -22,6 +22,8 @@ import { runFinancialDirector } from "@/lib/finance/intelligence/director/servic
 import { TOOL_REGISTRY } from "@/lib/zezinho/tools/registry";
 import type { ToolCall, ToolMeta, ToolResult, ToolResultStatus } from "@/lib/zezinho/tools/types";
 import type { ToolTraceEntry } from "@/lib/zezinho/reasoning/types";
+import type { UserRole } from "@/lib/auth/roles";
+import { isToolBlockedForRole, redactToolResultForRole } from "@/lib/zezinho/auth/access";
 
 /**
  * Dispatcher do catálogo de ferramentas (Etapa 3 — ver docs/zezinho-3.0-architecture.md, seção
@@ -374,8 +376,76 @@ async function runFinancialIntelligence(call: ToolCall): Promise<ToolResult> {
   return { id: "financial_intelligence", source, error: report.error, ...meta(report.status, report.limitations), report };
 }
 
+/**
+ * RBAC (Missão Z1) — bloqueio ANTES de chamar qualquer service real para ferramentas
+ * inteiramente financeiras/estratégicas. Este é o único ponto de despacho para todo `run*` acima
+ * (todos não-exportados) — não existe caminho de código que alcance um service financeiro sem
+ * passar por aqui primeiro, então este bloqueio funciona como a própria ferramenta se recusando a
+ * responder, não apenas um roteador central sendo "educado".
+ */
+function blockedResult(call: ToolCall): ToolResult {
+  const source = TOOL_REGISTRY[call.id].source;
+  const base = { source, error: null, ...meta("insufficient_permission") };
+  switch (call.id) {
+    case "cash_ledger_totals":
+    case "dre_result":
+      return { ...base, id: call.id, metrics: [] };
+    case "central_alerts":
+      return { ...base, id: "central_alerts", alerts: [] };
+    case "full_period_comparison":
+      return {
+        ...base,
+        id: "full_period_comparison",
+        report: {
+          periodA: call.periodA ?? { key: "custom", from: "", to: "", label: "" },
+          periodB: call.periodB,
+          filterKind: call.filterKind,
+          jumpparkConfigured: false,
+          metrics: [],
+          packageCountsA: EMPTY_PACKAGES,
+          packageCountsB: EMPTY_PACKAGES,
+          topServicesA: [],
+          topServicesB: [],
+          peakHourA: null,
+          peakHourB: null,
+          errors: [],
+        },
+      };
+    case "goal_progress":
+      return { ...base, id: "goal_progress", progress: null };
+    case "accounts_payable":
+      return { ...base, id: "accounts_payable", summary: null };
+    case "accounts_receivable":
+      return { ...base, id: "accounts_receivable", dashboard: null };
+    case "marketing_summary":
+      return { ...base, id: "marketing_summary" };
+    case "stone_reconciliation_summary":
+      return { ...base, id: "stone_reconciliation_summary", summary: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    case "stone_financial_schedule":
+      return { ...base, id: "stone_financial_schedule", result: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    case "stone_jumppark_reconciliation":
+      return { ...base, id: "stone_jumppark_reconciliation", result: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    case "stone_divergences_summary":
+      return { ...base, id: "stone_divergences_summary", summary: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    case "stone_integration_health":
+      return { ...base, id: "stone_integration_health", report: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    case "financial_intelligence":
+      return { ...base, id: "financial_intelligence", report: { status: "insufficient_permission", error: null, limitations: [], collectedAt: base.collectedAt } as never };
+    default:
+      // Nunca alcançado: `blockedResult` só é chamado para IDs em `ADMIN_ONLY_TOOLS`.
+      throw new Error(`blockedResult: ferramenta "${call.id}" não é admin-only.`);
+  }
+}
+
 /** Executa uma `ToolCall`, despachando para o service real correspondente. Nunca lança. */
-export async function executeTool(call: ToolCall): Promise<ToolResult> {
+export async function executeTool(call: ToolCall, role: UserRole): Promise<ToolResult> {
+  if (isToolBlockedForRole(call.id, role)) return blockedResult(call);
+
+  const result = await dispatchTool(call);
+  return redactToolResultForRole(result, role);
+}
+
+async function dispatchTool(call: ToolCall): Promise<ToolResult> {
   switch (call.id) {
     case "jumppark_period_summary":
       return runJumpparkPeriodSummary(call);
@@ -427,20 +497,21 @@ export async function executeTool(call: ToolCall): Promise<ToolResult> {
 }
 
 /** Executa várias ferramentas em paralelo (seção 6 do documento: nunca serial quando independentes). */
-export async function executeTools(calls: ToolCall[]): Promise<ToolResult[]> {
-  return Promise.all(calls.map(executeTool));
+export async function executeTools(calls: ToolCall[], role: UserRole): Promise<ToolResult[]> {
+  return Promise.all(calls.map((call) => executeTool(call, role)));
 }
 
 /**
  * Executa ferramentas em paralelo medindo a duração de cada uma — usado por `service.ts`
  * (pipeline de raciocínio single-intent) e por `planner/contextBuilder.ts` (Sprint 4.0, Z3).
- * Movido para cá na Z3 para não duplicar a mesma lógica em dois lugares.
+ * Movido para cá na Z3 para não duplicar a mesma lógica em dois lugares. `role` (Missão Z1) vem
+ * sempre da sessão autenticada, nunca do texto da pergunta — ver `lib/zezinho/auth/access.ts`.
  */
-export async function executeToolsWithTrace(calls: ToolCall[]): Promise<{ results: ToolResult[]; trace: ToolTraceEntry[] }> {
+export async function executeToolsWithTrace(calls: ToolCall[], role: UserRole): Promise<{ results: ToolResult[]; trace: ToolTraceEntry[] }> {
   const timed = await Promise.all(
     calls.map(async (call) => {
       const start = Date.now();
-      const result = await executeTool(call);
+      const result = await executeTool(call, role);
       const trace: ToolTraceEntry = { id: call.id, durationMs: Date.now() - start, error: result.error };
       return { result, trace };
     }),

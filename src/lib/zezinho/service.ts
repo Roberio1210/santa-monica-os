@@ -21,6 +21,8 @@ import { buildManagerialPlan, objectiveForPlan } from "@/lib/zezinho/planner/man
 import { narrateManagerialPlan } from "@/lib/zezinho/narrator/narrateManagerialPlan";
 import { EMPTY_REASONING_SESSION, type ReasoningSession } from "@/lib/zezinho/memory/types";
 import { withActiveAnalysis, withExplainedMetric, withInsightSummary, withUsedOpener } from "@/lib/zezinho/memory/session";
+import type { UserRole } from "@/lib/auth/roles";
+import { isQuestionBlockedForRole, ZEZINHO_RESTRICTION_MESSAGE } from "@/lib/zezinho/auth/access";
 
 /**
  * "Zézinho — Gerente Operacional": pipeline de raciocínio (intenção -> objetivo -> memória ->
@@ -54,8 +56,8 @@ const DAILY_SUMMARY_QUERY = "Como estamos hoje?";
  * frase só aparece quando há dado real por trás — nunca inventa fato nem comparação sem
  * histórico suficiente.
  */
-export async function generateDailySummary(): Promise<string> {
-  const plan = await buildManagerialPlan(DAILY_SUMMARY_QUERY, EMPTY_REASONING_SESSION);
+export async function generateDailySummary(role: UserRole): Promise<string> {
+  const plan = await buildManagerialPlan(DAILY_SUMMARY_QUERY, EMPTY_REASONING_SESSION, role);
   const { answer } = narrateManagerialPlan(plan, { greetingWord: greeting(new Date()), usedOpeners: [] });
   return `${greeting(new Date())}, Robério. ${answer.text}`;
 }
@@ -212,13 +214,17 @@ async function fetchOpenOrdersWithPreviews(): Promise<{ order: EligibleOrder; pr
  * Roteador de intenções explícito — cada pergunta pré-definida mapeia para uma função
  * determinística sobre services reais. Nunca executa escrita: só leitura.
  */
-export async function answerQuestion(questionId: string): Promise<ZezinhoAnswer> {
+export async function answerQuestion(questionId: string, role: UserRole): Promise<ZezinhoAnswer> {
+  // Missão Z1 — bloqueio ANTES de tocar qualquer service financeiro; nunca revela a role nem a
+  // lista de perguntas restritas, só a mesma frase natural usada no pipeline de texto livre.
+  if (isQuestionBlockedForRole(questionId, role)) return { text: ZEZINHO_RESTRICTION_MESSAGE, links: [] };
+
   const asOfDate = todayIso();
   const overview = await fetchCentralOverview(asOfDate);
 
   switch (questionId) {
     case "como_esta_o_dia":
-      return { text: await generateDailySummary(), links: [{ label: "Ver Central de Operações", href: "/dashboard" }] };
+      return { text: await generateDailySummary(role), links: [{ label: "Ver Central de Operações", href: "/dashboard" }] };
 
     case "faturamento_hoje":
       if (!overview.jumppark.data) return { text: "Ainda não tenho dados suficientes sobre o faturamento de hoje — o JumpPark não está conectado ou a consulta falhou.", links: [] };
@@ -804,11 +810,11 @@ function buildNextSessionFromPlan(session: ReasoningSession, plan: Awaited<Retur
   return next;
 }
 
-export async function answerFreeText(freeText: string, session: ReasoningSession = EMPTY_REASONING_SESSION): Promise<{ answer: ZezinhoAnswer; nextContext: ReasoningSession }> {
+export async function answerFreeText(freeText: string, session: ReasoningSession = EMPTY_REASONING_SESSION, role: UserRole = "operacional"): Promise<{ answer: ZezinhoAnswer; nextContext: ReasoningSession }> {
   const trimmed = freeText.trim();
   if (!trimmed) return { answer: UNKNOWN_ANSWER, nextContext: session };
 
-  const plan = await buildManagerialPlan(trimmed, session);
+  const plan = await buildManagerialPlan(trimmed, session, role);
   const { answer, openerUsed } = narrateManagerialPlan(plan, { greetingWord: greeting(new Date()), usedOpeners: session.usedNarrationOpeners });
   const nextSession = buildNextSessionFromPlan(session, plan, openerUsed);
 

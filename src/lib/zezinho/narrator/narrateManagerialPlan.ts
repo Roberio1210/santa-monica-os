@@ -4,6 +4,7 @@ import { normalize } from "@/lib/zezinho/date-parser";
 import { getAiProviderConfig, type AiProviderConfig } from "@/lib/zezinho/ai-provider";
 import type { ManagerialPlan } from "@/lib/zezinho/planner/managerialPlan";
 import type { ZezinhoAnswer, ZezinhoLink } from "@/lib/zezinho/types";
+import { ZEZINHO_RESTRICTION_MESSAGE } from "@/lib/zezinho/auth/access";
 
 /**
  * Narrador gerencial (Sprint 4.0, Z4) — único ponto que transforma um `ManagerialPlan` em prosa.
@@ -294,6 +295,12 @@ function conversationalLeadIn(plan: ManagerialPlan, greetingWord: string): strin
 /** Ponto de entrada único do narrador — nunca escreve fora do que `ManagerialPlan` trouxe. */
 export function narrateManagerialPlan(plan: ManagerialPlan, opts: NarrateOptions): NarrateResult {
   const fullOpts: Required<NarrateOptions> = { greetingWord: opts.greetingWord, usedOpeners: opts.usedOpeners, aiConfig: opts.aiConfig ?? getAiProviderConfig() };
+
+  // Missão Z1 — quando TUDO que foi pedido esbarrou em RBAC, responde só com a frase natural de
+  // restrição: nunca "não tenho dados" (confuso, sugere falha) nem detalhe do que foi bloqueado.
+  if (plan.roleBlocked) {
+    return { answer: { text: ZEZINHO_RESTRICTION_MESSAGE, links: [] }, openerUsed: null };
+  }
 
   let text: string;
   switch (plan.questionScope) {

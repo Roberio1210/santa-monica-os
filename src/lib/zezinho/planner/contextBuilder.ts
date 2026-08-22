@@ -1,5 +1,6 @@
 import type { ExtractedEntities } from "@/lib/zezinho/intent/types";
 import type { ReasoningSession } from "@/lib/zezinho/memory/types";
+import type { UserRole } from "@/lib/auth/roles";
 import { resolvePeriods, type ResolvedPeriods } from "@/lib/zezinho/planner/periods";
 import { CAPABILITY_TOOL, type Capability } from "@/lib/zezinho/planner/capabilities";
 import { executeToolsWithTrace } from "@/lib/zezinho/tools/executor";
@@ -39,7 +40,7 @@ function buildCall(id: ToolId, periods: ResolvedPeriods | null, filterKind: Extr
  * Ferramentas que exigem período e não têm nenhum resolvido são silenciosamente omitidas (mesma
  * regra já usada em `selectTools.ts`) — a ausência de UMA fonte nunca derruba as demais.
  */
-export async function buildOperationalContext(capabilities: Capability[], entities: ExtractedEntities, memory: ReasoningSession): Promise<OperationalContext> {
+export async function buildOperationalContext(capabilities: Capability[], entities: ExtractedEntities, memory: ReasoningSession, role: UserRole): Promise<OperationalContext> {
   const uniqueCapabilities = dedupe(capabilities);
   const periods = resolvePeriods(entities, memory);
 
@@ -49,7 +50,7 @@ export async function buildOperationalContext(capabilities: Capability[], entiti
   const toolIds = dedupe(Array.from(toolIdByCapability.values())).filter((id) => !TOOL_REGISTRY[id].requiresPeriod || periods !== null);
   const toolCalls = toolIds.map((id) => buildCall(id, periods, entities.areaFilter));
 
-  const { results, trace } = await executeToolsWithTrace(toolCalls);
+  const { results, trace } = await executeToolsWithTrace(toolCalls, role);
   const resultById = new Map(results.map((r) => [r.id, r]));
 
   const byCapability: Partial<Record<Capability, ToolResult>> = {};

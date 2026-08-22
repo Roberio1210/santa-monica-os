@@ -120,10 +120,13 @@ export function extractFacts(toolResults: ToolResult[]): Fact[] {
       case "historical_pattern": {
         if (result.status !== "ok" || !result.pattern || result.pattern.sampleWeeks === 0) break;
         const p = result.pattern;
+        // `typicalRevenue` vem `null` quando redigido para o papel `operacional` (Missão Z1) — a
+        // frase nunca menciona faturamento nesse caso, em vez de imprimir um "R$ undefined".
+        const revenuePart = p.typicalRevenue !== null ? ` e R$ ${p.typicalRevenue.toFixed(2)} de faturamento` : "";
         facts.push({
           key: "historical_pattern",
           label: "Padrão histórico",
-          statement: `Nas últimas ${p.sampleWeeks} ocorrência(s) deste dia da semana, o típico é ${p.typicalVehicles} veículo(s) e R$ ${p.typicalRevenue?.toFixed(2)} de faturamento (amostra ${p.sampleQuality}).`,
+          statement: `Nas últimas ${p.sampleWeeks} ocorrência(s) deste dia da semana, o típico é ${p.typicalVehicles} veículo(s)${revenuePart} (amostra ${p.sampleQuality}).`,
           direction: "indisponivel",
           source: result.source,
           isProxy: p.sampleQuality === "insuficiente",

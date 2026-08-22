@@ -4,11 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import { ZezinhoConversation } from "@/components/zezinho/zezinho-conversation";
 import { generateDailySummary } from "@/lib/zezinho/service";
 import { getAiProviderConfig } from "@/lib/zezinho/ai-provider";
+import { getCurrentUser } from "@/lib/auth/session";
+import { resolveZezinhoCallerRole } from "@/lib/zezinho/auth/access";
 
 export const dynamic = "force-dynamic";
 
 export default async function ZezinhoPage() {
-  const summary = await generateDailySummary();
+  const user = await getCurrentUser();
+  const summary = await generateDailySummary(resolveZezinhoCallerRole(user));
   const ai = getAiProviderConfig();
 
   return (
