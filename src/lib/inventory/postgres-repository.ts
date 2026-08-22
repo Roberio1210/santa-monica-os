@@ -39,6 +39,8 @@ function toItem(row: typeof inventoryItems.$inferSelect): InventoryItem {
     unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
     quantityStatus: row.quantityStatus as QuantityStatus,
     active: row.active,
+    technicalFunction: row.technicalFunction as InventoryItem["technicalFunction"],
+    usageType: row.usageType as InventoryItem["usageType"],
   };
 }
 

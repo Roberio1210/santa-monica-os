@@ -57,6 +57,8 @@ export function ZezinhoConversation() {
   const [stageIndex, setStageIndex] = useState(0);
   const [openFundamentos, setOpenFundamentos] = useState<Record<string, boolean>>({});
   const contextRef = useRef<ReasoningSession>(EMPTY_REASONING_SESSION);
+  /** Missão Z2 — histórico do modo generativo (só usado quando a flag do servidor está ligada); mantido no cliente, nunca persistido no servidor, mesmo princípio de `contextRef`. */
+  const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const stageTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -88,7 +90,7 @@ export function ZezinhoConversation() {
       const response = await fetch("/api/zezinho/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ freeText: trimmed, context: contextRef.current }),
+        body: JSON.stringify({ freeText: trimmed, context: contextRef.current, history: historyRef.current }),
         signal: controller.signal,
       });
       const data = await response.json();
@@ -98,6 +100,7 @@ export function ZezinhoConversation() {
       }
       const answer = data.answer as ZezinhoAnswer;
       contextRef.current = data.nextContext as ReasoningSession;
+      if (Array.isArray(data.history)) historyRef.current = data.history;
       setMessages((prev) => [
         ...prev,
         { id: fieldId(), role: "assistant", text: answer.text, links: answer.links, sources: answer.sources, facts: answer.facts, confidence: answer.confidence, followUps: answer.followUps, durationMs: data.durationMs, question: trimmed },

@@ -1,3 +1,5 @@
+import type { RecipeUsageType, TechnicalFunction } from "@/lib/recipes/types";
+
 export type InventoryCategory =
   | "Lavagem"
   | "Higienização"
@@ -216,6 +218,15 @@ export interface InventoryItem {
    * histórico intacto.
    */
   active?: boolean;
+  /**
+   * Missão Z2 (Zézinho generativo) — expõe o Catálogo Técnico Mestre (já real no banco desde a
+   * missão de catálogo, nunca antes surfaced pelo repositório) para a tool de consulta de
+   * estoque conseguir responder "para que serve"/"que tipo de uso" sem inventar. Opcional
+   * (mesmo motivo de `active`): não quebra literais existentes em testes/seeds. `undefined` em
+   * dados antigos/estáticos é honesto — significa "não catalogado", nunca inferido.
+   */
+  technicalFunction?: TechnicalFunction | null;
+  usageType?: RecipeUsageType | null;
 }
 
 export interface InventoryItemView extends InventoryItem {
