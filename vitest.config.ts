@@ -13,5 +13,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Alguns testes fazem `vi.resetModules()` + `await import(...)` para pegar uma instância nova
+    // do módulo (ex.: `generative/orchestrator.test.ts`) — sob contenção de CPU na suíte completa
+    // (muitos arquivos em paralelo), o custo do reimport pode passar do padrão de 5s do vitest
+    // mesmo sem nada estar realmente travado. 15s dá folga sem mascarar um teste que trava de verdade.
+    testTimeout: 15000,
   },
 });

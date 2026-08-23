@@ -184,7 +184,7 @@ function buildKnowledgeTools(): ToolSet {
   return {
     service_catalog_search: tool({
       description:
-        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço real, descrição e etapas incluídas quando cadastradas. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor.",
+        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço real, descrição e etapas incluídas quando cadastradas. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor. Ao listar 'etapas_incluidas', reproduza os nomes EXATAMENTE como vieram — nunca acrescente produto, técnica ou qualificador que o resultado não trouxe (ex.: se veio 'shampoo', responda 'shampoo', nunca 'shampoo exterior' ou 'shampoo automotivo').",
       inputSchema: serviceCatalogSearchInputSchema,
       execute: async ({ busca, porte, categoria }) => {
         const results = await searchServiceCatalog({ query: busca, vehicleCategory: porte, category: categoria });
@@ -202,6 +202,11 @@ function buildKnowledgeTools(): ToolSet {
             restricoes: s.restrictions,
             depende_de_avaliacao_presencial: s.requiresInspection,
             etapas_incluidas: s.operationalSteps.length > 0 ? s.operationalSteps.map(humanizeStep) : null,
+            // Instrução inline (ao lado do próprio dado, não só no system prompt) — modelos
+            // pequenos tendem a "enfeitar" listas com qualificador plausível (ex.: "shampoo
+            // exterior", "cera/moção") mesmo quando instruídos no prompt geral a não fazer isso.
+            // Repetir a regra colada ao dado reduz esse vazamento (achado real da Missão Z3).
+            aviso_etapas_incluidas: s.operationalSteps.length > 0 ? "Reproduza estes nomes EXATAMENTE como estão, palavra por palavra. Não acrescente produto, técnica, marca, duração ou qualquer outro qualificador — nenhum deles foi informado." : null,
           })),
         };
       },
