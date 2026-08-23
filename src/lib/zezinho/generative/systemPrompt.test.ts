@@ -51,4 +51,12 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
     expect(prompt.toLowerCase()).toContain("sem pedir esclarecimento ou mais detalhes primeiro");
     expect(prompt).toContain("responda IMEDIATAMENTE apenas");
   });
+
+  it("Missão Z4 — instrui a usar daily_management_summary/post_sale_candidates/inactive_customers e nunca afirmar que uma mensagem foi enviada", () => {
+    expect(prompt).toContain("daily_management_summary");
+    expect(prompt).toContain("post_sale_candidates");
+    expect(prompt).toContain("inactive_customers");
+    expect(prompt.toLowerCase()).toContain("nunca executa um envio real");
+    expect(prompt.toLowerCase()).toMatch(/nunca deve dizer "mandei a mensagem"/);
+  });
 });

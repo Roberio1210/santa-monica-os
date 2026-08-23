@@ -11,6 +11,7 @@ import type { ReasoningSession } from "@/lib/zezinho/memory/types";
 import type { ZezinhoAnswer, ZezinhoLink } from "@/lib/zezinho/types";
 
 const SUGGESTED_QUESTIONS = [
+  "Fechar o dia",
   "Como está a empresa hoje?",
   "Compare este mês com o mês passado.",
   "O que está precisando da minha atenção?",
@@ -20,6 +21,9 @@ const SUGGESTED_QUESTIONS = [
   "Vale contratar mais alguém?",
   "Estamos desperdiçando produto?",
 ];
+
+/** Missão Z4 — atalho "Fechar o dia" manda a pergunta completa por trás (a IA interpreta, nunca um caminho de código separado/hardcoded do fechamento). */
+const CLOSING_SHORTCUT_QUESTION = "Zezinho, faça o fechamento de hoje e me diga o que precisa da minha atenção.";
 
 const LOADING_STAGES = ["Entendendo sua pergunta…", "Consultando os dados…", "Montando o raciocínio…", "Preparando a resposta…"];
 
@@ -147,7 +151,7 @@ export function ZezinhoConversation() {
             <button
               key={q}
               type="button"
-              onClick={() => send(q)}
+              onClick={() => send(q === "Fechar o dia" ? CLOSING_SHORTCUT_QUESTION : q)}
               disabled={pending}
               className="rounded-full border border-border bg-background-elevated px-3 py-1.5 text-xs text-foreground-muted transition-colors hover:border-accent/50 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
             >

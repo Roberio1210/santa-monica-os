@@ -32,7 +32,7 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     }
   });
 
-  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 4 da Missão Z3/Z3.2 (catálogo de serviços, empresa, agenda, política comercial)", () => {
+  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 4 da Missão Z3/Z3.2 + as 3 da Missão Z4 (fechamento, pós-venda, inativos)", () => {
     const tools = buildZezinhoTools("admin");
     for (const id of ADMIN_ONLY_IDS) {
       expect(tools).toHaveProperty(id);
@@ -44,7 +44,10 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     expect(tools).toHaveProperty("company_info");
     expect(tools).toHaveProperty("agenda_availability");
     expect(tools).toHaveProperty("commercial_policy");
-    expect(Object.keys(tools).length).toBe(23 + 2 + 4);
+    expect(tools).toHaveProperty("daily_management_summary");
+    expect(tools).toHaveProperty("post_sale_candidates");
+    expect(tools).toHaveProperty("inactive_customers");
+    expect(Object.keys(tools).length).toBe(23 + 2 + 4 + 3);
   });
 
   it("operacional também recebe as 4 ferramentas da Missão Z3/Z3.2 — preço comercial, endereço, agenda e política de negociação não são dado financeiro gerencial", () => {
@@ -53,6 +56,13 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     expect(tools).toHaveProperty("company_info");
     expect(tools).toHaveProperty("agenda_availability");
     expect(tools).toHaveProperty("commercial_policy");
+  });
+
+  it("operacional também recebe as 3 ferramentas da Missão Z4 — o RBAC financeiro é aplicado DENTRO de cada uma (campo null), nunca pela ausência da ferramenta", () => {
+    const tools = buildZezinhoTools("operacional");
+    expect(tools).toHaveProperty("daily_management_summary");
+    expect(tools).toHaveProperty("post_sale_candidates");
+    expect(tools).toHaveProperty("inactive_customers");
   });
 
   it("operacional recebe as ferramentas seguras (redigidas ou já sem dado financeiro)", () => {

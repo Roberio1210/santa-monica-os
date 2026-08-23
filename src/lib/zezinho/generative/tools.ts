@@ -13,6 +13,9 @@ import { COMPANY_INFO } from "@/lib/company/info";
 import { fetchCapacityForDate } from "@/lib/planning/service";
 import { saoPauloDateISO, addDaysIso } from "@/lib/utils/timezone";
 import { fetchCommercialPolicy, fetchComplimentaryOptions } from "@/lib/services/commercialPolicy";
+import { fetchDailyClosing } from "@/lib/management/dailyClosing";
+import { fetchPostSaleCandidates, POST_SALE_CATEGORY_LABEL } from "@/lib/management/postSale";
+import { fetchInactiveCustomers, DEFAULT_INACTIVE_MIN_DAYS } from "@/lib/management/inactiveCustomers";
 
 /**
  * Missão Z2 — schemas de tool-calling para o modelo generativo. Ponte fina sobre o mesmo
@@ -181,7 +184,15 @@ const agendaAvailabilityInputSchema = z.object({
  * preço comercial, endereço/horário e disponibilidade de agenda não são dado financeiro
  * gerencial — nenhuma redação por role necessária aqui.
  */
-function buildKnowledgeTools(): ToolSet {
+const dailyClosingInputSchema = z.object({
+  dia: z.enum(["hoje", "ontem"]).default("hoje").describe("Dia do fechamento gerencial — o foco principal é sempre 'hoje'."),
+});
+
+const inactiveCustomersInputSchema = z.object({
+  dias_minimo: z.number().int().min(1).max(365).optional().describe("Quantidade mínima de dias sem retorno para considerar o cliente inativo — padrão 30."),
+});
+
+function buildKnowledgeTools(role: UserRole): ToolSet {
   return {
     service_catalog_search: tool({
       description:
@@ -285,10 +296,115 @@ function buildKnowledgeTools(): ToolSet {
         };
       },
     }),
+    // Missão Z4 — fechamento gerencial do dia: operação + serviços + (só ADMIN) financeiro +
+    // estoque que merece atenção + amanhã (agenda + produto homologado x estoque real) +
+    // recomendações. Nunca escreve nada — leitura pura sobre fontes já auditadas na missão.
+    daily_management_summary: tool({
+      description:
+        "Fechamento gerencial do dia (ou de ontem): quantidade de ordens/veículos/clientes, lavação x estacionamento, mix de pacotes Bronze/Silver/Gold, principais serviços, comparação com o período anterior, estoque que precisa de atenção, agenda de amanhã (com verificação de produto homologado disponível para os serviços agendados) e recomendações priorizadas. Para o papel operacional, o campo 'financeiro' sempre vem null — nunca peça faturamento/caixa/Stone a este papel, a resposta certa é dizer que essa informação é restrita à administração. Quando 'principais_servicos' vier vazio ([]), significa que não houve ordem registrada nesse período — NUNCA invente um nome de serviço, produto ou tabela 'serviço x produto' nesse caso; diga honestamente que não houve movimento.",
+      inputSchema: dailyClosingInputSchema,
+      execute: async ({ dia }) => {
+        const result = await fetchDailyClosing({ periodo: dia === "ontem" ? "yesterday" : "today" }, role);
+        return {
+          periodo: result.period.label,
+          periodo_comparacao: result.comparisonPeriod.label,
+          periodo_ainda_em_andamento: result.partialPeriod,
+          jumppark_configurado: result.jumpparkConfigured,
+          operacao: {
+            ordens: result.operational.ordersCount,
+            veiculos_atendidos: result.operational.vehiclesCount,
+            clientes: result.operational.customersCount,
+            lavacoes: result.operational.washCount,
+            estacionamentos: result.operational.parkingCount,
+            pacotes: result.operational.packageCounts,
+            principais_servicos: result.operational.topServices.map((s) => ({ servico: s.description, valor: s.amount })),
+            aviso_principais_servicos: result.operational.topServices.length === 0 ? "Nenhuma ordem registrada neste período — não existe 'serviço mais vendido' para reportar. Nunca invente um nome de serviço nem monte uma tabela serviço x produto aqui." : null,
+          },
+          financeiro: result.financial
+            ? {
+                faturamento_bruto: result.financial.grossRevenue,
+                faturamento_lavacao: result.financial.washRevenue,
+                faturamento_estacionamento: result.financial.parkingRevenue,
+                ticket_medio: result.financial.averageTicket,
+                caixa_entradas: result.financial.cashEntradas,
+                caixa_saidas: result.financial.cashSaidas,
+                caixa_resultado: result.financial.cashResultado,
+                resultado_dre: result.financial.dreResultado,
+                stone_configurado: result.financial.stoneConfigured,
+                stone_liquidado_hoje: result.financial.stoneSettledToday,
+                stone_a_receber_hoje: result.financial.stonePendingToday,
+              }
+            : null,
+          estoque_atencao: result.inventoryAttention.map((i) => ({ produto: i.name, marca: i.brand, quantidade_atual: i.currentQuantity, unidade: i.unit, status: i.status })),
+          amanha: {
+            veiculos_agendados: result.tomorrow.vehicleCount,
+            capacidade_configurada: result.tomorrow.capacityConfigured,
+            minutos_disponiveis: result.tomorrow.availableMinutes,
+            percentual_ocupado: result.tomorrow.percentOccupied,
+            principais_servicos: result.tomorrow.mainServices,
+            riscos_de_produto: result.tomorrow.productRisks.map((r) => ({ servico: r.serviceName, agendamentos: r.scheduledCount, status: r.status, detalhe: r.detail })),
+          },
+          pontos_de_atencao: result.insights.map((i) => ({ titulo: i.title, evidencia: i.evidence, gravidade: i.severity })),
+          recomendacoes_prioritarias: result.recommendations,
+          aviso: "Todo número aqui vem de fonte real (JumpPark/Neon/estoque/planejamento/Stone) — se algo não aparecer, é porque a fonte não tinha esse dado, nunca complete por conta própria.",
+        };
+      },
+    }),
+    // Missão Z4 — candidatos a pós-venda do dia (nunca envia nada, só sugere e prepara rascunho).
+    post_sale_candidates: tool({
+      description:
+        "Clientes atendidos HOJE que merecem alguma ação de pós-venda, já classificados (A: pedir avaliação Google; B: verificar satisfação antes; C: não abordar agora; D: precisa de atenção humana — nunca detectado automaticamente, só se você mesmo perceber isso na conversa) com uma mensagem-rascunho personalizada por cliente (nome, veículo e serviço reais, nunca a mesma frase para todos). NUNCA envia nada — só prepara o texto para revisão humana.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const result = await fetchPostSaleCandidates();
+        return {
+          jumppark_configurado: result.jumpparkConfigured,
+          erro: result.error,
+          candidatos: result.candidates.map((c) => ({
+            cliente: c.customerName,
+            veiculo: c.vehicleModel,
+            servicos: c.serviceNames,
+            telefone_mascarado: c.phoneMasked,
+            categoria: c.category,
+            categoria_label: POST_SALE_CATEGORY_LABEL[c.category],
+            motivo: c.categoryReason,
+            mensagem_sugerida: c.messageDraft,
+          })),
+          aviso: "Nenhuma mensagem foi enviada — são apenas rascunhos para você revisar e enviar manualmente.",
+        };
+      },
+    }),
+    // Missão Z4 — clientes sem retorno há mais de N dias, priorizados de forma transparente.
+    inactive_customers: tool({
+      description:
+        "Clientes que já usaram a Santa Mônica e não retornam há mais de N dias (padrão 30) — priorizados por critérios explícitos (recorrência, tempo sem retorno, ticket histórico, todos exibidos por cliente) e com mensagem-rascunho de reativação (nunca menciona promoção, pois nenhuma promoção ativa está cadastrada no sistema hoje). Lista sempre limitada aos melhores candidatos, nunca uma lista gigante sem critério. NUNCA envia nada — só prepara o texto para revisão humana. Este sistema ainda não registra se o cliente já foi abordado recentemente nem sinaliza reclamação/pedido de não-contato — sempre avise isso e recomende checagem manual antes de contatar.",
+      inputSchema: inactiveCustomersInputSchema,
+      execute: async ({ dias_minimo }) => {
+        const result = await fetchInactiveCustomers(dias_minimo ?? DEFAULT_INACTIVE_MIN_DAYS);
+        return {
+          dias_minimo_considerado: result.minDays,
+          total_encontrado_antes_do_corte: result.totalCandidatesBeforeCap,
+          candidatos: result.candidates.map((c) => ({
+            cliente: c.customerName,
+            veiculo: c.vehicleModel,
+            placa_mascarada: c.plateMasked,
+            telefone_mascarado: c.phoneMasked,
+            dias_sem_retorno: c.daysSinceLastVisit,
+            visitas_historicas: c.visitCount,
+            gasto_historico_total: role === "admin" ? c.totalSpent : null,
+            cliente_recorrente: c.isRecurring,
+            prioridade_pontuacao: c.priorityScore,
+            prioridade_motivos: c.priorityReasons,
+            mensagem_sugerida: c.messageDraft,
+          })),
+          avisos: result.caveats,
+        };
+      },
+    }),
   };
 }
 
 /** Ponto único de montagem — tudo que o modelo generativo pode chamar para este papel, e nada além disso. */
 export function buildZezinhoTools(role: UserRole): ToolSet {
-  return { ...buildRegistryTools(role), ...buildLookupTools(role), ...buildKnowledgeTools() };
+  return { ...buildRegistryTools(role), ...buildLookupTools(role), ...buildKnowledgeTools(role) };
 }
