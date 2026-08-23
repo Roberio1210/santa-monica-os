@@ -185,7 +185,7 @@ function buildKnowledgeTools(): ToolSet {
   return {
     service_catalog_search: tool({
       description:
-        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço-base, condição comercial atual (quando diferente), produtos confirmados e etapas incluídas quando cadastrados. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor. Ao listar 'etapas_incluidas', reproduza os nomes EXATAMENTE como vieram — nunca acrescente produto, técnica ou qualificador que o resultado não trouxe (ex.: se veio 'shampoo', responda 'shampoo', nunca 'shampoo exterior' ou 'shampoo automotivo').",
+        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço-base, condição comercial atual (quando diferente), produtos homologados (com estoque real quando cadastrado) e etapas incluídas quando cadastrados. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor. Ao listar 'etapas_incluidas', reproduza os nomes EXATAMENTE como vieram — nunca acrescente produto, técnica ou qualificador que o resultado não trouxe (ex.: se veio 'shampoo', responda 'shampoo', nunca 'shampoo exterior' ou 'shampoo automotivo'). Para perguntas do tipo 'qual produto vamos usar/temos disponível', use o campo 'produtos': cada item já traz se está disponível em estoque agora ('disponivel_em_estoque') — quando 'nunca_cadastrado_no_estoque' vier true, esse produto homologado nunca foi comprado/contado, então NUNCA é disponível, mesmo que pareça o mais adequado — responda que precisa de reposição. Nunca troque silenciosamente por um produto de outra variante/durabilidade só porque o homologado da variante pedida está indisponível.",
       inputSchema: serviceCatalogSearchInputSchema,
       execute: async ({ busca, porte, categoria }) => {
         const results = await searchServiceCatalog({ query: busca, vehicleCategory: porte, category: categoria });
@@ -211,8 +211,24 @@ function buildKnowledgeTools(): ToolSet {
             // exterior", "cera/moção") mesmo quando instruídos no prompt geral a não fazer isso.
             // Repetir a regra colada ao dado reduz esse vazamento (achado real da Missão Z3).
             aviso_etapas_incluidas: s.operationalSteps.length > 0 ? "Reproduza estes nomes EXATAMENTE como estão, palavra por palavra. Não acrescente produto, técnica, marca, duração ou qualquer outro qualificador — nenhum deles foi informado." : null,
-            // Missão Z3.2 — produtos confirmados pelo gestor (nunca inferidos pela mera existência no estoque).
-            produtos: s.products.length > 0 ? s.products.map((p) => ({ produto: p.productName, papel: p.role, alternativa: p.isAlternative })) : null,
+            // Missão Z3.2/Z3.3 — produtos homologados pelo gestor (nunca inferidos pela mera existência no estoque),
+            // já cruzados com o estoque real quando o produto está cadastrado.
+            produtos:
+              s.products.length > 0
+                ? s.products.map((p) => ({
+                    produto: p.productName,
+                    marca: p.brand,
+                    papel: p.role,
+                    alternativa: p.isAlternative,
+                    variante: p.variantLabel,
+                    durabilidade_aproximada: p.durabilityLabel,
+                    nunca_cadastrado_no_estoque: p.estoque === null,
+                    disponivel_em_estoque: p.estoque?.disponivel ?? false,
+                    quantidade_atual: p.estoque?.quantidadeAtual ?? null,
+                    unidade: p.estoque?.unidade ?? null,
+                    status_estoque: p.estoque?.status ?? null,
+                  }))
+                : null,
           })),
         };
       },

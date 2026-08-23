@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { services, servicePriceVariants, serviceOperationalSteps, serviceProducts, inventoryItems } from "@/db/schema";
+import { computeStatus } from "@/lib/inventory/status";
 
 /**
  * Missão Z3 (base de conhecimento do Zézinho) — catálogo comercial estruturado (categoria B da
@@ -23,10 +24,32 @@ export interface ServicePriceVariant {
   currentPrice: number | null;
 }
 
+/**
+ * Missão Z3.3 — gerente operacional: serviço → etapa → produto homologado → estoque real.
+ * `estoque` é `null` quando este produto homologado NUNCA foi cadastrado no estoque real
+ * (`itemId` null em `service_products` — ver comentário do schema) — nesse caso é sempre tratado
+ * como indisponível, nunca "talvez disponível". Quando `estoque` existe, a disponibilidade
+ * (`disponivel`) vem sempre do saldo atual real, nunca hardcoded aqui ou no prompt.
+ */
+export interface ServiceProductStock {
+  quantidadeAtual: number;
+  unidade: string;
+  disponivel: boolean;
+  /** Mesmo status do módulo de estoque (`comprar`/`atencao`/`ok`/`sem_minimo`) — nunca um novo cálculo paralelo. */
+  status: ReturnType<typeof computeStatus>;
+}
+
 export interface ServiceProductLink {
   productName: string;
+  brand: string | null;
   role: string;
   isAlternative: boolean;
+  /** Duração/variante de preço a que este produto se aplica (ex.: "4 anos") — `null` quando vale para o serviço inteiro. */
+  variantLabel: string | null;
+  /** Durabilidade/proteção aproximada confirmada pelo gestor para este produto — nunca uma garantia, nunca inventada. */
+  durabilityLabel: string | null;
+  /** `null` = produto homologado mas nunca cadastrado no estoque real (sempre indisponível até cadastro/compra). */
+  estoque: ServiceProductStock | null;
 }
 
 export interface ServiceCatalogEntry {
@@ -61,9 +84,23 @@ export async function fetchServiceCatalog(): Promise<ServiceCatalogEntry[]> {
     db.select().from(servicePriceVariants).where(eq(servicePriceVariants.active, true)),
     db.select().from(serviceOperationalSteps).where(eq(serviceOperationalSteps.active, true)),
     db
-      .select({ serviceId: serviceProducts.serviceId, role: serviceProducts.role, isAlternative: serviceProducts.isAlternative, productName: inventoryItems.name })
+      .select({
+        serviceId: serviceProducts.serviceId,
+        role: serviceProducts.role,
+        isAlternative: serviceProducts.isAlternative,
+        durabilityLabel: serviceProducts.durabilityLabel,
+        variantLabel: servicePriceVariants.variantLabel,
+        productNameFallback: serviceProducts.productNameFallback,
+        brandFallback: serviceProducts.brandFallback,
+        itemName: inventoryItems.name,
+        itemBrand: inventoryItems.brand,
+        itemQuantity: inventoryItems.currentQuantity,
+        itemUnit: inventoryItems.unit,
+        itemMinimumStock: inventoryItems.minimumStock,
+      })
       .from(serviceProducts)
-      .innerJoin(inventoryItems, eq(inventoryItems.id, serviceProducts.itemId))
+      .leftJoin(inventoryItems, eq(inventoryItems.id, serviceProducts.itemId))
+      .leftJoin(servicePriceVariants, eq(servicePriceVariants.id, serviceProducts.priceVariantId))
       .where(eq(serviceProducts.active, true)),
   ]);
 
@@ -84,7 +121,23 @@ export async function fetchServiceCatalog(): Promise<ServiceCatalogEntry[]> {
   const productsByService = new Map<string, ServiceProductLink[]>();
   for (const p of productRows) {
     const list = productsByService.get(p.serviceId) ?? [];
-    list.push({ productName: p.productName, role: p.role, isAlternative: p.isAlternative });
+    const hasRealItem = p.itemName !== null;
+    list.push({
+      productName: hasRealItem ? p.itemName! : (p.productNameFallback ?? "(produto sem nome cadastrado)"),
+      brand: hasRealItem ? p.itemBrand : p.brandFallback,
+      role: p.role,
+      isAlternative: p.isAlternative,
+      variantLabel: p.variantLabel,
+      durabilityLabel: p.durabilityLabel,
+      estoque: hasRealItem
+        ? {
+            quantidadeAtual: Number(p.itemQuantity),
+            unidade: p.itemUnit!,
+            disponivel: Number(p.itemQuantity) > 0,
+            status: computeStatus({ currentQuantity: Number(p.itemQuantity), minimumStock: p.itemMinimumStock !== null ? Number(p.itemMinimumStock) : null }),
+          }
+        : null,
+    });
     productsByService.set(p.serviceId, list);
   }
 

@@ -417,27 +417,48 @@ export const serviceOperationalSteps = pgTable(
  * serviços confirmados nesta missão (motor, chassi, chuva ácida, proteção de vidros, faróis,
  * plásticos, couro) não variam por porte e não têm nenhuma amostra de calibração real — forçar
  * esses casos em `serviceConsumptionRules` exigiria um `vehicleCategory`/`unit` artificial só
- * para satisfazer o schema. Aqui só se registra QUAL produto real (sempre um `itemId` de
- * `inventoryItems`, nunca inventado) está confirmado para qual papel no serviço — nunca inferido
- * pela mera existência do produto no estoque (ver `isInferredFromStock`, sempre `false` aqui:
- * todo registro desta tabela vem de confirmação explícita do gestor).
+ * para satisfazer o schema. Aqui só se registra QUAL produto real está confirmado para qual papel
+ * no serviço — nunca inferido pela mera existência do produto no estoque: todo registro desta
+ * tabela vem de confirmação explícita do gestor.
+ *
+ * Missão Z3.3 (gerente operacional: serviço → etapa → produto homologado → estoque real) —
+ * `itemId` passou a ser NULLABLE e ganhou `priceVariantId`/`productNameFallback`/`brandFallback`/
+ * `durabilityLabel`: um produto pode ser HOMOLOGADO (confirmado pelo gestor como opção adequada,
+ * ex.: os 3 vitrificadores de couro citados na missão) mesmo sem nunca ter sido cadastrado no
+ * estoque real — nesse caso `itemId` fica null e `productNameFallback`/`brandFallback` guardam o
+ * nome/marca exatamente como o gestor informou (nunca um `itemId` inventado só para satisfazer o
+ * schema). Quando `itemId` está preenchido, o produto É um item real de `inventoryItems` e sua
+ * disponibilidade é sempre lida do saldo atual dele — nunca hardcoded aqui. Aplicação garante
+ * `itemId IS NOT NULL OR productNameFallback IS NOT NULL` (sem CHECK no banco, mesmo padrão de
+ * invariante só-em-aplicação já usado no restante deste schema). `priceVariantId` (nullable,
+ * aponta para `service_price_variants`) existe porque produtos homologados podem variar por
+ * variante de preço do MESMO serviço (ex.: vitrificação de pintura 1/2/3/4/5 anos usa produtos
+ * diferentes por duração) — null significa "vale para o serviço inteiro, independente de
+ * variante" (ex.: Glass Limpa Vidros nos três pacotes, independente do porte).
  */
 export const serviceProducts = pgTable("service_products", {
   id: id(),
   serviceId: uuid("service_id")
     .notNull()
     .references(() => services.id),
-  itemId: uuid("item_id")
-    .notNull()
-    .references(() => inventoryItems.id),
+  /** Nullable quando a homologação vale para o serviço inteiro, independente de variante (ex.: porte). Preenchido quando o produto é específico de uma variante (ex.: uma duração de vitrificação). */
+  priceVariantId: uuid("price_variant_id").references(() => servicePriceVariants.id),
+  /** Null quando o produto homologado ainda não foi cadastrado no estoque real (ver `productNameFallback`). */
+  itemId: uuid("item_id").references(() => inventoryItems.id),
+  /** Nome do produto exatamente como o gestor confirmou — só preenchido quando `itemId` é null. */
+  productNameFallback: text("product_name_fallback"),
+  /** Marca do produto exatamente como o gestor confirmou — só preenchido quando `itemId` é null. */
+  brandFallback: text("brand_fallback"),
   /** Papel do produto no serviço, em texto curto confirmado pelo gestor (ex.: "Proteção com cera líquida", "Desengraxante", "Finalização com verniz") — nunca inventado. */
   role: text("role").notNull(),
   /** `true` quando o gestor confirmou este produto como uma ALTERNATIVA aceitável a outro já cadastrado para o mesmo papel (ex.: Nograx OU o "3 em 1"), nunca uma dedução. */
   isAlternative: boolean("is_alternative").notNull().default(false),
+  /** Durabilidade/proteção aproximada confirmada pelo gestor para ESTE produto especificamente (ex.: "~1 ano", "1 a 2 anos") — nunca inventada, nunca tratada como garantia. Null até confirmação. */
+  durabilityLabel: text("durability_label"),
   displayOrder: integer("display_order"),
   active: active(),
   source: source(),
-  /** `${serviceExternalId}:${itemId}:${role-slug}` — idempotência do seed. */
+  /** `${serviceExternalId}:${variantLabel ?? "-"}:${itemId ?? "fallback:" + productNameFallback-slug}:${role-slug}` — idempotência do seed. */
   externalId: text("external_id").unique(),
   notes: notes(),
   ...timestamps,
