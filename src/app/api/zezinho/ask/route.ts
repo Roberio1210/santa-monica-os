@@ -107,11 +107,16 @@ export async function POST(request: Request) {
         nextContext: sanitizeContext(context),
         history: nextHistory,
         durationMs: Date.now() - startedAt,
+        // Missão Z3.4 — verdade por mensagem (não só a config da página inteira): esta resposta
+        // específica veio do modelo generativo. Nunca inferido pelo cliente, sempre declarado
+        // aqui, para a UI nunca poder afirmar "IA generativa" numa resposta que na verdade caiu
+        // no fallback (ver auditoria da missão).
+        pipeline: "generativo" as const,
       });
     }
 
     const { answer, nextContext } = await answerFreeText(safeText, sanitizeContext(context), role);
-    return NextResponse.json({ answer, nextContext, durationMs: Date.now() - startedAt });
+    return NextResponse.json({ answer, nextContext, durationMs: Date.now() - startedAt, pipeline: "analitico_local" as const });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Falha ao consultar os dados.", durationMs: Date.now() - startedAt },

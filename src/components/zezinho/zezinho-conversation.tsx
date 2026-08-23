@@ -38,7 +38,11 @@ interface ChatMessage {
   durationMs?: number;
   /** Só em mensagens do Zézinho: a pergunta do usuário que originou esta resposta ("Refazer análise"). */
   question?: string;
+  /** Missão Z3.4 — qual pipeline respondeu ESTA mensagem específica (nunca inferido no cliente, sempre vindo do servidor) — a interface nunca pode afirmar "IA generativa" numa resposta que caiu no fallback. */
+  pipeline?: "generativo" | "analitico_local";
 }
+
+const PIPELINE_LABEL: Record<"generativo" | "analitico_local", string> = { generativo: "IA generativa", analitico_local: "Modo analítico local (fallback)" };
 
 function fieldId() {
   return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -101,9 +105,10 @@ export function ZezinhoConversation() {
       const answer = data.answer as ZezinhoAnswer;
       contextRef.current = data.nextContext as ReasoningSession;
       if (Array.isArray(data.history)) historyRef.current = data.history;
+      const pipeline = data.pipeline === "generativo" || data.pipeline === "analitico_local" ? data.pipeline : undefined;
       setMessages((prev) => [
         ...prev,
-        { id: fieldId(), role: "assistant", text: answer.text, links: answer.links, sources: answer.sources, facts: answer.facts, confidence: answer.confidence, followUps: answer.followUps, durationMs: data.durationMs, question: trimmed },
+        { id: fieldId(), role: "assistant", text: answer.text, links: answer.links, sources: answer.sources, facts: answer.facts, confidence: answer.confidence, followUps: answer.followUps, durationMs: data.durationMs, question: trimmed, pipeline },
       ]);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -195,6 +200,7 @@ export function ZezinhoConversation() {
                           </button>
                         ) : null}
                         {m.durationMs !== undefined ? <span>{(m.durationMs / 1000).toFixed(1)}s</span> : null}
+                        {m.pipeline ? <span>{PIPELINE_LABEL[m.pipeline]}</span> : null}
                       </div>
                     ) : null}
                     {openFundamentos[m.id] ? (

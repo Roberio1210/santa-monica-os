@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { JumpParkConnectionTest } from "@/components/configuracoes/jumppark-connection-test";
 import { getInventoryConsumptionMode } from "@/lib/config/env";
 import { fetchJumpParkDiagnostics } from "@/lib/integrations/jumppark/diagnostics";
-import { getAiProviderConfig } from "@/lib/zezinho/ai-provider";
+import { getGenerativeConfig } from "@/lib/zezinho/generative/config";
 import { isDatabaseConfigured } from "@/db/client";
 import { getStorageMode } from "@/lib/storage/mode";
 import { getAuthStatus } from "@/lib/auth/status";
@@ -53,7 +53,9 @@ export default async function StatusPage() {
   const storageMode = getStorageMode();
   const auth = getAuthStatus();
   const consumptionMode = getInventoryConsumptionMode();
-  const ai = getAiProviderConfig();
+  // Missão Z3.4 — mesma flag real usada por `answerGenerative`/`orchestrator.ts`, nunca o
+  // `ai-provider.ts` legado (que não reflete o Vercel AI Gateway — ver relatório da missão).
+  const generative = getGenerativeConfig();
 
   const commitSha = process.env.VERCEL_GIT_COMMIT_SHA;
   const shortCommit = commitSha ? commitSha.slice(0, 7) : null;
@@ -157,13 +159,12 @@ export default async function StatusPage() {
         </CardHeader>
         <CardContent className="pt-0">
           <StatusRow label="Disponível" ok={true} okLabel="Sim" notOkLabel="Não" />
-          <StatusRow label="Modo" ok={ai.enabled} okLabel={`IA generativa (${ai.provider})`} notOkLabel="Analítico local" />
-          <StatusRow label="Provedor configurado" ok={ai.provider !== "disabled"} okLabel={ai.provider} notOkLabel="Nenhum" />
+          <StatusRow label="Modo" ok={generative.enabled} okLabel="IA generativa (Vercel AI Gateway)" notOkLabel="Analítico local" />
           <div className="flex items-center justify-between py-2 last:border-0">
             <p className="text-sm text-foreground-muted">Modelo</p>
-            <Badge variant="outline">{ai.model ?? "Não informado"}</Badge>
+            <Badge variant="outline">{generative.model}</Badge>
           </div>
-          {!ai.enabled ? <p className="mt-2 text-xs text-foreground-subtle">IA generativa não configurada — usando modo analítico local.</p> : null}
+          <p className="mt-2 text-xs text-foreground-subtle">{generative.enabled ? "IA generativa ativa — o modo analítico local continua disponível como fallback automático se o provedor ficar indisponível." : "IA generativa desligada nesta variável de ambiente — usando modo analítico local."}</p>
         </CardContent>
       </Card>
 
