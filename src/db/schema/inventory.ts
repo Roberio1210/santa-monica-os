@@ -110,6 +110,17 @@ export const processStepEnum = pgEnum("process_step", [
   "chuva_acida",
   "cristalizacao",
   "revisao_final",
+  // Missão Z3.2 — etapas confirmadas pelo gestor para diferenciar Bronze/Silver/Gold de verdade
+  // (a auditoria da Z3 encontrou Silver e Gold com as mesmas etapas cadastradas — incorreto).
+  "simbolos",
+  "letras",
+  "macanetas",
+  "sanitizacao_interna",
+  "cera_carnauba",
+  "batentes",
+  "descontaminacao_ferrosa",
+  "cromados",
+  "estepe",
 ]);
 
 export const recipeStatusEnum = pgEnum("recipe_status", ["rascunho", "em_calibracao", "aprovada", "suspensa"]);
@@ -304,8 +315,16 @@ export const services = pgTable("services", {
   id: id(),
   name: text("name").notNull(),
   category: text("category"),
-  /** Preço padrão do serviço — só quando o serviço tem UM preço único (sem variação por porte/tier). Serviços com variação usam `servicePriceVariants`, e este campo fica null. Nunca inventado. */
+  /** Preço-base do serviço — só quando o serviço tem UM preço único (sem variação por porte/tier). Serviços com variação usam `servicePriceVariants`, e este campo fica null. Nunca inventado. */
   defaultPrice: numeric("default_price", { precision: 12, scale: 2 }),
+  /**
+   * Missão Z3.2 — condição comercial atualmente praticada, quando DIFERENTE do preço-base
+   * (`defaultPrice`). Null significa "preço comercial atual = preço-base" (o caso comum). Nunca
+   * preenchido a partir do valor de uma Ordem de Serviço específica — só de confirmação explícita
+   * do gestor. Ver `docs` da missão: preço-base ≠ preço comercial atual ≠ preço negociado (esse
+   * último nunca é armazenado aqui, só existe na OS/venda em si).
+   */
+  currentPrice: numeric("current_price", { precision: 12, scale: 2 }),
   active: active(),
   source: source(),
   /** Slug estável (ex.: "lavacao-parceria-iesa"), único, para seed idempotente. */
@@ -347,7 +366,10 @@ export const servicePriceVariants = pgTable(
     vehicleCategory: vehicleCategoryEnum("vehicle_category"),
     /** Segunda dimensão de variação em texto livre (ex.: "Sem cera", "1 ano", "08h-18h Fração") — null quando a variação é só por porte. */
     variantLabel: text("variant_label"),
+    /** Preço-base desta variante. Nunca inventado. */
     price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+    /** Missão Z3.2 — condição comercial atual, quando diferente do preço-base (`price`). Null = preço comercial atual é o próprio `price`. Mesmo princípio de `services.currentPrice`. */
+    currentPrice: numeric("current_price", { precision: 12, scale: 2 }),
     displayOrder: integer("display_order"),
     active: active(),
     source: source(),
@@ -388,6 +410,80 @@ export const serviceOperationalSteps = pgTable(
   },
   (table) => [unique().on(table.serviceId, table.processStep)],
 );
+
+/**
+ * Missão Z3.2 — "este serviço usa este produto", separado de `serviceConsumptionRules` (que
+ * exige porte + etapa + unidade + é voltado para CALIBRAÇÃO de consumo/quantidade). Muitos dos
+ * serviços confirmados nesta missão (motor, chassi, chuva ácida, proteção de vidros, faróis,
+ * plásticos, couro) não variam por porte e não têm nenhuma amostra de calibração real — forçar
+ * esses casos em `serviceConsumptionRules` exigiria um `vehicleCategory`/`unit` artificial só
+ * para satisfazer o schema. Aqui só se registra QUAL produto real (sempre um `itemId` de
+ * `inventoryItems`, nunca inventado) está confirmado para qual papel no serviço — nunca inferido
+ * pela mera existência do produto no estoque (ver `isInferredFromStock`, sempre `false` aqui:
+ * todo registro desta tabela vem de confirmação explícita do gestor).
+ */
+export const serviceProducts = pgTable("service_products", {
+  id: id(),
+  serviceId: uuid("service_id")
+    .notNull()
+    .references(() => services.id),
+  itemId: uuid("item_id")
+    .notNull()
+    .references(() => inventoryItems.id),
+  /** Papel do produto no serviço, em texto curto confirmado pelo gestor (ex.: "Proteção com cera líquida", "Desengraxante", "Finalização com verniz") — nunca inventado. */
+  role: text("role").notNull(),
+  /** `true` quando o gestor confirmou este produto como uma ALTERNATIVA aceitável a outro já cadastrado para o mesmo papel (ex.: Nograx OU o "3 em 1"), nunca uma dedução. */
+  isAlternative: boolean("is_alternative").notNull().default(false),
+  displayOrder: integer("display_order"),
+  active: active(),
+  source: source(),
+  /** `${serviceExternalId}:${itemId}:${role-slug}` — idempotência do seed. */
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Missão Z3.2 — política comercial estruturada (nunca só no system prompt do Zézinho, para poder
+ * mudar sem editar código — ver missão, seção 31). Modelada como linha única de configuração
+ * (não um KV genérico): os parâmetros são finitos e conhecidos, um KV store seria
+ * sobre-engenharia para 4 números. Nunca contém custo/margem interna — só regras de negociação
+ * voltadas ao cliente, seguras para o papel operacional.
+ */
+export const commercialPolicy = pgTable("commercial_policy", {
+  id: id(),
+  /** Limite máximo de desconto financeiro, em % — nunca oferecido de imediato, sempre último recurso. */
+  maxDiscountPercent: numeric("max_discount_percent", { precision: 5, scale: 2 }).notNull(),
+  /** Passos sugeridos de progressão do desconto, em %, do menor ao maior (ex.: [5, 10]) — nunca pular direto para o máximo. */
+  discountProgressionSteps: jsonb("discount_progression_steps").notNull(),
+  /** Valor mínimo da venda para oferecer parcelamento. */
+  installmentThresholdAmount: numeric("installment_threshold_amount", { precision: 12, scale: 2 }).notNull(),
+  maxInstallments: integer("max_installments").notNull(),
+  active: active(),
+  source: source(),
+  notes: notes(),
+  ...timestamps,
+});
+
+/**
+ * Missão Z3.2 — quais serviços já têm autorização prévia do gestor para serem oferecidos como
+ * cortesia estratégica (nunca decidido pelo Zézinho sozinho — só reflete o que já foi
+ * autorizado). O "valor percebido" da cortesia é sempre o preço real do próprio serviço em
+ * `services`/`servicePriceVariants` — nunca duplicado aqui.
+ */
+export const serviceComplimentaryOptions = pgTable("service_complimentary_options", {
+  id: id(),
+  serviceId: uuid("service_id")
+    .notNull()
+    .references(() => services.id),
+  /** Contexto de quando esta cortesia é apropriada, confirmado pelo gestor (ex.: "fechamento de ticket relevante com vários serviços adicionais"). */
+  context: text("context"),
+  active: active(),
+  source: source(),
+  externalId: text("external_id").unique(),
+  notes: notes(),
+  ...timestamps,
+});
 
 /**
  * Receita técnica de consumo — serviço × categoria de veículo × etapa × produto (FASE B).

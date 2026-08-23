@@ -12,6 +12,7 @@ import { searchServiceCatalog } from "@/lib/services/catalog";
 import { COMPANY_INFO } from "@/lib/company/info";
 import { fetchCapacityForDate } from "@/lib/planning/service";
 import { saoPauloDateISO, addDaysIso } from "@/lib/utils/timezone";
+import { fetchCommercialPolicy, fetchComplimentaryOptions } from "@/lib/services/commercialPolicy";
 
 /**
  * Missão Z2 — schemas de tool-calling para o modelo generativo. Ponte fina sobre o mesmo
@@ -184,7 +185,7 @@ function buildKnowledgeTools(): ToolSet {
   return {
     service_catalog_search: tool({
       description:
-        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço real, descrição e etapas incluídas quando cadastradas. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor. Ao listar 'etapas_incluidas', reproduza os nomes EXATAMENTE como vieram — nunca acrescente produto, técnica ou qualificador que o resultado não trouxe (ex.: se veio 'shampoo', responda 'shampoo', nunca 'shampoo exterior' ou 'shampoo automotivo').",
+        "Busca serviços/pacotes da Santa Mônica por nome, categoria ou porte do veículo — preço-base, condição comercial atual (quando diferente), produtos confirmados e etapas incluídas quando cadastrados. Quando um campo vier null/[], significa que ainda não foi confirmado pelo gestor — nunca deduza o valor. Ao listar 'etapas_incluidas', reproduza os nomes EXATAMENTE como vieram — nunca acrescente produto, técnica ou qualificador que o resultado não trouxe (ex.: se veio 'shampoo', responda 'shampoo', nunca 'shampoo exterior' ou 'shampoo automotivo').",
       inputSchema: serviceCatalogSearchInputSchema,
       execute: async ({ busca, porte, categoria }) => {
         const results = await searchServiceCatalog({ query: busca, vehicleCategory: porte, category: categoria });
@@ -192,8 +193,11 @@ function buildKnowledgeTools(): ToolSet {
           servicos: results.map((s) => ({
             nome: s.name,
             categoria: s.category,
-            preco_unico: s.defaultPrice,
-            precos_por_variante: s.priceVariants.map((v) => ({ porte: v.vehicleCategory, variante: v.variantLabel, preco: v.price })),
+            preco_base: s.defaultPrice,
+            // Missão Z3.2 — preço-base ≠ preço comercial atual ≠ preço negociado (esse último só existe na venda, nunca aqui).
+            // Quando preco_comercial_atual vier null, o preço vigente é o próprio preco_base.
+            preco_comercial_atual: s.currentPrice,
+            precos_por_variante: s.priceVariants.map((v) => ({ porte: v.vehicleCategory, variante: v.variantLabel, preco_base: v.price, preco_comercial_atual: v.currentPrice })),
             descricao_curta: s.shortDescription,
             descricao_detalhada: s.detailedDescription,
             tempo_estimado_minutos: s.estimatedDurationMinutes,
@@ -207,6 +211,8 @@ function buildKnowledgeTools(): ToolSet {
             // exterior", "cera/moção") mesmo quando instruídos no prompt geral a não fazer isso.
             // Repetir a regra colada ao dado reduz esse vazamento (achado real da Missão Z3).
             aviso_etapas_incluidas: s.operationalSteps.length > 0 ? "Reproduza estes nomes EXATAMENTE como estão, palavra por palavra. Não acrescente produto, técnica, marca, duração ou qualquer outro qualificador — nenhum deles foi informado." : null,
+            // Missão Z3.2 — produtos confirmados pelo gestor (nunca inferidos pela mera existência no estoque).
+            produtos: s.products.length > 0 ? s.products.map((p) => ({ produto: p.productName, papel: p.role, alternativa: p.isAlternative })) : null,
           })),
         };
       },
@@ -243,6 +249,23 @@ function buildKnowledgeTools(): ToolSet {
           percentual_ocupado: prep.capacity.percentOccupied,
           veiculos_agendados: prep.vehicleCount,
           previsao_por_servico: prep.forecast.calculable ? prep.forecast.entries.map((e) => ({ servico: e.serviceName, cabem: e.canFit })) : null,
+        };
+      },
+    }),
+    commercial_policy: tool({
+      description:
+        "Regras reais de negociação da Santa Mônica: limite máximo de desconto financeiro, progressão sugerida, valor mínimo e parcelas para parcelamento no cartão, e quais serviços já têm autorização do gestor para ser oferecidos como cortesia estratégica. SEMPRE consulte esta ferramenta antes de mencionar desconto, parcelamento ou cortesia — nunca use um número de memória.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const [policy, complimentary] = await Promise.all([fetchCommercialPolicy(), fetchComplimentaryOptions()]);
+        return {
+          politica_configurada: policy !== null,
+          desconto_maximo_percentual: policy?.maxDiscountPercent ?? null,
+          progressao_desconto_sugerida: policy?.discountProgressionSteps ?? null,
+          valor_minimo_para_parcelamento: policy?.installmentThresholdAmount ?? null,
+          parcelas_maximas: policy?.maxInstallments ?? null,
+          cortesias_autorizadas: complimentary.length > 0 ? complimentary.map((c) => ({ servico: c.serviceName, contexto: c.context })) : null,
+          aviso: "O desconto financeiro é SEMPRE o último recurso, depois de cortesia e parcelamento. Nunca ofereça o percentual máximo de imediato — comece pelo primeiro passo da progressão sugerida.",
         };
       },
     }),

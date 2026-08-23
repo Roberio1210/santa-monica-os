@@ -33,12 +33,13 @@ export interface GenerativeAnswer {
 }
 
 /**
- * Missão Z2.1/Z3 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de canal
- * interno como texto literal na resposta, em pelo menos duas variações observadas em produção:
- * "analysis...raciocínio...assistantfinal...resposta" (texto puro) e
- * "<|channel|>final<|message|>...resposta" (tokens de controle literais). Nunca mostrar esse
- * raciocínio ao usuário — quando qualquer um dos marcadores aparece, mantém só o que vem depois
- * do ÚLTIMO marcador encontrado (o mais à direita = o canal final de verdade).
+ * Missão Z2.1/Z3/Z3.2 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de
+ * canal interno como texto literal na resposta. Três variações reais já observadas em produção:
+ * "analysis...raciocínio...assistantfinal...resposta" (texto puro), "<|channel|>final<|message|>
+ * ...resposta" (tokens de controle literais), e um "final"/"analysis" solto colado direto no
+ * início da resposta (ex.: "finalPelo que encontrei..."). Nunca mostrar esse raciocínio ao
+ * usuário — quando qualquer um dos marcadores aparece, mantém só o que vem depois do ÚLTIMO
+ * encontrado (o mais à direita = o canal final de verdade).
  */
 function stripLeakedReasoningChannel(text: string): string {
   const markers = ["<|channel|>final<|message|>", "assistantfinal"];
@@ -51,8 +52,11 @@ function stripLeakedReasoningChannel(text: string): string {
       bestMarkerLength = marker.length;
     }
   }
-  if (bestIdx === -1) return text.trim();
-  return text.slice(bestIdx + bestMarkerLength).trim();
+  const stage1 = bestIdx === -1 ? text : text.slice(bestIdx + bestMarkerLength);
+  // Nome de canal solto colado no início (sem espaço, seguido de maiúscula/aspas/dígito/parêntese
+  // — nunca uma palavra real em português nessa posição) — cobre o caso "finalPelo que..." acima.
+  const stage2 = stage1.replace(/^(analysis|commentary|final)(?=["'(A-ZÀ-Ú0-9])/, "");
+  return stage2.trim();
 }
 
 export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole): Promise<GenerativeAnswer | null> {

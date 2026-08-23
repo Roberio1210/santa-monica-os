@@ -22,6 +22,7 @@ function entry(overrides: Partial<ServiceCatalogEntry>): ServiceCatalogEntry {
     name: "Gold",
     category: "Pacote",
     defaultPrice: null,
+    currentPrice: null,
     priceVariants: [],
     shortDescription: null,
     detailedDescription: null,
@@ -31,6 +32,7 @@ function entry(overrides: Partial<ServiceCatalogEntry>): ServiceCatalogEntry {
     restrictions: null,
     requiresInspection: false,
     operationalSteps: [],
+    products: [],
     ...overrides,
   };
 }

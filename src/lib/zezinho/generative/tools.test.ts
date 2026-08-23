@@ -32,7 +32,7 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     }
   });
 
-  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 3 da Missão Z3 (catálogo de serviços, empresa, agenda)", () => {
+  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 4 da Missão Z3/Z3.2 (catálogo de serviços, empresa, agenda, política comercial)", () => {
     const tools = buildZezinhoTools("admin");
     for (const id of ADMIN_ONLY_IDS) {
       expect(tools).toHaveProperty(id);
@@ -43,14 +43,16 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     expect(tools).toHaveProperty("service_catalog_search");
     expect(tools).toHaveProperty("company_info");
     expect(tools).toHaveProperty("agenda_availability");
-    expect(Object.keys(tools).length).toBe(23 + 2 + 3);
+    expect(tools).toHaveProperty("commercial_policy");
+    expect(Object.keys(tools).length).toBe(23 + 2 + 4);
   });
 
-  it("operacional também recebe as 3 ferramentas da Missão Z3 — preço comercial, endereço e agenda não são dado financeiro gerencial", () => {
+  it("operacional também recebe as 4 ferramentas da Missão Z3/Z3.2 — preço comercial, endereço, agenda e política de negociação não são dado financeiro gerencial", () => {
     const tools = buildZezinhoTools("operacional");
     expect(tools).toHaveProperty("service_catalog_search");
     expect(tools).toHaveProperty("company_info");
     expect(tools).toHaveProperty("agenda_availability");
+    expect(tools).toHaveProperty("commercial_policy");
   });
 
   it("operacional recebe as ferramentas seguras (redigidas ou já sem dado financeiro)", () => {

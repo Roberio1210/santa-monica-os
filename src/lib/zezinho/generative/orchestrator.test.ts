@@ -81,6 +81,28 @@ describe("answerGenerative", () => {
     expect(result?.text).not.toContain("<|channel|>");
   });
 
+  it("Missão Z3.2 (terceira variante real encontrada em produção) — remove o nome de canal solto colado no início ('finalPelo que encontrei...')", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({
+      text: "finalPelo que encontrei na política comercial, o preço-base do Polimento Comercial é R$ 600.",
+      toolCalls: [],
+      steps: [{}],
+      usage: { inputTokens: 10, outputTokens: 10 },
+    });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("Quanto custa o polimento comercial?", [], "operacional");
+    expect(result?.text).toBe("Pelo que encontrei na política comercial, o preço-base do Polimento Comercial é R$ 600.");
+    expect(result?.text.startsWith("final")).toBe(false);
+  });
+
+  it("nunca remove a palavra 'final' quando ela é parte legítima de uma frase real (com espaço depois)", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({ text: "final ajuste feito com sucesso.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("oi", [], "operacional");
+    expect(result?.text).toBe("final ajuste feito com sucesso.");
+  });
+
   it("texto sem o marcador do formato Harmony passa intacto (nunca corta resposta de outros modelos)", async () => {
     process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
     generateTextMock.mockResolvedValue({ text: "Resposta normal, sem nenhum canal interno.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });

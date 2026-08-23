@@ -27,7 +27,17 @@ export type ProcessStep =
   | "farois"
   | "chuva_acida"
   | "cristalizacao"
-  | "revisao_final";
+  | "revisao_final"
+  // Missão Z3.2 — etapas confirmadas para diferenciar Bronze/Silver/Gold de verdade.
+  | "simbolos"
+  | "letras"
+  | "macanetas"
+  | "sanitizacao_interna"
+  | "cera_carnauba"
+  | "batentes"
+  | "descontaminacao_ferrosa"
+  | "cromados"
+  | "estepe";
 
 export const processSteps: ProcessStep[] = [
   "pre_lavagem",
@@ -53,6 +63,15 @@ export const processSteps: ProcessStep[] = [
   "chuva_acida",
   "cristalizacao",
   "revisao_final",
+  "simbolos",
+  "letras",
+  "macanetas",
+  "sanitizacao_interna",
+  "cera_carnauba",
+  "batentes",
+  "descontaminacao_ferrosa",
+  "cromados",
+  "estepe",
 ];
 
 export type RecipeStatus = "rascunho" | "em_calibracao" | "aprovada" | "suspensa";
