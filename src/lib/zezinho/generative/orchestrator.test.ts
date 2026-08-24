@@ -95,6 +95,20 @@ describe("answerGenerative", () => {
     expect(result?.text.startsWith("final")).toBe(false);
   });
 
+  it("Missão Z4 (quarta variante real encontrada em produção, confirmação com chamada real autenticada como admin) — remove 'final' colado direto num negrito markdown ('final**Fechamento...')", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({
+      text: "final**Fechamento Gerencial – Hoje**\n\n| Indicador | Valor |",
+      toolCalls: [],
+      steps: [{}],
+      usage: { inputTokens: 10, outputTokens: 10 },
+    });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("Fecha o dia", [], "admin");
+    expect(result?.text.startsWith("**Fechamento Gerencial")).toBe(true);
+    expect(result?.text.startsWith("final")).toBe(false);
+  });
+
   it("nunca remove a palavra 'final' quando ela é parte legítima de uma frase real (com espaço depois)", async () => {
     process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
     generateTextMock.mockResolvedValue({ text: "final ajuste feito com sucesso.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });

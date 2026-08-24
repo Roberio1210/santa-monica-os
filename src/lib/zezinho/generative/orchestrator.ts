@@ -53,9 +53,12 @@ function stripLeakedReasoningChannel(text: string): string {
     }
   }
   const stage1 = bestIdx === -1 ? text : text.slice(bestIdx + bestMarkerLength);
-  // Nome de canal solto colado no início (sem espaço, seguido de maiúscula/aspas/dígito/parêntese
-  // — nunca uma palavra real em português nessa posição) — cobre o caso "finalPelo que..." acima.
-  const stage2 = stage1.replace(/^(analysis|commentary|final)(?=["'(A-ZÀ-Ú0-9])/, "");
+  // Nome de canal solto colado no início (sem espaço, seguido de maiúscula/aspas/dígito/parêntese/
+  // asterisco de markdown — nunca uma palavra real em português nessa posição) — cobre o caso
+  // "finalPelo que..." e, achado real na Missão Z4 (confirmação com chamada real autenticada como
+  // admin), "final**Fechamento..." (o modelo abre a resposta com negrito em markdown logo após o
+  // nome do canal, sem espaço).
+  const stage2 = stage1.replace(/^(analysis|commentary|final)(?=["'(*A-ZÀ-Ú0-9])/, "");
   return stage2.trim();
 }
 
