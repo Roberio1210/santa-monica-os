@@ -58,11 +58,22 @@ export interface AttendanceRepository {
   createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
   /** Placa normalizada (maiúscula, sem espaço), comparada mesmo quando a formatação salva difere — só para aviso de possível duplicidade, nunca funde/bloqueia. */
   findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]>;
+  /**
+   * Missão de Performance do CRM — mesma consulta de `listVehiclesByCustomer`, mas para MUITOS
+   * clientes de uma vez (1 consulta em vez de N). Existe só porque `listCustomerOverviews`
+   * (Missão 25, `crm-intelligente/overview.ts`) chamava a versão por-cliente uma vez por cliente
+   * da carteira inteira — com o pool real em `max: 1` (ver `db/client.ts`), 331 clientes reais
+   * levavam ~9 minutos (achado real, Missão de confirmação Z4). Nunca substitui
+   * `listVehiclesByCustomer` para o caso de consultar 1 cliente só.
+   */
+  listVehiclesForCustomers(customerIds: string[]): Promise<Vehicle[]>;
 
   createServiceVisit(input: { customerId: string; vehicleId: string; mileageAtVisit: number | null }): Promise<ServiceVisit>;
   getServiceVisit(id: string): Promise<ServiceVisit | null>;
   listVisitsByCustomer(customerId: string): Promise<ServiceVisit[]>;
   listVisitsByVehicle(vehicleId: string): Promise<ServiceVisit[]>;
+  /** Mesmo espírito de `listVehiclesForCustomers` — versão em lote de `listVisitsByCustomer`, mesma motivação de performance. */
+  listVisitsForCustomers(customerIds: string[]): Promise<ServiceVisit[]>;
 
   /** Upsert por `serviceVisitId` (constraint única) — nunca duplica diagnóstico da mesma visita. */
   saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic>;
@@ -72,6 +83,8 @@ export interface AttendanceRepository {
   addRecommendation(input: AddRecommendationInput): Promise<TechnicalRecommendation>;
   listRecommendationsByVisit(serviceVisitId: string): Promise<TechnicalRecommendation[]>;
   listRecommendationsByCustomer(customerId: string): Promise<TechnicalRecommendation[]>;
+  /** Versão em lote de `listRecommendationsByCustomer` — recebe os `visitId`s já resolvidos (evita repetir `listVisitsByCustomer` por cliente), mesma motivação de `listVehiclesForCustomers`. */
+  listRecommendationsForVisits(visitIds: string[]): Promise<TechnicalRecommendation[]>;
 
   /** `url` sempre `null` — só registra que a foto foi capturada e em qual etapa (estrutura preparada, sem upload real). */
   addPhoto(input: AddPhotoInput): Promise<DiagnosticPhoto>;
@@ -84,6 +97,8 @@ export interface AttendanceRepository {
   getServiceOrder(id: string): Promise<ServiceOrder | null>;
   getServiceOrderByVisit(serviceVisitId: string): Promise<ServiceOrder | null>;
   listServiceOrdersByCustomer(customerId: string): Promise<ServiceOrder[]>;
+  /** Versão em lote de `listServiceOrdersByCustomer` — recebe os `visitId`s já resolvidos, já com os itens de cada ordem batidos numa única consulta extra (nunca N consultas de itens, uma por ordem). */
+  listServiceOrdersForVisits(visitIds: string[]): Promise<ServiceOrder[]>;
   updateServiceOrderStatus(id: string, status: ServiceOrderStatus): Promise<ServiceOrder>;
 
   /** Todas as ordens ativas (não entregues), já com dado de cliente/veículo para o Painel do Gerente. */

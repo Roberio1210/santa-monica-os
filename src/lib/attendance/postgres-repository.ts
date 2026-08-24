@@ -230,6 +230,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toVehicle);
   }
 
+  async listVehiclesForCustomers(customerIds: string[]): Promise<Vehicle[]> {
+    if (customerIds.length === 0) return [];
+    const rows = await this.db().select().from(vehicles).where(inArray(vehicles.customerId, customerIds));
+    return rows.map(toVehicle);
+  }
+
   async createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
     const [row] = await this.db()
       .insert(vehicles)
@@ -261,6 +267,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
 
   async listVisitsByCustomer(customerId: string): Promise<ServiceVisit[]> {
     const rows = await this.db().select().from(serviceVisits).where(eq(serviceVisits.customerId, customerId)).orderBy(desc(serviceVisits.createdAt));
+    return rows.map(toServiceVisit);
+  }
+
+  async listVisitsForCustomers(customerIds: string[]): Promise<ServiceVisit[]> {
+    if (customerIds.length === 0) return [];
+    const rows = await this.db().select().from(serviceVisits).where(inArray(serviceVisits.customerId, customerIds)).orderBy(desc(serviceVisits.createdAt));
     return rows.map(toServiceVisit);
   }
 
@@ -316,6 +328,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
 
   async listRecommendationsByCustomer(customerId: string): Promise<TechnicalRecommendation[]> {
     const visitIds = (await this.listVisitsByCustomer(customerId)).map((v) => v.id);
+    if (visitIds.length === 0) return [];
+    const rows = await this.db().select().from(technicalRecommendations).where(inArray(technicalRecommendations.serviceVisitId, visitIds));
+    return rows.map(toRecommendation);
+  }
+
+  async listRecommendationsForVisits(visitIds: string[]): Promise<TechnicalRecommendation[]> {
     if (visitIds.length === 0) return [];
     const rows = await this.db().select().from(technicalRecommendations).where(inArray(technicalRecommendations.serviceVisitId, visitIds));
     return rows.map(toRecommendation);
@@ -384,6 +402,38 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     if (visitIds.length === 0) return [];
     const rows = await this.db().select().from(serviceOrders).where(inArray(serviceOrders.serviceVisitId, visitIds));
     return Promise.all(rows.map((r) => this.toServiceOrderWithItems(r)));
+  }
+
+  /**
+   * Versão em lote de `listServiceOrdersByCustomer` — os itens de TODAS as ordens vêm de uma
+   * única consulta extra (`inArray` pelos ids das ordens), nunca uma consulta de itens por ordem
+   * (era isso que fazia `toServiceOrderWithItems` chamado em loop, ver `listServiceOrdersByCustomer`
+   * acima — correto para 1 cliente, catastrófico para uma carteira inteira).
+   */
+  async listServiceOrdersForVisits(visitIds: string[]): Promise<ServiceOrder[]> {
+    if (visitIds.length === 0) return [];
+    const orderRows = await this.db().select().from(serviceOrders).where(inArray(serviceOrders.serviceVisitId, visitIds));
+    if (orderRows.length === 0) return [];
+    const orderIds = orderRows.map((r) => r.id);
+    const itemRows = await this.db()
+      .select({ id: serviceOrderItems.id, serviceOrderId: serviceOrderItems.serviceOrderId, serviceId: serviceOrderItems.serviceId, notes: serviceOrderItems.notes, serviceName: services.name })
+      .from(serviceOrderItems)
+      .innerJoin(services, eq(serviceOrderItems.serviceId, services.id))
+      .where(inArray(serviceOrderItems.serviceOrderId, orderIds));
+    const itemsByOrderId = new Map<string, ServiceOrderItem[]>();
+    for (const item of itemRows) {
+      const list = itemsByOrderId.get(item.serviceOrderId) ?? [];
+      list.push(item);
+      itemsByOrderId.set(item.serviceOrderId, list);
+    }
+    return orderRows.map((row) => ({
+      id: row.id,
+      serviceVisitId: row.serviceVisitId,
+      status: row.status,
+      items: itemsByOrderId.get(row.id) ?? [],
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }));
   }
 
   async updateServiceOrderStatus(id: string, status: ServiceOrderStatus): Promise<ServiceOrder> {

@@ -136,6 +136,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.vehicles.values()).filter((v) => v.customerId === customerId);
   }
 
+  async listVehiclesForCustomers(customerIds: string[]): Promise<Vehicle[]> {
+    const ids = new Set(customerIds);
+    return Array.from(this.vehicles.values()).filter((v) => ids.has(v.customerId));
+  }
+
   async createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
     const vehicle: Vehicle = {
       id: randomUUID(),
@@ -164,6 +169,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
 
   async listVisitsByCustomer(customerId: string): Promise<ServiceVisit[]> {
     return Array.from(this.visits.values()).filter((v) => v.customerId === customerId);
+  }
+
+  async listVisitsForCustomers(customerIds: string[]): Promise<ServiceVisit[]> {
+    const ids = new Set(customerIds);
+    return Array.from(this.visits.values()).filter((v) => ids.has(v.customerId));
   }
 
   async listVisitsByVehicle(vehicleId: string): Promise<ServiceVisit[]> {
@@ -218,6 +228,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
   async listRecommendationsByCustomer(customerId: string): Promise<TechnicalRecommendation[]> {
     const visitIds = new Set((await this.listVisitsByCustomer(customerId)).map((v) => v.id));
     return Array.from(this.recommendations.values()).filter((r) => visitIds.has(r.serviceVisitId));
+  }
+
+  async listRecommendationsForVisits(visitIds: string[]): Promise<TechnicalRecommendation[]> {
+    const ids = new Set(visitIds);
+    return Array.from(this.recommendations.values()).filter((r) => ids.has(r.serviceVisitId));
   }
 
   async countRecommendationsCreatedOnDate(dateIso: string): Promise<number> {
@@ -281,6 +296,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
   async listServiceOrdersByCustomer(customerId: string): Promise<ServiceOrder[]> {
     const visitIds = new Set((await this.listVisitsByCustomer(customerId)).map((v) => v.id));
     return Array.from(this.orders.values()).filter((o) => visitIds.has(o.serviceVisitId));
+  }
+
+  async listServiceOrdersForVisits(visitIds: string[]): Promise<ServiceOrder[]> {
+    const ids = new Set(visitIds);
+    return Array.from(this.orders.values()).filter((o) => ids.has(o.serviceVisitId));
   }
 
   async updateServiceOrderStatus(id: string, status: ServiceOrderStatus): Promise<ServiceOrder> {
