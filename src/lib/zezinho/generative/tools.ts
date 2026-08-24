@@ -331,6 +331,10 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
             pacotes: result.operational.packageCounts,
             principais_servicos: result.operational.topServices.map((s) => ({ servico: s.description, valor: s.amount })),
             aviso_principais_servicos: result.operational.topServices.length === 0 ? "Nenhuma ordem registrada neste período — não existe 'serviço mais vendido' para reportar. Nunca invente um nome de serviço nem monte uma tabela serviço x produto aqui." : null,
+            // Missão Z5 — quantidade por serviço real (não só valor) e "adicionais" (serviços de
+            // lavação fora Bronze/Silver/Gold) — mesmo agrupamento canônico já usado no mix de pacotes.
+            quantidade_por_servico: result.operational.serviceCounts.map((s) => ({ servico: s.description, quantidade: s.count })),
+            servicos_adicionais_vendidos: result.operational.additionalServicesCount,
           },
           financeiro: result.financial
             ? {
@@ -347,7 +351,17 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
                 stone_a_receber_hoje: result.financial.stonePendingToday,
               }
             : null,
-          estoque_atencao: result.inventoryAttention.map((i) => ({ produto: i.name, marca: i.brand, quantidade_atual: i.currentQuantity, unidade: i.unit, status: i.status })),
+          // Missão Z5 — estoque separado em COMPRAR/ATENÇÃO (decisão necessária) e OK relevante
+          // (usado em serviço vendido hoje ou comprado recentemente — nunca a lista completa de
+          // itens normais). "dias_restantes" só aparece quando a fonte técnica realmente existir
+          // (nunca inventado) — hoje esta ferramenta não estima isso, então NUNCA mencione "dias
+          // restantes" de um produto a partir só do saldo.
+          estoque: {
+            comprar: result.inventoryAttention.filter((i) => i.status === "comprar").map((i) => ({ produto: i.name, marca: i.brand, quantidade_atual: i.currentQuantity, unidade: i.unit })),
+            atencao: result.inventoryAttention.filter((i) => i.status === "atencao").map((i) => ({ produto: i.name, marca: i.brand, quantidade_atual: i.currentQuantity, unidade: i.unit })),
+            ok_relevante: result.inventoryOkRelevant.map((i) => ({ produto: i.name, marca: i.brand, quantidade_atual: i.currentQuantity, unidade: i.unit, motivo: i.reason })),
+            comprados_recentemente: result.recentPurchases.map((p) => ({ produto: p.name, quantidade: p.quantity, unidade: p.unit, data: p.date })),
+          },
           amanha: {
             veiculos_agendados: result.tomorrow.vehicleCount,
             capacidade_configurada: result.tomorrow.capacityConfigured,
@@ -365,13 +379,14 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
     // Missão Z4 — candidatos a pós-venda do dia (nunca envia nada, só sugere e prepara rascunho).
     post_sale_candidates: tool({
       description:
-        "Clientes atendidos HOJE que merecem alguma ação de pós-venda, já classificados (A: pedir avaliação Google; B: verificar satisfação antes; C: não abordar agora; D: precisa de atenção humana — nunca detectado automaticamente, só se você mesmo perceber isso na conversa) com uma mensagem-rascunho personalizada por cliente (nome, veículo e serviço reais, nunca a mesma frase para todos). NUNCA envia nada — só prepara o texto para revisão humana.",
+        "Clientes atendidos HOJE que merecem alguma ação de pós-venda, já classificados (A: pedir avaliação Google; B: verificar satisfação antes; C: não abordar agora; D: precisa de atenção humana — nunca detectado automaticamente, só se você mesmo perceber isso na conversa) com uma mensagem-rascunho personalizada por cliente (nome, veículo e serviço reais, nunca a mesma frase para todos). O link de avaliação Google ainda não está configurado no sistema — as mensagens de categoria A já trazem o texto '[LINK DE AVALIAÇÃO A CONFIGURAR]' no lugar do link; nunca invente uma URL real. NUNCA envia nada — só prepara o texto para revisão humana.",
       inputSchema: z.object({}),
       execute: async () => {
         const result = await fetchPostSaleCandidates();
         return {
           jumppark_configurado: result.jumpparkConfigured,
           erro: result.error,
+          link_avaliacao_configurado: result.reviewLinkConfigured,
           candidatos: result.candidates.map((c) => ({
             cliente: c.customerName,
             veiculo: c.vehicleModel,
@@ -401,6 +416,7 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
             veiculo: c.vehicleModel,
             placa_mascarada: c.plateMasked,
             telefone_mascarado: c.phoneMasked,
+            ultima_visita: c.lastVisitAt,
             dias_sem_retorno: c.daysSinceLastVisit,
             visitas_historicas: c.visitCount,
             gasto_historico_total: role === "admin" ? c.totalSpent : null,

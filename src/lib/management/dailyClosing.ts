@@ -2,22 +2,35 @@ import "server-only";
 import type { UserRole } from "@/lib/auth/roles";
 import { buildComparisonReport, type ComparisonReport, type ComparisonMetric } from "@/lib/zezinho/comparison-engine";
 import { fetchInventoryOverview } from "@/lib/inventory/service";
-import type { InventoryItemView } from "@/lib/inventory/types";
+import { getInventoryRepository } from "@/lib/inventory/repository-factory";
+import type { InventoryItemView, StockMovement } from "@/lib/inventory/types";
 import { fetchPlanningBoard } from "@/lib/planning/service";
 import type { AppointmentView, TomorrowPreparation } from "@/lib/planning/types";
 import { fetchServiceCatalog, type ServiceCatalogEntry } from "@/lib/services/catalog";
+import type { WashCategoryGroup } from "@/lib/integrations/jumppark/wash-grouping";
 import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financialScheduleService";
 import { isStoneConfigured } from "@/lib/config/env";
-import { resolvePeriod, previousPeriodOf, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
+import { resolvePeriod, previousPeriodOf, saoPauloDateISO, addDaysIso, type PeriodRange } from "@/lib/utils/timezone";
 
 /**
- * Missão Z4 — fechamento gerencial do dia. Camada de AGREGAÇÃO pura por cima de fontes já
+ * Missão Z4/Z5 — fechamento gerencial do dia. Camada de AGREGAÇÃO pura por cima de fontes já
  * existentes e auditadas (Regra Nº1 da missão): `buildComparisonReport` (Z2, mesmo motor que já
  * alimenta `full_period_comparison` e foi a fonte confirmada da resposta real auditada na Z3.4),
- * `fetchInventoryOverview` (estoque), `fetchPlanningBoard` (agenda real de `/planejamento`) e
- * `fetchServiceCatalog` (produtos homologados x estoque real, Z3.3). Nenhuma consulta nova ao
- * JumpPark/Stone/estoque é criada aqui — só composição e leitura somente-leitura.
+ * `fetchInventoryOverview`/`listMovements()` (estoque, uma consulta cada — nunca uma por item),
+ * `fetchPlanningBoard` (agenda real de `/planejamento`) e `fetchServiceCatalog` (produtos
+ * homologados x estoque real, Z3.3). Nenhuma consulta nova ao JumpPark/Stone/estoque é criada
+ * aqui — só composição e leitura somente-leitura.
+ *
+ * Missão Z5 — "quantidade por serviço"/"adicionais" vêm de `report.washCategoryGroupsA`, o MESMO
+ * agrupamento que `buildComparisonReport` já calculava internamente só para extrair
+ * `packageCountsA` (Bronze/Silver/Gold) — nunca uma segunda consulta ou um segundo agrupamento,
+ * só o resto do mesmo resultado, antes descartado.
  */
+
+/** Serviços de pacote (mesmos rótulos de `packageCounts` em comparison-engine.ts) — todo outro serviço de lavação real é "adicional". */
+const PACKAGE_LABELS = new Set(["Bronze", "Silver", "Gold"]);
+/** Janela de "comprado recentemente" no resumo de estoque — nunca escondida, sempre com a data real da movimentação. */
+const RECENT_PURCHASE_WINDOW_DAYS = 7;
 
 export interface ClosingInsight {
   id: string;
@@ -41,6 +54,27 @@ export interface InventoryAttentionItem {
   status: "comprar" | "atencao";
 }
 
+/** Item "OK" relevante hoje (usado em serviço vendido ou comprado recentemente) — nunca a lista completa de itens normais (seção 3 da missão). */
+export interface RelevantOkItem {
+  name: string;
+  brand: string;
+  currentQuantity: number;
+  unit: string;
+  reason: "usado_em_servico_hoje" | "comprado_recentemente";
+}
+
+export interface RecentPurchase {
+  name: string;
+  quantity: number;
+  unit: string;
+  date: string;
+}
+
+export interface ServiceCount {
+  description: string;
+  count: number;
+}
+
 export interface DailyOperationalSummary {
   ordersCount: number;
   vehiclesCount: number;
@@ -49,6 +83,10 @@ export interface DailyOperationalSummary {
   parkingCount: number;
   packageCounts: { Bronze: number; Silver: number; Gold: number };
   topServices: { description: string; amount: number | null }[];
+  /** Quantidade por serviço de lavação real (nome canônico, nunca inventado) — seção 1A da missão. */
+  serviceCounts: ServiceCount[];
+  /** Serviços de lavação que NÃO são Bronze/Silver/Gold (adicionais reais vendidos hoje). */
+  additionalServicesCount: number;
 }
 
 export interface DailyFinancialSummary {
@@ -85,6 +123,9 @@ export interface DailyClosingResult {
   /** `null` para o papel operacional — dado financeiro gerencial nunca chega nessa role (RBAC Z1). */
   financial: DailyFinancialSummary | null;
   inventoryAttention: InventoryAttentionItem[];
+  /** OK relevantes hoje (nunca a lista completa de itens normais) + comprados recentemente — seção 3 da missão Z5. */
+  inventoryOkRelevant: RelevantOkItem[];
+  recentPurchases: RecentPurchase[];
   tomorrow: TomorrowSummary;
   insights: ClosingInsight[];
   /** No máximo 5, só quando algum insight realmente sustentar uma ação — nunca genéricas (seção 21 da missão). */
@@ -113,7 +154,7 @@ function metricComparison(metrics: ComparisonMetric[], key: string) {
  * para a mesma métrica, risco identificado na auditoria desta missão). Limiares documentados
  * inline, nunca um score opaco.
  */
-export function deriveClosingInsights(report: ComparisonReport, role: UserRole): ClosingInsight[] {
+export function deriveClosingInsights(report: ComparisonReport, role: UserRole, additionalServicesCount: number = 0): ClosingInsight[] {
   const insights: ClosingInsight[] = [];
   const { metrics, packageCountsA, jumpparkConfigured } = report;
   if (!jumpparkConfigured) return insights;
@@ -121,6 +162,8 @@ export function deriveClosingInsights(report: ComparisonReport, role: UserRole):
   const revenueCmp = metricComparison(metrics, "revenue");
   const ticketCmp = metricComparison(metrics, "avgTicket");
   const ordersCmp = metricComparison(metrics, "orders");
+  const vehiclesCount = metricValue(metrics, "vehicles");
+  const avgTicket = metricValue(metrics, "avgTicket");
 
   if (role === "admin" && revenueCmp && revenueCmp.trend !== "indisponivel" && revenueCmp.deltaPercent !== null && Math.abs(revenueCmp.deltaPercent) >= 15) {
     insights.push({
@@ -171,6 +214,33 @@ export function deriveClosingInsights(report: ComparisonReport, role: UserRole):
     });
   }
 
+  // Poucos adicionais vendidos — só quando houve volume real de lavação para comparar contra (evita "0 de 0" soar como achado).
+  if (washCount >= 5 && additionalServicesCount === 0) {
+    insights.push({
+      id: "few-addons",
+      title: "Poucos serviços adicionais vendidos hoje",
+      evidence: `${washCount} lavações concluídas e nenhum serviço adicional (fora Bronze/Silver/Gold) registrado.`,
+      severity: "info",
+    });
+  }
+
+  const vehiclesCmp = metricComparison(metrics, "vehicles");
+  if (role === "admin" && vehiclesCmp && ticketCmp && vehiclesCmp.trend !== "queda" && vehiclesCmp.trend !== "indisponivel" && ticketCmp.trend === "queda") {
+    insights.push({
+      id: "high-volume-low-ticket",
+      title: "Bom volume de veículos, mas ticket médio abaixo do período de comparação",
+      evidence: `${vehiclesCount} veículos atendidos (${vehiclesCmp.trend}) com ticket médio de ${round2(avgTicket)} (${ticketCmp.deltaPercent}% vs. período anterior).`,
+      severity: "info",
+    });
+  } else if (role === "admin" && vehiclesCmp && ticketCmp && vehiclesCmp.trend === "queda" && ticketCmp.trend === "aumento") {
+    insights.push({
+      id: "low-volume-high-ticket",
+      title: "Poucos veículos, mas ticket médio acima do período de comparação",
+      evidence: `${vehiclesCount} veículos atendidos (${vehiclesCmp.deltaPercent}%) com ticket médio de ${round2(avgTicket)} (+${ticketCmp.deltaPercent}%).`,
+      severity: "info",
+    });
+  }
+
   return insights;
 }
 
@@ -195,8 +265,8 @@ function buildRecommendations(insights: ClosingInsight[], inventoryAttention: In
   return recs.slice(0, 5);
 }
 
-export async function buildTomorrowSummary(): Promise<TomorrowSummary> {
-  const [board, catalog] = await Promise.all([fetchPlanningBoard("amanha"), fetchServiceCatalog()]);
+export async function buildTomorrowSummary(catalog: ServiceCatalogEntry[]): Promise<TomorrowSummary> {
+  const board = await fetchPlanningBoard("amanha");
   const appointments: AppointmentView[] = board.days[0]?.appointments ?? [];
   const prep: TomorrowPreparation = board.tomorrowPreparation;
 
@@ -236,6 +306,55 @@ export function buildInventoryAttention(items: InventoryItemView[]): InventoryAt
     .map((i) => ({ name: i.name, brand: i.brand, currentQuantity: i.currentQuantity, unit: i.unit, status: i.status as "comprar" | "atencao" }));
 }
 
+/** Pura — "quantidade por serviço"/"adicionais" (seção 1A da missão Z5), a partir do MESMO agrupamento já calculado por `buildComparisonReport` (nunca um segundo cálculo). */
+export function computeServiceCounts(groups: WashCategoryGroup[]): { serviceCounts: ServiceCount[]; additionalServicesCount: number } {
+  const serviceCounts = groups.map((g) => ({ description: g.label, count: g.count }));
+  const additionalServicesCount = groups.filter((g) => !PACKAGE_LABELS.has(g.label)).reduce((sum, g) => sum + g.count, 0);
+  return { serviceCounts, additionalServicesCount };
+}
+
+/** Pura — movimentações reais de compra dos últimos `RECENT_PURCHASE_WINDOW_DAYS` dias (seção 3/8 da missão Z5: "itens comprados recentemente"). */
+export function computeRecentPurchases(movements: StockMovement[], itemsById: Map<string, InventoryItemView>, todayIso: string): RecentPurchase[] {
+  const sinceIso = addDaysIso(todayIso, -RECENT_PURCHASE_WINDOW_DAYS);
+  return movements
+    .filter((m) => m.type === "compra" && m.date >= sinceIso && m.date <= todayIso)
+    .map((m) => ({ name: itemsById.get(m.itemId)?.name ?? "Item não identificado", quantity: m.quantity, unit: m.unit, date: m.date }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 10);
+}
+
+/**
+ * Pura — itens "OK" que merecem aparecer mesmo sem exigir decisão (seção 3: "não precisa listar
+ * dezenas de produtos normais, priorizar o que importa"): usados em serviço vendido hoje (produto
+ * homologado real, Z3.3) ou comprados recentemente. Nunca lista os demais itens "ok" irrelevantes.
+ */
+export function computeRelevantOkItems(items: InventoryItemView[], soldServiceNames: string[], catalog: ServiceCatalogEntry[], recentPurchases: RecentPurchase[]): RelevantOkItem[] {
+  const okItems = items.filter((i) => i.status === "ok" || i.status === "sem_minimo");
+  const soldNamesSet = new Set(soldServiceNames);
+  const relevantProductNames = new Set<string>();
+  for (const entry of catalog) {
+    if (!soldNamesSet.has(entry.name)) continue;
+    for (const p of entry.products) relevantProductNames.add(p.productName);
+  }
+  const recentNames = new Set(recentPurchases.map((p) => p.name));
+
+  const result: RelevantOkItem[] = [];
+  const seen = new Set<string>();
+  for (const item of okItems) {
+    if (relevantProductNames.has(item.name) && !seen.has(item.name)) {
+      result.push({ name: item.name, brand: item.brand, currentQuantity: item.currentQuantity, unit: item.unit, reason: "usado_em_servico_hoje" });
+      seen.add(item.name);
+    }
+  }
+  for (const item of okItems) {
+    if (recentNames.has(item.name) && !seen.has(item.name)) {
+      result.push({ name: item.name, brand: item.brand, currentQuantity: item.currentQuantity, unit: item.unit, reason: "comprado_recentemente" });
+      seen.add(item.name);
+    }
+  }
+  return result.slice(0, 10);
+}
+
 export async function fetchDailyClosing(dia: { periodo?: "today" | "yesterday" } | undefined, role: UserRole): Promise<DailyClosingResult> {
   const period = resolvePeriod(dia?.periodo ?? "today");
   const comparisonRange = previousPeriodOf(period);
@@ -243,15 +362,26 @@ export async function fetchDailyClosing(dia: { periodo?: "today" | "yesterday" }
   const todayIso = saoPauloDateISO();
   const partialPeriod = period.to >= todayIso;
 
-  const [report, inventoryOverview, tomorrow, stoneResult] = await Promise.all([
+  const [report, inventoryOverview, catalog, movements, stoneResult] = await Promise.all([
     buildComparisonReport(period, comparisonPeriod),
     fetchInventoryOverview(),
-    buildTomorrowSummary(),
+    fetchServiceCatalog(),
+    getInventoryRepository().listMovements(),
     role === "admin" && isStoneConfigured() ? buildFinancialScheduleForToday(todayIso) : Promise.resolve(null),
   ]);
+  const tomorrow = await buildTomorrowSummary(catalog);
 
   const inventoryAttention = buildInventoryAttention(inventoryOverview.items);
-  const insights = deriveClosingInsights(report, role);
+  const itemsById = new Map(inventoryOverview.items.map((i) => [i.id, i]));
+  const recentPurchases = computeRecentPurchases(movements, itemsById, todayIso);
+  const { serviceCounts, additionalServicesCount } = computeServiceCounts(report.washCategoryGroupsA);
+  const inventoryOkRelevant = computeRelevantOkItems(
+    inventoryOverview.items,
+    serviceCounts.map((s) => s.description),
+    catalog,
+    recentPurchases,
+  );
+  const insights = deriveClosingInsights(report, role, additionalServicesCount);
   const recommendations = buildRecommendations(insights, inventoryAttention, tomorrow);
 
   const operational: DailyOperationalSummary = {
@@ -262,6 +392,8 @@ export async function fetchDailyClosing(dia: { periodo?: "today" | "yesterday" }
     parkingCount: metricValue(report.metrics, "parkingCount"),
     packageCounts: report.packageCountsA,
     topServices: report.topServicesA.slice(0, 8).map((s) => ({ description: s.description, amount: role === "admin" ? s.amount : null })),
+    serviceCounts,
+    additionalServicesCount,
   };
 
   let financial: DailyFinancialSummary | null = null;
@@ -291,6 +423,8 @@ export async function fetchDailyClosing(dia: { periodo?: "today" | "yesterday" }
     operational,
     financial,
     inventoryAttention,
+    inventoryOkRelevant,
+    recentPurchases,
     tomorrow,
     insights,
     recommendations,

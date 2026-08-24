@@ -64,4 +64,23 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
     expect(prompt.toLowerCase()).toContain('nunca diga "não consegui obter os dados" quando a ferramenta respondeu normalmente');
     expect(prompt.toLowerCase()).toContain("um dia sem movimento é uma informação gerencial válida");
   });
+
+  it("Missão Z5 — regra GERAL de confiança pós-consulta bem-sucedida (vale para qualquer ferramenta, proíbe linguagem de incerteza indevida)", () => {
+    expect(prompt).toContain("QUALQUER ferramenta");
+    expect(prompt.toLowerCase()).toContain('"parece que não encontrei..."');
+    expect(prompt.toLowerCase()).toContain('"talvez não haja..."');
+    expect(prompt.toLowerCase()).toContain('"não consegui confirmar..."');
+    expect(prompt).toContain("Consultei os dados de hoje e não há clientes que atendam ao critério de mais de 30 dias sem retorno.");
+  });
+
+  it("Missão Z5 — nunca mistura faturamento, recebimento (Stone) e fluxo de caixa", () => {
+    expect(prompt).toContain("FATURAMENTO x RECEBIMENTO x CAIXA nunca são a mesma coisa");
+    expect(prompt.toLowerCase()).toContain("mostre-os separadamente, nunca some ou substitua um pelo outro");
+  });
+
+  it("Missão Z5 — fechamento diário: seções não vazias e no máximo 5 sugestões priorizadas e variáveis", () => {
+    expect(prompt.toLowerCase()).toContain("nunca inclua uma seção vazia só para preencher formato");
+    expect(prompt.toLowerCase()).toContain("no máximo 5");
+    expect(prompt.toLowerCase()).toContain("nunca as mesmas 5 frases genéricas todo dia");
+  });
 });

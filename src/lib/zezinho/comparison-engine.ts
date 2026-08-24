@@ -1,6 +1,6 @@
 import "server-only";
 import { fetchOperationalOrders, computeOperationalSummary, comparePeriods, type OperationalOrder, type PeriodComparison } from "@/lib/integrations/jumppark/operations-summary";
-import { computeWashCategoryGroups } from "@/lib/integrations/jumppark/wash-grouping";
+import { computeWashCategoryGroups, type WashCategoryGroup } from "@/lib/integrations/jumppark/wash-grouping";
 import { fetchCashLedger, fetchDreReport } from "@/lib/finance/service";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import type { PeriodRange } from "@/lib/utils/timezone";
@@ -55,6 +55,15 @@ export interface ComparisonReport {
   packageCountsB: PackageCounts;
   topServicesA: { description: string; amount: number }[];
   topServicesB: { description: string; amount: number }[];
+  /**
+   * Missão Z5 — mesmo `groupsA`/`groupsB` já calculados para extrair `packageCountsA`/`B`
+   * (nunca uma segunda consulta ou um segundo agrupamento), agora expostos por completo: contagem
+   * (não só valor) por serviço de lavação real, canônico via `/estoque/mapeamentos`. Base real de
+   * "quantidade por serviço" e "adicionais" (serviços de lavação que não são Bronze/Silver/Gold) —
+   * nunca inclui estacionamento (contado à parte em `parkingCount`).
+   */
+  washCategoryGroupsA: WashCategoryGroup[];
+  washCategoryGroupsB: WashCategoryGroup[];
   peakHourA: PeakHour | null;
   peakHourB: PeakHour | null;
   errors: string[];
@@ -132,6 +141,8 @@ export async function buildComparisonReport(periodA: PeriodRange, periodB: Perio
       packageCountsB: { Bronze: 0, Silver: 0, Gold: 0 },
       topServicesA: [],
       topServicesB: [],
+      washCategoryGroupsA: [],
+      washCategoryGroupsB: [],
       peakHourA: null,
       peakHourB: null,
       errors: ["JumpPark não configurado neste ambiente."],
@@ -205,6 +216,8 @@ export async function buildComparisonReport(periodA: PeriodRange, periodB: Perio
     packageCountsB: packageCounts(groupsB),
     topServicesA: topServicesByRevenue(ordersA),
     topServicesB: topServicesByRevenue(ordersB),
+    washCategoryGroupsA: groupsA,
+    washCategoryGroupsB: groupsB,
     peakHourA: computePeakHour(ordersA),
     peakHourB: hasB ? computePeakHour(ordersB) : null,
     errors,

@@ -26,6 +26,8 @@ export interface InactiveCustomerCandidate {
   vehicleModel: string | null;
   plateMasked: string | null;
   phoneMasked: string | null;
+  /** Data ISO da última visita real conhecida — "ÚLTIMA VISITA" no formato pedido pela missão Z5. */
+  lastVisitAt: string | null;
   daysSinceLastVisit: number;
   visitCount: number;
   totalSpent: number;
@@ -107,6 +109,7 @@ export async function fetchInactiveCustomers(minDays: number = DEFAULT_INACTIVE_
       vehicleModel: entry.primaryVehicle?.model ?? null,
       plateMasked: maskPlate(entry.primaryVehicle?.plate ?? null),
       phoneMasked: maskPhone(entry.customer.phone ?? null),
+      lastVisitAt: entry.profile.lastVisitAt,
       daysSinceLastVisit: entry.profile.daysSinceLastVisit ?? 0,
       visitCount: entry.profile.visitCount,
       totalSpent: entry.profile.totalSpent,

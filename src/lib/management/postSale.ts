@@ -37,6 +37,9 @@ export interface PostSaleCandidate {
   messageDraft: string;
 }
 
+/** Missão Z5 — auditado: nenhum link de avaliação Google está configurado em lugar nenhum do sistema. Nunca inventar uma URL — usar sempre este placeholder explícito até existir configuração real. */
+export const REVIEW_LINK_PLACEHOLDER = "[LINK DE AVALIAÇÃO A CONFIGURAR]";
+
 const REVIEW_WORTHY = /lava|higieniz|cristaliz/i;
 const FOLLOW_UP_FIRST = /poliment|vitrific|far[oó]is|far[oó]l|couro|plastic/i;
 const LOW_TICKET_ONLY = /estacionamento|ozônio|ozonio/i;
@@ -62,7 +65,7 @@ export function draftPostSaleMessage(order: Pick<OperationalOrder, "clientName" 
   const service = (order.services[0]?.description ?? "o serviço de hoje").toLowerCase();
 
   if (category === "A") {
-    return `Oi, ${name}! Tudo bem? Passando para saber o que achou do resultado de ${service} em ${vehicleMention}. Se ficou satisfeito, adoraríamos que deixasse uma avaliação pra gente — ajuda muito!`;
+    return `Oi, ${name}! Tudo bem? Passando para saber o que achou do resultado de ${service} em ${vehicleMention}. Se ficou satisfeito, adoraríamos que deixasse uma avaliação pra gente no Google — ajuda muito! ${REVIEW_LINK_PLACEHOLDER}`;
   }
   if (category === "B") {
     return `Oi, ${name}! Tudo bem? Ficou tudo certo com ${vehicleMention} depois de ${service}? Qualquer detalhe que quiser ajustar, é só chamar.`;
@@ -74,6 +77,8 @@ export interface PostSaleResult {
   jumpparkConfigured: boolean;
   error: string | null;
   candidates: PostSaleCandidate[];
+  /** Sempre `false` hoje — auditado, nenhum link de avaliação Google está cadastrado no sistema (nunca inventado). */
+  reviewLinkConfigured: boolean;
 }
 
 export async function fetchPostSaleCandidates(): Promise<PostSaleResult> {
@@ -96,5 +101,5 @@ export async function fetchPostSaleCandidates(): Promise<PostSaleResult> {
       };
     });
 
-  return { jumpparkConfigured, error, candidates };
+  return { jumpparkConfigured, error, candidates, reviewLinkConfigured: false };
 }

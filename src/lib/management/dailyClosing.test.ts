@@ -24,6 +24,8 @@ function report(overrides: Partial<ComparisonReport> = {}): ComparisonReport {
     packageCountsB: { Bronze: 0, Silver: 0, Gold: 0 },
     topServicesA: [],
     topServicesB: [],
+    washCategoryGroupsA: [],
+    washCategoryGroupsB: [],
     peakHourA: null,
     peakHourB: null,
     errors: [],
@@ -79,5 +81,40 @@ describe("deriveClosingInsights — mix de pacotes (lavação x estacionamento n
   it("poucos pacotes vendidos (< 3) -> nunca insight de mix, amostra pequena demais para conclusão", () => {
     const r = report({ metrics: [metric("washCount", 2, null, null, "indisponivel")], packageCountsA: { Bronze: 2, Silver: 0, Gold: 0 } });
     expect(deriveClosingInsights(r, "admin").some((i) => i.id.startsWith("mix-"))).toBe(false);
+  });
+});
+
+describe("Missão Z5 — poucos adicionais e cruzamento volume x ticket", () => {
+  it("bom volume de lavações e zero adicionais -> sinaliza poucos adicionais vendidos", () => {
+    const r = report({ metrics: [metric("washCount", 8, null, null, "indisponivel")] });
+    expect(deriveClosingInsights(r, "admin", 0).some((i) => i.id === "few-addons")).toBe(true);
+  });
+
+  it("volume baixo de lavações (< 5) -> nunca sinaliza poucos adicionais, amostra pequena demais", () => {
+    const r = report({ metrics: [metric("washCount", 3, null, null, "indisponivel")] });
+    expect(deriveClosingInsights(r, "admin", 0).some((i) => i.id === "few-addons")).toBe(false);
+  });
+
+  it("há adicionais vendidos -> nunca sinaliza 'poucos adicionais'", () => {
+    const r = report({ metrics: [metric("washCount", 8, null, null, "indisponivel")] });
+    expect(deriveClosingInsights(r, "admin", 4).some((i) => i.id === "few-addons")).toBe(false);
+  });
+
+  it("bom volume de veículos (não caiu) + ticket em queda -> 'bom volume mas ticket baixo' (só admin)", () => {
+    const r = report({ metrics: [metric("vehicles", 20, 18, 11, "aumento"), metric("avgTicket", 90, 120, -25, "queda")] });
+    expect(deriveClosingInsights(r, "admin").some((i) => i.id === "high-volume-low-ticket")).toBe(true);
+    expect(deriveClosingInsights(r, "operacional").some((i) => i.id === "high-volume-low-ticket")).toBe(false);
+  });
+
+  it("poucos veículos (caiu) + ticket em alta -> 'poucos carros mas ticket alto'", () => {
+    const r = report({ metrics: [metric("vehicles", 5, 12, -58, "queda"), metric("avgTicket", 200, 100, 100, "aumento")] });
+    expect(deriveClosingInsights(r, "admin").some((i) => i.id === "low-volume-high-ticket")).toBe(true);
+  });
+
+  it("veículos e ticket seguindo a mesma direção -> nunca dispara os dois insights cruzados de uma vez", () => {
+    const r = report({ metrics: [metric("vehicles", 20, 18, 11, "aumento"), metric("avgTicket", 130, 120, 8, "aumento")] });
+    const insights = deriveClosingInsights(r, "admin");
+    expect(insights.some((i) => i.id === "high-volume-low-ticket")).toBe(false);
+    expect(insights.some((i) => i.id === "low-volume-high-ticket")).toBe(false);
   });
 });

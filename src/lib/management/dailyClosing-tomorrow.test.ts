@@ -10,13 +10,9 @@ import type { ServiceCatalogEntry } from "@/lib/services/catalog";
  */
 
 const fetchPlanningBoardMock = vi.fn();
-const fetchServiceCatalogMock = vi.fn();
 
 vi.mock("@/lib/planning/service", () => ({
   fetchPlanningBoard: (...args: unknown[]) => fetchPlanningBoardMock(...args),
-}));
-vi.mock("@/lib/services/catalog", () => ({
-  fetchServiceCatalog: (...args: unknown[]) => fetchServiceCatalogMock(...args),
 }));
 
 function appointment(overrides: Partial<AppointmentView> = {}): AppointmentView {
@@ -78,13 +74,13 @@ function catalogEntry(overrides: Partial<ServiceCatalogEntry> = {}): ServiceCata
 describe("buildTomorrowSummary — produto homologado x estoque real para os serviços de amanhã", () => {
   it("serviço agendado amanhã com produto homologado disponível -> risco 'disponivel'", async () => {
     fetchPlanningBoardMock.mockResolvedValue(board([appointment({ serviceName: "Vitrificação" })]));
-    fetchServiceCatalogMock.mockResolvedValue([
+    const catalog = [
       catalogEntry({
         products: [{ productName: "CC Pro Sonax", brand: "Sonax", role: "Vitrificador 4 anos", isAlternative: false, variantLabel: "4 anos", durabilityLabel: null, estoque: { quantidadeAtual: 37.5, unidade: "ml", disponivel: true, status: "ok" } }],
       }),
-    ]);
+    ];
     const { buildTomorrowSummary } = await import("@/lib/management/dailyClosing");
-    const result = await buildTomorrowSummary();
+    const result = await buildTomorrowSummary(catalog);
     const risk = result.productRisks.find((r) => r.serviceName === "Vitrificação");
     expect(risk?.status).toBe("disponivel");
     expect(risk?.detail).toContain("CC Pro Sonax");
@@ -92,14 +88,14 @@ describe("buildTomorrowSummary — produto homologado x estoque real para os ser
 
   it("serviço agendado amanhã SEM produto homologado disponível -> risco 'indisponivel', nunca substitui silenciosamente", async () => {
     fetchPlanningBoardMock.mockResolvedValue(board([appointment({ serviceName: "Vitrificação de Couro" })]));
-    fetchServiceCatalogMock.mockResolvedValue([
+    const catalog = [
       catalogEntry({
         name: "Vitrificação de Couro",
         products: [{ productName: "V-Leather", brand: "Vonixx", role: "Vitrificador de couro", isAlternative: false, variantLabel: null, durabilityLabel: "~1 ano", estoque: null }],
       }),
-    ]);
+    ];
     const { buildTomorrowSummary } = await import("@/lib/management/dailyClosing");
-    const result = await buildTomorrowSummary();
+    const result = await buildTomorrowSummary(catalog);
     const risk = result.productRisks.find((r) => r.serviceName === "Vitrificação de Couro");
     expect(risk?.status).toBe("indisponivel");
     expect(risk?.detail).toMatch(/nenhum produto homologado dispon[íi]vel/i);
@@ -107,17 +103,16 @@ describe("buildTomorrowSummary — produto homologado x estoque real para os ser
 
   it("serviço agendado sem nenhum produto homologado cadastrado -> nunca inventa risco (não aparece na lista)", async () => {
     fetchPlanningBoardMock.mockResolvedValue(board([appointment({ serviceName: "Lavação Interna" })]));
-    fetchServiceCatalogMock.mockResolvedValue([catalogEntry({ name: "Lavação Interna", products: [] })]);
+    const catalog = [catalogEntry({ name: "Lavação Interna", products: [] })];
     const { buildTomorrowSummary } = await import("@/lib/management/dailyClosing");
-    const result = await buildTomorrowSummary();
+    const result = await buildTomorrowSummary(catalog);
     expect(result.productRisks.find((r) => r.serviceName === "Lavação Interna")).toBeUndefined();
   });
 
   it("agenda de amanhã vazia -> nunca lança, capacidade e serviços refletem zero real", async () => {
     fetchPlanningBoardMock.mockResolvedValue(board([]));
-    fetchServiceCatalogMock.mockResolvedValue([]);
     const { buildTomorrowSummary } = await import("@/lib/management/dailyClosing");
-    const result = await buildTomorrowSummary();
+    const result = await buildTomorrowSummary([]);
     expect(result.vehicleCount).toBe(0);
     expect(result.mainServices).toEqual([]);
     expect(result.productRisks).toEqual([]);

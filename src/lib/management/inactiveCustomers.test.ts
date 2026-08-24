@@ -123,4 +123,30 @@ describe("fetchInactiveCustomers — mockando a fonte real (listCustomerOverview
     expect(result.candidates[0].phoneMasked).not.toBe("48999990000");
     expect(result.candidates[0].plateMasked).not.toBe("ABC1D23");
   });
+
+  it("Missão Z5 — cliente com EXATAMENTE 30 dias sem retorno cai dentro do limiar padrão (>=30, nunca >30)", async () => {
+    listCustomerOverviewsMock.mockResolvedValue([overviewEntry({ profile: profile({ daysSinceLastVisit: 30 }) })]);
+    const { fetchInactiveCustomers } = await import("@/lib/management/inactiveCustomers");
+    const result = await fetchInactiveCustomers();
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].daysSinceLastVisit).toBe(30);
+  });
+
+  it("Missão Z5 — cliente sem telefone cadastrado ainda aparece na lista, com telefone_mascarado null (nunca lança, nunca inventa número)", async () => {
+    listCustomerOverviewsMock.mockResolvedValue([
+      overviewEntry({ customer: { id: "c1", name: "Cliente Sem Telefone", phone: null, cpf: null, email: null, notes: null, createdAt: "2026-01-01", updatedAt: "2026-01-01" }, profile: profile({ daysSinceLastVisit: 40 }) }),
+    ]);
+    const { fetchInactiveCustomers } = await import("@/lib/management/inactiveCustomers");
+    const result = await fetchInactiveCustomers();
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].phoneMasked).toBeNull();
+    expect(result.candidates[0].customerName).toBe("Cliente Sem Telefone");
+  });
+
+  it("Missão Z5 — expõe a data real da última visita (ULTIMA VISITA), nunca só a contagem de dias", async () => {
+    listCustomerOverviewsMock.mockResolvedValue([overviewEntry({ profile: profile({ daysSinceLastVisit: 45, lastVisitAt: "2026-07-10T12:00:00.000Z" }) })]);
+    const { fetchInactiveCustomers } = await import("@/lib/management/inactiveCustomers");
+    const result = await fetchInactiveCustomers();
+    expect(result.candidates[0].lastVisitAt).toBe("2026-07-10T12:00:00.000Z");
+  });
 });

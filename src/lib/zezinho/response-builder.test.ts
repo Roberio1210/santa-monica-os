@@ -27,6 +27,8 @@ function baseReport(overrides: Partial<ComparisonReport> = {}): ComparisonReport
     packageCountsB: { Bronze: 25, Silver: 20, Gold: 8 },
     topServicesA: [],
     topServicesB: [],
+    washCategoryGroupsA: [],
+    washCategoryGroupsB: [],
     peakHourA: { hour: "10h", count: 12 },
     peakHourB: { hour: "11h", count: 10 },
     errors: [],

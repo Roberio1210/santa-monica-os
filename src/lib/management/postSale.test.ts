@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPostSale, draftPostSaleMessage } from "@/lib/management/postSale";
+import { classifyPostSale, draftPostSaleMessage, REVIEW_LINK_PLACEHOLDER } from "@/lib/management/postSale";
 
 describe("classifyPostSale", () => {
   it("lavação/higienização concluída -> categoria A (pedir avaliação)", () => {
@@ -55,6 +55,19 @@ describe("draftPostSaleMessage", () => {
     const bText = draftPostSaleMessage({ clientName: "Ana", vehicleModel: "HB20", services: [{ description: "Vitrificação 1 ano", amount: 1300 }] }, "B");
     expect(aText.toLowerCase()).toContain("avaliação");
     expect(bText.toLowerCase()).not.toContain("avaliação");
+  });
+});
+
+describe("Missão Z5 — link de avaliação Google (ainda não configurado no sistema)", () => {
+  it("mensagem de categoria A traz o placeholder explícito, nunca uma URL inventada", () => {
+    const text = draftPostSaleMessage({ clientName: "João", vehicleModel: "Corolla", services: [{ description: "Lavação Externa", amount: 80 }] }, "A");
+    expect(text).toContain(REVIEW_LINK_PLACEHOLDER);
+    expect(text).not.toMatch(/https?:\/\//);
+  });
+
+  it("mensagens de categoria B/C nunca mencionam avaliação nem link (só quando o resultado é bom, categoria A)", () => {
+    const bText = draftPostSaleMessage({ clientName: "João", vehicleModel: "Corolla", services: [{ description: "Polimento Técnico", amount: 1000 }] }, "B");
+    expect(bText).not.toContain(REVIEW_LINK_PLACEHOLDER);
   });
 });
 

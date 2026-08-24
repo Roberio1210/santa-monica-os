@@ -406,6 +406,8 @@ function blockedResult(call: ToolCall): ToolResult {
           packageCountsB: EMPTY_PACKAGES,
           topServicesA: [],
           topServicesB: [],
+          washCategoryGroupsA: [],
+          washCategoryGroupsB: [],
           peakHourA: null,
           peakHourB: null,
           errors: [],
