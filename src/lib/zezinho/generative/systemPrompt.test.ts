@@ -59,4 +59,9 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
     expect(prompt.toLowerCase()).toContain("nunca executa um envio real");
     expect(prompt.toLowerCase()).toMatch(/nunca deve dizer "mandei a mensagem"/);
   });
+
+  it("Missão Z4 (achado real, confirmação com chamada real autenticada como admin) — nunca confundir resposta real com valor zero com falha de consulta", () => {
+    expect(prompt.toLowerCase()).toContain('nunca diga "não consegui obter os dados" quando a ferramenta respondeu normalmente');
+    expect(prompt.toLowerCase()).toContain("um dia sem movimento é uma informação gerencial válida");
+  });
 });

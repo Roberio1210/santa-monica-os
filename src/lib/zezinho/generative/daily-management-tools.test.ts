@@ -85,6 +85,35 @@ describe("daily_management_summary — RBAC financeiro", () => {
     expect(operacao.aviso_principais_servicos).toMatch(/nunca invente/i);
   });
 
+  it("Missão Z4 (achado real, confirmação com chamada real autenticada como admin) — JumpPark configurado + 0 ordens: aviso_geral desambigua 'zero real' de 'sem dados', proibindo explicitamente a frase que o modelo usou de forma errada", async () => {
+    fetchDailyClosingMock.mockResolvedValue(baseClosing({ jumpparkConfigured: true, operational: { ordersCount: 0, vehiclesCount: 0, customersCount: 0, washCount: 0, parkingCount: 0, packageCounts: { Bronze: 0, Silver: 0, Gold: 0 }, topServices: [] } }));
+    const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");
+    const tools = buildZezinhoTools("admin");
+    const execute = tools.daily_management_summary!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const result = await execute({ dia: "hoje" });
+    expect(result.aviso_geral).toMatch(/dado REAL/);
+    expect(result.aviso_geral).toMatch(/NUNCA diga 'não consegui obter os dados'/);
+  });
+
+  it("dia com movimento real -> aviso_geral vem null (nunca um aviso genérico quando não faz sentido)", async () => {
+    fetchDailyClosingMock.mockResolvedValue(baseClosing({ jumpparkConfigured: true, operational: { ordersCount: 12, vehiclesCount: 10, customersCount: 9, washCount: 10, parkingCount: 2, packageCounts: { Bronze: 3, Silver: 2, Gold: 1 }, topServices: [] } }));
+    const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");
+    const tools = buildZezinhoTools("admin");
+    const execute = tools.daily_management_summary!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const result = await execute({ dia: "hoje" });
+    expect(result.aviso_geral).toBeNull();
+  });
+
+  it("JumpPark NÃO configurado (mesmo com 0 ordens) -> aviso_geral vem null, esse caso já é comunicado por jumppark_configurado:false", async () => {
+    fetchDailyClosingMock.mockResolvedValue(baseClosing({ jumpparkConfigured: false, operational: { ordersCount: 0, vehiclesCount: 0, customersCount: 0, washCount: 0, parkingCount: 0, packageCounts: { Bronze: 0, Silver: 0, Gold: 0 }, topServices: [] } }));
+    const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");
+    const tools = buildZezinhoTools("admin");
+    const execute = tools.daily_management_summary!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const result = await execute({ dia: "hoje" });
+    expect(result.jumppark_configurado).toBe(false);
+    expect(result.aviso_geral).toBeNull();
+  });
+
   it("comparação de período: aceita 'ontem' e repassa para o agregador real, nunca calcula data na mão aqui", async () => {
     fetchDailyClosingMock.mockResolvedValue(baseClosing());
     const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");

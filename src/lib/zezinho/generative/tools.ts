@@ -301,15 +301,24 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
     // recomendações. Nunca escreve nada — leitura pura sobre fontes já auditadas na missão.
     daily_management_summary: tool({
       description:
-        "Fechamento gerencial do dia (ou de ontem): quantidade de ordens/veículos/clientes, lavação x estacionamento, mix de pacotes Bronze/Silver/Gold, principais serviços, comparação com o período anterior, estoque que precisa de atenção, agenda de amanhã (com verificação de produto homologado disponível para os serviços agendados) e recomendações priorizadas. Para o papel operacional, o campo 'financeiro' sempre vem null — nunca peça faturamento/caixa/Stone a este papel, a resposta certa é dizer que essa informação é restrita à administração. Quando 'principais_servicos' vier vazio ([]), significa que não houve ordem registrada nesse período — NUNCA invente um nome de serviço, produto ou tabela 'serviço x produto' nesse caso; diga honestamente que não houve movimento.",
+        "Fechamento gerencial do dia (ou de ontem): quantidade de ordens/veículos/clientes, lavação x estacionamento, mix de pacotes Bronze/Silver/Gold, principais serviços, comparação com o período anterior, estoque que precisa de atenção, agenda de amanhã (com verificação de produto homologado disponível para os serviços agendados) e recomendações priorizadas. Para o papel operacional, o campo 'financeiro' sempre vem null — nunca peça faturamento/caixa/Stone a este papel, a resposta certa é dizer que essa informação é restrita à administração. Quando 'principais_servicos' vier vazio ([]), significa que não houve ordem registrada nesse período — NUNCA invente um nome de serviço, produto ou tabela 'serviço x produto' nesse caso; diga honestamente que não houve movimento. IMPORTANTE: quando 'jumppark_configurado' vier true, a ferramenta SEMPRE conseguiu consultar os dados — mesmo que 'operacao.ordens' venha 0, isso é um FATO REAL (nenhum atendimento registrado ainda no período), nunca uma falha de consulta. Nesse caso é ERRADO dizer 'não consegui obter os dados' ou qualquer frase parecida — a resposta certa é reportar o dia como tendo movimento zero até agora, exatamente como o campo 'aviso_geral' explica.",
       inputSchema: dailyClosingInputSchema,
       execute: async ({ dia }) => {
         const result = await fetchDailyClosing({ periodo: dia === "ontem" ? "yesterday" : "today" }, role);
+        const zeroMovement = result.jumpparkConfigured && result.operational.ordersCount === 0;
         return {
           periodo: result.period.label,
           periodo_comparacao: result.comparisonPeriod.label,
           periodo_ainda_em_andamento: result.partialPeriod,
           jumppark_configurado: result.jumpparkConfigured,
+          // Achado real (Missão Z4, confirmação com chamada real autenticada como admin): mesmo
+          // com jumppark_configurado=true e groundedInRealSource=true, o modelo às vezes
+          // interpretou "tudo zero" como "não consegui obter os dados" — um erro de síntese, não
+          // de busca. Este campo desambigua explicitamente os dois casos, colado ao dado (mesmo
+          // padrão já eficaz de aviso_etapas_incluidas/aviso_principais_servicos).
+          aviso_geral: zeroMovement
+            ? "jumppark_configurado é true: a consulta funcionou normalmente. O valor 0 em 'ordens' é um dado REAL — não houve nenhum atendimento registrado neste período até agora. NUNCA diga 'não consegui obter os dados' aqui; reporte honestamente um dia (ou período) sem movimento."
+            : null,
           operacao: {
             ordens: result.operational.ordersCount,
             veiculos_atendidos: result.operational.vehiclesCount,
