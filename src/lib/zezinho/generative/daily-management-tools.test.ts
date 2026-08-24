@@ -147,6 +147,33 @@ describe("daily_management_summary — RBAC financeiro", () => {
     expect((estoque.ok_relevante as Array<Record<string, unknown>>)[0]).toMatchObject({ produto: "Glaco", motivo: "usado_em_servico_hoje" });
     expect((estoque.comprados_recentemente as Array<Record<string, unknown>>)[0]).toMatchObject({ produto: "Kit Pincéis", data: "2026-08-21" });
   });
+
+  it("Missão Z5 (achado real com chamada ao modelo) — avisa explicitamente que ok_relevante/comprados_recentemente NUNCA são 'estoque crítico', mesmo achado real onde o modelo rotulou errado apesar do dado certo", async () => {
+    fetchDailyClosingMock.mockResolvedValue(
+      baseClosing({
+        inventoryOkRelevant: [{ name: "Glaco", brand: "Soft99", currentQuantity: 420, unit: "ml", reason: "usado_em_servico_hoje" }],
+        recentPurchases: [{ name: "Kit Pincéis", quantity: 1, unit: "unidade", date: "2026-08-21" }],
+      }),
+    );
+    const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");
+    const tools = buildZezinhoTools("admin");
+    const execute = tools.daily_management_summary!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const result = await execute({ dia: "hoje" });
+    const estoque = result.estoque as Record<string, unknown>;
+    expect(estoque.aviso_ok_relevante).toMatch(/nunca os liste como 'estoque crítico'/i);
+    expect(estoque.aviso_comprados_recentemente).toMatch(/não significa que o item está em falta/i);
+  });
+
+  it("estoque saudável vazio -> avisos vêm null, nunca um aviso genérico sem sentido", async () => {
+    fetchDailyClosingMock.mockResolvedValue(baseClosing({ inventoryOkRelevant: [], recentPurchases: [] }));
+    const { buildZezinhoTools } = await import("@/lib/zezinho/generative/tools");
+    const tools = buildZezinhoTools("admin");
+    const execute = tools.daily_management_summary!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    const result = await execute({ dia: "hoje" });
+    const estoque = result.estoque as Record<string, unknown>;
+    expect(estoque.aviso_ok_relevante).toBeNull();
+    expect(estoque.aviso_comprados_recentemente).toBeNull();
+  });
 });
 
 describe("post_sale_candidates — nunca envia nada, só sugere", () => {
