@@ -16,6 +16,7 @@ import { fetchCommercialPolicy, fetchComplimentaryOptions } from "@/lib/services
 import { fetchDailyClosing } from "@/lib/management/dailyClosing";
 import { fetchPostSaleCandidates, POST_SALE_CATEGORY_LABEL } from "@/lib/management/postSale";
 import { fetchInactiveCustomers, DEFAULT_INACTIVE_MIN_DAYS } from "@/lib/management/inactiveCustomers";
+import { queueMessageForApproval, listPendingApprovals, approveMessages, discardMessages, type Actor, type OutboundMessageKind } from "@/lib/management/outboundMessages";
 
 /**
  * Missão Z2 — schemas de tool-calling para o modelo generativo. Ponte fina sobre o mesmo
@@ -195,7 +196,7 @@ const inactiveCustomersInputSchema = z.object({
   dias_minimo: z.number().int().min(1).max(365).optional().describe("Quantidade mínima de dias sem retorno para considerar o cliente inativo — padrão 30."),
 });
 
-function buildKnowledgeTools(role: UserRole): ToolSet {
+function buildKnowledgeTools(role: UserRole, actor: Actor | null): ToolSet {
   return {
     service_catalog_search: tool({
       description:
@@ -436,10 +437,109 @@ function buildKnowledgeTools(role: UserRole): ToolSet {
         };
       },
     }),
+    // Missão "Regra Absoluta de Envio" — o Zézinho NUNCA envia sozinho. Estas 4 ferramentas são
+    // TODO o caminho disponível para o chat: gerar rascunho -> mostrar pré-visualização -> aprovar
+    // (ids específicos, nunca "todas") ou descartar. NÃO existe ferramenta de "enviar" exposta ao
+    // chat nesta missão — o canal real (WhatsApp) ainda não está implementado; a função de envio
+    // existe em código (`sendApprovedOutboundMessage`), testada, mas só será conectada a um canal
+    // real e exposta ao chat numa missão futura.
+    queue_message_for_approval: tool({
+      description:
+        "Registra um rascunho de mensagem (pós-venda, reativação ou outro) para o gestor decidir depois — NUNCA envia. Use depois de identificar um candidato real (via post_sale_candidates/inactive_customers ou por pedido direto do gestor) e já ter o texto da mensagem. Chamar de novo para o mesmo cliente/motivo no mesmo dia NUNCA duplica — devolve o rascunho já existente. Depois de chamar, APRESENTE a pré-visualização completa (cliente, veículo, telefone mascarado, motivo, texto completo, tipo) ao gestor — ele precisa ver exatamente o que seria enviado antes de decidir.",
+      inputSchema: z.object({
+        tipo: z.enum(["pos_venda", "reativacao", "manual", "outro"]).describe("Tipo de contato."),
+        cliente: z.string().nullable().describe("Nome do cliente, ou null quando não identificado."),
+        veiculo: z.string().nullable().describe("Modelo do veículo, quando conhecido."),
+        telefone_mascarado: z.string().nullable().describe("Telefone JÁ MASCARADO (nunca o número completo)."),
+        motivo: z.string().describe("Por que este contato faz sentido agora (ex.: 'Lavação concluída hoje', 'Sumiu há 45 dias, cliente recorrente')."),
+        texto: z.string().min(1).describe("Texto completo da mensagem sugerida."),
+      }),
+      execute: async ({ tipo, cliente, veiculo, telefone_mascarado, motivo, texto }) => {
+        const dedupeKey = `${tipo}:${cliente ?? "sem-nome"}:${telefone_mascarado ?? "sem-telefone"}:${motivo}:${saoPauloDateISO()}`;
+        const record = await queueMessageForApproval({
+          kind: tipo as OutboundMessageKind,
+          customerName: cliente,
+          vehicleModel: veiculo,
+          phoneMasked: telefone_mascarado,
+          reason: motivo,
+          draftText: texto,
+          dedupeKey,
+        });
+        return {
+          mensagem_id: record.id,
+          status: record.status,
+          cliente: record.customerName,
+          veiculo: record.vehicleModel,
+          telefone_mascarado: record.phoneMasked,
+          motivo: record.reason,
+          texto_completo: record.draftText,
+          tipo: record.kind,
+          aviso: "Isto é só um RASCUNHO — mostre a pré-visualização completa acima ao gestor. Nenhuma mensagem foi enviada. Só avança para aprovação com um pedido específico e explícito (ex.: 'pode enviar essa', 'aprovo essas 3') — nunca com comentários vagos como 'gostei'/'está boa'/'legal', que NÃO contam como aprovação.",
+        };
+      },
+    }),
+    list_pending_approvals: tool({
+      description: "Lista as mensagens em rascunho aguardando decisão do gestor (pré-visualização completa de cada uma). Use quando o gestor pedir para ver o que está pendente, ou antes de um pedido de aprovação em lote — sempre informe a QUANTIDADE total antes de perguntar se ele quer aprovar tudo.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const pending = await listPendingApprovals();
+        return {
+          total_pendente: pending.length,
+          mensagens: pending.map((m) => ({
+            mensagem_id: m.id,
+            tipo: m.kind,
+            cliente: m.customerName,
+            veiculo: m.vehicleModel,
+            telefone_mascarado: m.phoneMasked,
+            motivo: m.reason,
+            texto_completo: m.draftText,
+          })),
+          aviso: pending.length > 0 ? `Você está prestes a poder decidir sobre ${pending.length} mensagem(ns). Mostre a lista completa antes de perguntar se o gestor quer aprovar todas ou só algumas.` : null,
+        };
+      },
+    }),
+    approve_messages: tool({
+      description:
+        "Aprova mensagens ESPECÍFICAS (por id, nunca 'todas as pendentes' sem listar) para envio futuro — NUNCA envia de fato (não há canal real configurado ainda). SÓ chame esta ferramenta quando o gestor tiver dado uma aprovação EXPLÍCITA e ESPECÍFICA sobre aquela(s) mensagem(ns) exata(s) — frases como 'pode enviar essa', 'pode mandar para o João', 'aprovo essas 5' contam; frases vagas como 'está boa', 'gostei', 'legal', 'pode deixar assim' NUNCA contam como aprovação — nesse caso não chame esta ferramenta, peça confirmação explícita. Quem aprova é sempre a pessoa realmente logada nesta conversa — nunca um nome dito no texto.",
+      inputSchema: z.object({
+        mensagem_ids: z.array(z.string()).min(1).describe("Ids exatos das mensagens aprovadas (de queue_message_for_approval ou list_pending_approvals)."),
+        edicoes: z.array(z.object({ mensagem_id: z.string(), texto_editado: z.string() })).optional().describe("Quando o gestor pediu para mudar o texto antes de aprovar — o texto ORIGINAL sugerido nunca é apagado, só o texto final de envio muda."),
+      }),
+      execute: async ({ mensagem_ids, edicoes }) => {
+        if (!actor) {
+          return { aprovadas: [], aviso: "Não há uma sessão autenticada real nesta conversa — nenhuma aprovação pode ser registrada sem saber quem está aprovando. Peça para o gestor fazer login." };
+        }
+        const edits = Object.fromEntries((edicoes ?? []).map((e) => [e.mensagem_id, e.texto_editado]));
+        const result = await approveMessages(mensagem_ids, actor, edits);
+        return {
+          total_pedido: mensagem_ids.length,
+          aprovadas: result.succeeded.map((m) => ({ mensagem_id: m.id, cliente: m.customerName, texto_final: m.finalText, aprovado_por: m.approvedByName })),
+          nao_encontradas: result.notFound,
+          ja_decididas_antes: result.alreadyDecided,
+          aviso: "Aprovado NÃO significa enviado — não há canal de envio real configurado nesta fase. Nenhuma mensagem foi de fato enviada a nenhum cliente.",
+        };
+      },
+    }),
+    discard_messages: tool({
+      description: "Descarta mensagens específicas em rascunho (por id) — o gestor decidiu não prosseguir com elas. Nunca envia, nunca aprova.",
+      inputSchema: z.object({ mensagem_ids: z.array(z.string()).min(1).describe("Ids exatos das mensagens descartadas.") }),
+      execute: async ({ mensagem_ids }) => {
+        if (!actor) {
+          return { descartadas: [], aviso: "Não há uma sessão autenticada real nesta conversa — nenhum descarte pode ser registrado sem saber quem decidiu. Peça para o gestor fazer login." };
+        }
+        const result = await discardMessages(mensagem_ids, actor);
+        return {
+          total_pedido: mensagem_ids.length,
+          descartadas: result.succeeded.map((m) => ({ mensagem_id: m.id, cliente: m.customerName })),
+          nao_encontradas: result.notFound,
+          ja_decididas_antes: result.alreadyDecided,
+        };
+      },
+    }),
   };
 }
 
 /** Ponto único de montagem — tudo que o modelo generativo pode chamar para este papel, e nada além disso. */
-export function buildZezinhoTools(role: UserRole): ToolSet {
-  return { ...buildRegistryTools(role), ...buildLookupTools(role), ...buildKnowledgeTools(role) };
+export function buildZezinhoTools(role: UserRole, actor: Actor | null = null): ToolSet {
+  return { ...buildRegistryTools(role), ...buildLookupTools(role), ...buildKnowledgeTools(role, actor) };
 }

@@ -32,7 +32,7 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     }
   });
 
-  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 4 da Missão Z3/Z3.2 + as 3 da Missão Z4 (fechamento, pós-venda, inativos)", () => {
+  it("admin recebe todas as 23 ferramentas do catálogo + as 2 de busca por nome + as 4 da Missão Z3/Z3.2 + as 3 da Missão Z4 + as 4 de aprovação de envio", () => {
     const tools = buildZezinhoTools("admin");
     for (const id of ADMIN_ONLY_IDS) {
       expect(tools).toHaveProperty(id);
@@ -47,7 +47,11 @@ describe("buildZezinhoTools — RBAC decide o que o modelo generativo pode até 
     expect(tools).toHaveProperty("daily_management_summary");
     expect(tools).toHaveProperty("post_sale_candidates");
     expect(tools).toHaveProperty("inactive_customers");
-    expect(Object.keys(tools).length).toBe(23 + 2 + 4 + 3);
+    expect(tools).toHaveProperty("queue_message_for_approval");
+    expect(tools).toHaveProperty("list_pending_approvals");
+    expect(tools).toHaveProperty("approve_messages");
+    expect(tools).toHaveProperty("discard_messages");
+    expect(Object.keys(tools).length).toBe(23 + 2 + 4 + 3 + 4);
   });
 
   it("operacional também recebe as 4 ferramentas da Missão Z3/Z3.2 — preço comercial, endereço, agenda e política de negociação não são dado financeiro gerencial", () => {

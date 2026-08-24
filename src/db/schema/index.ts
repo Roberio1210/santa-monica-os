@@ -15,3 +15,4 @@ export * from "./attendance";
 export * from "./managerAssistant";
 export * from "./planning";
 export * from "./historicalSpreadsheet";
+export * from "./outboundMessaging";

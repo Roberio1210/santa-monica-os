@@ -52,12 +52,14 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
     expect(prompt).toContain("responda IMEDIATAMENTE apenas");
   });
 
-  it("Missão Z4 — instrui a usar daily_management_summary/post_sale_candidates/inactive_customers e nunca afirmar que uma mensagem foi enviada", () => {
+  it("Missão Z4 — instrui a usar daily_management_summary/post_sale_candidates/inactive_customers", () => {
     expect(prompt).toContain("daily_management_summary");
     expect(prompt).toContain("post_sale_candidates");
     expect(prompt).toContain("inactive_customers");
-    expect(prompt.toLowerCase()).toContain("nunca executa um envio real");
-    expect(prompt.toLowerCase()).toMatch(/nunca deve dizer "mandei a mensagem"/);
+  });
+
+  it('Missão "Regra Absoluta de Envio" — nunca afirma ter enviado uma mensagem (substitui a regra mais simples da Z4)', () => {
+    expect(prompt.toLowerCase()).toMatch(/nunca diga "enviei", "mandei a mensagem"/);
   });
 
   it("Missão Z4 (achado real, confirmação com chamada real autenticada como admin) — nunca confundir resposta real com valor zero com falha de consulta", () => {
@@ -82,5 +84,38 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
     expect(prompt.toLowerCase()).toContain("nunca inclua uma seção vazia só para preencher formato");
     expect(prompt.toLowerCase()).toContain("no máximo 5");
     expect(prompt.toLowerCase()).toContain("nunca as mesmas 5 frases genéricas todo dia");
+  });
+
+  it('Missão "Regra Absoluta de Envio" — nível de autonomia é sempre MANUAL_APPROVAL, nenhuma mensagem é enviada sozinha', () => {
+    expect(prompt).toContain("VOCÊ NUNCA TEM AUTONOMIA PARA ENVIAR MENSAGEM SOZINHO");
+    expect(prompt).toContain("MANUAL_APPROVAL");
+    expect(prompt).toContain("queue_message_for_approval");
+    expect(prompt).toContain("approve_messages");
+    expect(prompt).toContain("list_pending_approvals");
+  });
+
+  it('Missão "Regra Absoluta de Envio" — exemplos exatos de aprovação válida e inválida (nunca aprovação genérica/implícita)', () => {
+    expect(prompt).toContain('"pode enviar essa"');
+    expect(prompt).toContain('"pode mandar para o João"');
+    expect(prompt).toContain('"aprovo essas 5 mensagens"');
+    expect(prompt).toContain('"está boa"');
+    expect(prompt).toContain('"gostei"');
+    expect(prompt).toContain('"legal"');
+    expect(prompt).toContain('"pode deixar assim"');
+    expect(prompt.toLowerCase()).toContain("não chame approve_messages");
+  });
+
+  it('Missão "Regra Absoluta de Envio" — pré-visualização obrigatória (cliente/veículo/telefone/motivo/texto/tipo) antes de decidir', () => {
+    expect(prompt.toLowerCase()).toContain("pré-visualização completa");
+    expect(prompt.toLowerCase()).toContain("telefone mascarado");
+  });
+
+  it('Missão "Regra Absoluta de Envio" — mesmo depois de aprovada, nunca afirma ter enviado (não há canal real conectado)', () => {
+    expect(prompt.toLowerCase()).toContain("ainda não foi enviada de verdade");
+    expect(prompt.toLowerCase()).toContain('nunca diga "enviei"');
+  });
+
+  it('Missão "Regra Absoluta de Envio" — lote sempre informa a quantidade antes de perguntar sobre aprovar tudo', () => {
+    expect(prompt.toLowerCase()).toContain("quantidade total antes de perguntar");
   });
 });

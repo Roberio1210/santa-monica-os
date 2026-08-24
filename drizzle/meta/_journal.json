@@ -337,6 +337,13 @@
       "when": 1787520687155,
       "tag": "0047_melodic_gorilla_man",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787577793360,
+      "tag": "0048_third_meteorite",
+      "breakpoints": true
     }
   ]
 }

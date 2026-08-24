@@ -94,12 +94,15 @@ export async function POST(request: Request) {
   try {
     const user = await getCurrentUser();
     const role = resolveZezinhoCallerRole(user);
+    // Missão "Regra Absoluta de Envio" — identidade de quem aprova/descarta mensagens SEMPRE vem
+    // da sessão real, nunca do texto da conversa (mesma soberania de `role` desde a Z1).
+    const actor = user ? { id: user.id, name: user.name } : null;
     const sanitizedHistory = sanitizeHistory(history);
 
     // Missão Z2 — tenta o modo generativo primeiro; `answerGenerative` retorna `null` quando a
     // flag está desligada OU o provider falhou (sem crédito, sem credencial, timeout etc.) — em
     // qualquer um desses casos, cai no pipeline determinístico da Z1/Z3/Z4, nunca quebra o app.
-    const generative = await answerGenerative(safeText, sanitizedHistory, role);
+    const generative = await answerGenerative(safeText, sanitizedHistory, role, actor);
     if (generative) {
       const nextHistory = [...sanitizedHistory, { role: "user" as const, content: safeText }, { role: "assistant" as const, content: generative.text }];
       return NextResponse.json({

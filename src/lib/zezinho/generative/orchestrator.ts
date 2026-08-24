@@ -32,6 +32,12 @@ export interface GenerativeAnswer {
   toolsCalled: string[];
 }
 
+/** Missão "Regra Absoluta de Envio" — identidade real de quem está conversando, resolvida pelo chamador a partir da sessão (nunca inferida aqui, nunca do texto da conversa). `null` quando não há sessão (mesmo caso que já resolve `role` para "operacional"). */
+export interface GenerativeActor {
+  id: string;
+  name: string;
+}
+
 /**
  * Missão Z2.1/Z3/Z3.2 — modelos "gpt-oss" (formato Harmony) às vezes vazam os marcadores de
  * canal interno como texto literal na resposta. Três variações reais já observadas em produção:
@@ -67,12 +73,12 @@ function stripLeakedReasoningChannel(text: string): string {
   return stage2.trim();
 }
 
-export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole): Promise<GenerativeAnswer | null> {
+export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole, actor: GenerativeActor | null = null): Promise<GenerativeAnswer | null> {
   const config = getGenerativeConfig();
   if (!config.enabled) return null;
 
   const trimmedHistory = history.slice(-MAX_HISTORY_MESSAGES);
-  const tools = buildZezinhoTools(role);
+  const tools = buildZezinhoTools(role, actor);
   const start = Date.now();
 
   try {
