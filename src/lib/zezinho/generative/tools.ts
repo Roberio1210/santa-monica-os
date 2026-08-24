@@ -124,16 +124,19 @@ const crmLookupInputSchema = z.object({
 function buildLookupTools(role: UserRole): ToolSet {
   return {
     inventory_lookup: tool({
-      description: "Consulta produtos do estoque por nome — saldo atual, unidade, status e (quando catalogado) função técnica. Nunca inclui custo unitário para o papel operacional.",
+      description:
+        "Consulta produtos do estoque por nome — saldo atual, unidade, status, classificação e (quando catalogado) função técnica. Nunca inclui custo unitário para o papel operacional. IMPORTANTE — leia 'classificacao' antes de responder sobre disponibilidade: 'quimico_volume'/'solido_peso'/'consumivel_unidade' são PRODUTOS CONSUMÍVEIS (saldo é insumo que se esgota, pode virar 'X serviços restantes' quando houver receita técnica associada); 'ferramenta'/'equipamento' são reutilizáveis (quantidade = disponibilidade do item físico, ex. '1 escova disponível' — NUNCA interprete essa quantidade como 'quantos serviços restam', ferramenta não se consome por serviço); 'patrimonio' é mobiliário/estrutura (mesma lógica de disponibilidade, nunca consumível).",
       inputSchema: inventoryLookupInputSchema,
       execute: async ({ nome_produto }) => {
         const items = await lookupInventoryItems(nome_produto);
         return {
           matches: items.map((item) => ({
             nome: item.name,
+            marca: item.brand,
             quantidade_atual: item.currentQuantity,
             unidade: item.unit,
             status: item.status,
+            classificacao: item.classification ?? null,
             estoque_minimo: item.minimumStock,
             funcao_tecnica: item.technicalFunction ?? null,
             tipo_de_uso: item.usageType ?? null,

@@ -27,7 +27,8 @@
     "db:seed:import-historical-spreadsheet": "tsx src/db/seed/import-historical-spreadsheet.ts",
     "db:seed:service-catalog-prices-2026-08": "tsx src/db/seed/service-catalog-prices-2026-08.ts",
     "db:seed:service-catalog-consolidation-2026-08": "tsx src/db/seed/service-catalog-consolidation-2026-08.ts",
-    "db:seed:service-products-operational-2026-08-23": "tsx src/db/seed/service-products-operational-2026-08-23.ts"
+    "db:seed:service-products-operational-2026-08-23": "tsx src/db/seed/service-products-operational-2026-08-23.ts",
+    "db:seed:inventory-receipts-2026-08-21-22": "tsx src/db/seed/inventory-receipts-2026-08-21-22.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.2.2",

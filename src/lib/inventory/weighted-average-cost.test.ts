@@ -22,4 +22,11 @@ describe("computeWeightedAverageCost", () => {
     const cost = computeWeightedAverageCost({ currentQuantity: 0, currentUnitCost: 3, enteredQuantity: 100, unitPricePaid: 5 });
     expect(cost).toBe(5);
   });
+
+  it('Missão de compras 21/22-08-2026 (achado real) — entrada de 300ml de "Glaco Max" (NF R$162,00) sobre o Glaco existente (120ml, sem custo cadastrado): novo custo é o preço pago, nunca inventado', () => {
+    const unitPricePaid = Math.round((162.0 / 300) * 100) / 100; // R$0,54/ml, derivado da NF real
+    expect(unitPricePaid).toBe(0.54);
+    const cost = computeWeightedAverageCost({ currentQuantity: 120, currentUnitCost: null, enteredQuantity: 300, unitPricePaid });
+    expect(cost).toBe(0.54);
+  });
 });

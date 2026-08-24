@@ -94,6 +94,15 @@ describe("computeItemYield — rendimento de estoque (Automação JumpPark → C
     expect(result.estimatedServicesRemaining).toBeNull();
   });
 
+  it('Missão de compras 21/22-08-2026 — ferramenta/equipamento reutilizável (1 unidade, sem receita de consumo associada) NUNCA vira "1 serviço restante" nem qualquer estimativa de rendimento', () => {
+    // Mesmo cenário real de "Kit 5 Pincéis" (ferramenta) e "Pulverizador Snow Foam" (equipamento):
+    // 1 unidade em estoque, nenhuma serviceConsumptionRules associada (nunca criada para eles).
+    const result = computeItemYield({ currentQuantity: 1, unit: "unidade" }, [], [], TODAY);
+    expect(result.estimatedServicesRemaining).toBeNull();
+    expect(result.confidence).toBeNull();
+    expect(result.forecastDays).toBeNull();
+  });
+
   it("soma consumo (tipos de redução real) dos últimos 7 e 30 dias corretamente", () => {
     const movements: StockMovement[] = [
       movement({ id: "m1", type: "consumo_interno", quantity: 10, date: "2026-08-11" }),
