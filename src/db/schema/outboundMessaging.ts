@@ -1,6 +1,7 @@
 import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, id, notes, source, timestamps } from "./common";
 import { users } from "./auth";
+import { customers } from "./crm";
 
 /**
  * Missão "Regra Absoluta de Envio" — o Zézinho NUNCA tem autonomia para enviar mensagem sozinho
@@ -25,6 +26,15 @@ export const outboundMessages = pgTable("outbound_messages", {
   kind: outboundMessageKindEnum("kind").notNull(),
   /** Canal PRETENDIDO (ex.: "whatsapp") — nunca implica que um canal real está configurado; ver `channel.ts`. */
   channel: text("channel").notNull().default("whatsapp"),
+  /**
+   * Missão Z6.2 — resolução do destinatário POR REFERÊNCIA, nunca por telefone completo
+   * armazenado aqui (fonte canônica é `customers.phone`). Null quando o candidato não veio do
+   * CRM interno (ex.: `post_sale_candidates`, que vem só de dados soltos da JumpPark — ver
+   * `postSale.ts`, não existe hoje uma chave confiável para cruzar com `customers`) — nesse caso
+   * o envio real será corretamente bloqueado por telefone não resolvido, e essa é a decisão
+   * correta, não uma falha desta missão.
+   */
+  customerId: uuid("customer_id").references(() => customers.id),
   customerName: text("customer_name"),
   vehicleModel: text("vehicle_model"),
   /** Sempre mascarado antes de chegar aqui — nunca o telefone completo (mesma política de `operational-view.ts`/`mask.ts`). */
@@ -50,6 +60,10 @@ export const outboundMessages = pgTable("outbound_messages", {
   sentAt: timestamp("sent_at", { withTimezone: true }),
   /** Resultado real do canal de envio (ex.: "Canal de envio (WhatsApp) ainda não configurado neste ambiente.") — nunca "enviada" inventada. */
   sendResult: text("send_result"),
+  /** Qual `MessageChannel` foi de fato usado (ex.: "whatsapp_cloud_api") — nunca o token/credencial. */
+  provider: text("provider"),
+  /** Id da mensagem devolvido pelo provider real (ex.: `wamid...` da Meta) — só preenchido em envio bem-sucedido. */
+  externalMessageId: text("external_message_id"),
   /** `${kind}:${identidade real do candidato}:${data}` — mesma chamada de post_sale_candidates/inactive_customers nunca duplica o rascunho do mesmo candidato no mesmo dia. */
   dedupeKey: text("dedupe_key").notNull().unique(),
   active: active(),

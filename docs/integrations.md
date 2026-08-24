@@ -76,13 +76,30 @@
   futura NÃO são fornecidos prontos pela Stone — ver
   docs/stone-integration-architecture.md, seção 3, para as decisões de arquitetura sobre isso.
 
-## WhatsApp Business (planejado)
+## WhatsApp Business — WhatsApp Cloud API oficial da Meta (preparado, desabilitado)
 
 - **Descrição**: agendamentos e relacionamento com clientes.
-- **Fonte**: WhatsApp Business Platform (Meta)
-- **Modo**: não conectado (envio real exigirá aprovação humana)
-- **Variáveis**: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`
-- **Implementação**: `src/lib/integrations/whatsapp/`
+- **Fonte**: WhatsApp Cloud API oficial da Meta (Graph API) — decisão de arquitetura confirmada na
+  Missão Z6.1 (auditoria: nem Evolution API nem n8n/Cloudfy existem ou são usados neste projeto).
+- **Modo**: código real implementado (Missão Z6.2), mas DESABILITADO — `WHATSAPP_ENABLED=false` é
+  o padrão e nenhuma variável de credencial está configurada em produção. `MessageChannel.send()`
+  do canal (`whatsappCloudApiChannel`) falha fechado antes de qualquer chamada HTTP externa sempre
+  que `WHATSAPP_ENABLED !== "true"`, credencial ausente, mensagem não aprovada, ou destinatário não
+  resolvido.
+- **Fluxo de aprovação**: nenhuma mensagem sai sem aprovação explícita e específica do gestor — ver
+  `outbound_messages`/`assertMessageApproved` (Missão "Regra Absoluta de Envio"). O canal em si
+  nunca é a autorização; é só o transporte, chamado depois que o gate já aprovou.
+- **Variáveis**: `WHATSAPP_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`,
+  `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`
+- **Implementação**: `src/lib/integrations/whatsapp/` (config, normalização de telefone E.164,
+  resolução de destinatário por `customerId`, templates, canal, webhook), rota
+  `src/app/api/whatsapp/webhook/route.ts` (GET de verificação + POST com assinatura
+  `X-Hub-Signature-256`), `src/lib/management/inboundMessages.ts` (recebimento, idempotente por
+  `externalMessageId`, allowlist administrativa em `whatsapp_admin_numbers` preparada mas vazia e
+  não conectada a nenhuma ação nesta fase).
+- **Pendências reais para ativar** (fora do escopo de código, decisão do gestor): conta Meta
+  Business, número comercial verificado, credenciais reais nas variáveis acima, e então
+  `WHATSAPP_ENABLED=true`.
 
 ## Intelbras / Mibo Smart (planejado — módulo Vigia)
 

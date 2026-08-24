@@ -11,9 +11,13 @@ import { isPathAllowedForRole, ROLE_HOME_PATH } from "@/lib/auth/permissions";
  * Caminhos que permanecem públicos mesmo com o gate ativado: /api/health (sem dado nenhum),
  * /api/jumppark/sync e /api/stone/sync (Missão 27 / Missão Financeiro V2 — ambos têm
  * autenticação própria por `CRON_SECRET`, verificada dentro da própria rota; precisam ficar
- * acessíveis sem Basic Auth para o cron diário da Vercel conseguir chamá-los).
+ * acessíveis sem Basic Auth para o cron diário da Vercel conseguir chamá-los), e
+ * /api/whatsapp/webhook (Missão Z6.2 — a Meta precisa alcançar essa rota sem Basic Auth; a
+ * autenticação própria é a assinatura `X-Hub-Signature-256`, verificada dentro da rota. Enquanto
+ * `WHATSAPP_ENABLED` não estiver `true`, a rota sempre responde 404 antes de processar qualquer
+ * coisa — ver `src/lib/integrations/whatsapp/config.ts`).
  */
-const PUBLIC_PATHS = ["/api/health", "/api/jumppark/sync", "/api/stone/sync"];
+const PUBLIC_PATHS = ["/api/health", "/api/jumppark/sync", "/api/stone/sync", "/api/whatsapp/webhook"];
 
 /**
  * Missão de Usuários Individuais (V5.3) — camada NOVA, por cima do Basic Auth acima (nunca no

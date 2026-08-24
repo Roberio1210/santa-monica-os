@@ -45,6 +45,30 @@ describe("queue_message_for_approval — gera rascunho, nunca envia", () => {
     expect(result.aviso).toMatch(/nenhuma mensagem foi enviada/i);
     expect(result.aviso).toMatch(/gostei.*está boa.*legal|está boa.*gostei/i);
   });
+
+  it("Missão Z6.2 — repassa cliente_id quando fornecido (ex.: veio de inactive_customers), nunca obrigatório", async () => {
+    queueMessageForApprovalMock.mockResolvedValue({
+      id: "msg-2", kind: "reativacao", channel: "whatsapp", customerId: "cust-42", customerName: "Maria", vehicleModel: "HB20", phoneMasked: "*******34",
+      reason: "Sumiu há 45 dias", draftText: "Oi Maria!", finalText: null, status: "rascunho",
+      approvedByName: null, approvedAt: null, discardedByName: null, discardedAt: null, sentAt: null, sendResult: null, createdAt: "2026-08-24T10:00:00.000Z",
+    });
+    const tools = await toolsFor("admin", { id: "u1", name: "Robério" });
+    const execute = tools.queue_message_for_approval!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    await execute({ tipo: "reativacao", cliente: "Maria", cliente_id: "cust-42", veiculo: "HB20", telefone_mascarado: "*******34", motivo: "Sumiu há 45 dias", texto: "Oi Maria!" });
+    expect(queueMessageForApprovalMock).toHaveBeenCalledWith(expect.objectContaining({ customerId: "cust-42" }));
+  });
+
+  it("Missão Z6.2 — sem cliente_id (ex.: veio de post_sale_candidates) -> customerId null, nunca inventado", async () => {
+    queueMessageForApprovalMock.mockResolvedValue({
+      id: "msg-3", kind: "pos_venda", channel: "whatsapp", customerId: null, customerName: "Pedro", vehicleModel: "Gol", phoneMasked: "*******56",
+      reason: "Lavação concluída hoje", draftText: "Oi Pedro!", finalText: null, status: "rascunho",
+      approvedByName: null, approvedAt: null, discardedByName: null, discardedAt: null, sentAt: null, sendResult: null, createdAt: "2026-08-24T10:00:00.000Z",
+    });
+    const tools = await toolsFor("admin", { id: "u1", name: "Robério" });
+    const execute = tools.queue_message_for_approval!.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    await execute({ tipo: "pos_venda", cliente: "Pedro", veiculo: "Gol", telefone_mascarado: "*******56", motivo: "Lavação concluída hoje", texto: "Oi Pedro!" });
+    expect(queueMessageForApprovalMock).toHaveBeenCalledWith(expect.objectContaining({ customerId: null }));
+  });
 });
 
 describe("list_pending_approvals — pré-visualização obrigatória + contagem antes de decidir em lote", () => {

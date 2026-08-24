@@ -29,6 +29,8 @@ export interface OutboundMessageRecord {
   id: string;
   kind: OutboundMessageKind;
   channel: string;
+  /** Referência canônica para resolver o telefone completo só no momento do envio (Missão Z6.2) — nunca o telefone em si. */
+  customerId: string | null;
   customerName: string | null;
   vehicleModel: string | null;
   phoneMasked: string | null;
@@ -42,6 +44,8 @@ export interface OutboundMessageRecord {
   discardedAt: string | null;
   sentAt: string | null;
   sendResult: string | null;
+  provider: string | null;
+  externalMessageId: string | null;
   createdAt: string;
 }
 
@@ -50,6 +54,7 @@ function toRecord(row: typeof outboundMessages.$inferSelect): OutboundMessageRec
     id: row.id,
     kind: row.kind,
     channel: row.channel,
+    customerId: row.customerId,
     customerName: row.customerName,
     vehicleModel: row.vehicleModel,
     phoneMasked: row.phoneMasked,
@@ -63,6 +68,8 @@ function toRecord(row: typeof outboundMessages.$inferSelect): OutboundMessageRec
     discardedAt: row.discardedAt ? row.discardedAt.toISOString() : null,
     sentAt: row.sentAt ? row.sentAt.toISOString() : null,
     sendResult: row.sendResult,
+    provider: row.provider,
+    externalMessageId: row.externalMessageId,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -80,6 +87,8 @@ export class DatabaseUnavailableError extends Error {
  */
 export async function queueMessageForApproval(input: {
   kind: OutboundMessageKind;
+  /** Missão Z6.2 — referência real do CRM quando disponível (ex.: `inactive_customers`). Nunca inventado; `null` quando o candidato não tem essa referência (ex.: `post_sale_candidates`, ver `postSale.ts`). */
+  customerId?: string | null;
   customerName: string | null;
   vehicleModel: string | null;
   phoneMasked: string | null;
@@ -94,6 +103,7 @@ export async function queueMessageForApproval(input: {
     .insert(outboundMessages)
     .values({
       kind: input.kind,
+      customerId: input.customerId ?? null,
       customerName: input.customerName,
       vehicleModel: input.vehicleModel,
       phoneMasked: input.phoneMasked,
@@ -228,11 +238,14 @@ export function assertMessageApproved(id: string, status: OutboundMessageStatus)
 
 /** Canal de envio real — pluginável para quando WhatsApp (ou outro canal) for implementado numa missão futura. Nunca fabrica sucesso. */
 export interface MessageChannel {
-  send(message: OutboundMessageRecord): Promise<{ success: boolean; result: string }>;
+  /** Identifica qual canal foi de fato usado (ex.: "whatsapp_cloud_api") — gravado em `outbound_messages.provider`, nunca a credencial. */
+  provider: string;
+  send(message: OutboundMessageRecord): Promise<{ success: boolean; result: string; externalMessageId?: string }>;
 }
 
 /** Canal padrão desta fase — nenhum canal real está configurado, então nunca finge ter enviado. */
 export const unconfiguredChannel: MessageChannel = {
+  provider: "nenhum",
   async send() {
     return { success: false, result: "Canal de envio (WhatsApp) ainda não configurado neste ambiente." };
   },
@@ -258,6 +271,8 @@ export async function sendApprovedOutboundMessage(id: string, channel: MessageCh
       status: outcome.success ? "enviada" : "falha_envio",
       sentAt: outcome.success ? new Date() : row.sentAt,
       sendResult: outcome.result,
+      provider: channel.provider,
+      externalMessageId: outcome.externalMessageId ?? row.externalMessageId,
       updatedAt: new Date(),
     })
     .where(and(eq(outboundMessages.id, id), eq(outboundMessages.status, "aprovada")))

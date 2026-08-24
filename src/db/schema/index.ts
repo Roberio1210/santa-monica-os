@@ -16,3 +16,4 @@ export * from "./managerAssistant";
 export * from "./planning";
 export * from "./historicalSpreadsheet";
 export * from "./outboundMessaging";
+export * from "./whatsapp";

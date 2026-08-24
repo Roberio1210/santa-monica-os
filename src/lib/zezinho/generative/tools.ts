@@ -421,6 +421,7 @@ function buildKnowledgeTools(role: UserRole, actor: Actor | null): ToolSet {
           total_encontrado_antes_do_corte: result.totalCandidatesBeforeCap,
           candidatos: result.candidates.map((c) => ({
             cliente: c.customerName,
+            cliente_id: c.customerId,
             veiculo: c.vehicleModel,
             placa_mascarada: c.plateMasked,
             telefone_mascarado: c.phoneMasked,
@@ -445,19 +446,21 @@ function buildKnowledgeTools(role: UserRole, actor: Actor | null): ToolSet {
     // real e exposta ao chat numa missão futura.
     queue_message_for_approval: tool({
       description:
-        "Registra um rascunho de mensagem (pós-venda, reativação ou outro) para o gestor decidir depois — NUNCA envia. Use depois de identificar um candidato real (via post_sale_candidates/inactive_customers ou por pedido direto do gestor) e já ter o texto da mensagem. Chamar de novo para o mesmo cliente/motivo no mesmo dia NUNCA duplica — devolve o rascunho já existente. Depois de chamar, APRESENTE a pré-visualização completa (cliente, veículo, telefone mascarado, motivo, texto completo, tipo) ao gestor — ele precisa ver exatamente o que seria enviado antes de decidir.",
+        "Registra um rascunho de mensagem (pós-venda, reativação ou outro) para o gestor decidir depois — NUNCA envia. Use depois de identificar um candidato real (via post_sale_candidates/inactive_customers ou por pedido direto do gestor) e já ter o texto da mensagem. Quando o candidato veio de inactive_customers, sempre passe também o cliente_id retornado por aquela ferramenta — é o que permite ao canal real (quando configurado) resolver o telefone completo no momento do envio; nunca invente um cliente_id, e nunca é obrigatório (post_sale_candidates nunca tem um, e tudo bem). Chamar de novo para o mesmo cliente/motivo no mesmo dia NUNCA duplica — devolve o rascunho já existente. Depois de chamar, APRESENTE a pré-visualização completa (cliente, veículo, telefone mascarado, motivo, texto completo, tipo) ao gestor — ele precisa ver exatamente o que seria enviado antes de decidir.",
       inputSchema: z.object({
         tipo: z.enum(["pos_venda", "reativacao", "manual", "outro"]).describe("Tipo de contato."),
         cliente: z.string().nullable().describe("Nome do cliente, ou null quando não identificado."),
+        cliente_id: z.string().nullable().optional().describe("Id real do cliente no CRM, só quando veio de uma ferramenta que o forneceu (ex.: inactive_customers). Nunca inventar um valor."),
         veiculo: z.string().nullable().describe("Modelo do veículo, quando conhecido."),
         telefone_mascarado: z.string().nullable().describe("Telefone JÁ MASCARADO (nunca o número completo)."),
         motivo: z.string().describe("Por que este contato faz sentido agora (ex.: 'Lavação concluída hoje', 'Sumiu há 45 dias, cliente recorrente')."),
         texto: z.string().min(1).describe("Texto completo da mensagem sugerida."),
       }),
-      execute: async ({ tipo, cliente, veiculo, telefone_mascarado, motivo, texto }) => {
+      execute: async ({ tipo, cliente, cliente_id, veiculo, telefone_mascarado, motivo, texto }) => {
         const dedupeKey = `${tipo}:${cliente ?? "sem-nome"}:${telefone_mascarado ?? "sem-telefone"}:${motivo}:${saoPauloDateISO()}`;
         const record = await queueMessageForApproval({
           kind: tipo as OutboundMessageKind,
+          customerId: cliente_id ?? null,
           customerName: cliente,
           vehicleModel: veiculo,
           phoneMasked: telefone_mascarado,

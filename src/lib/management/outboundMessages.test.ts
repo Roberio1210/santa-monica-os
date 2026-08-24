@@ -93,12 +93,16 @@ describe("assertMessageApproved — O GATE (testes 12/13/14: job, webhook e retr
 describe("unconfiguredChannel — nunca finge ter enviado", () => {
   it("send() sempre devolve success:false com o motivo real", async () => {
     const outcome = await unconfiguredChannel.send({
-      id: "m1", kind: "pos_venda", channel: "whatsapp", customerName: "João", vehicleModel: "Corolla", phoneMasked: "*******12",
+      id: "m1", kind: "pos_venda", channel: "whatsapp", customerId: null, customerName: "João", vehicleModel: "Corolla", phoneMasked: "*******12",
       reason: "teste", draftText: "oi", finalText: "oi", status: "aprovada", approvedByName: "Robério", approvedAt: null,
-      discardedByName: null, discardedAt: null, sentAt: null, sendResult: null, createdAt: new Date().toISOString(),
+      discardedByName: null, discardedAt: null, sentAt: null, sendResult: null, provider: null, externalMessageId: null, createdAt: new Date().toISOString(),
     });
     expect(outcome.success).toBe(false);
     expect(outcome.result).toMatch(/ainda não configurado/i);
+  });
+
+  it("provider é 'nenhum' — nunca finge um provider real configurado", () => {
+    expect(unconfiguredChannel.provider).toBe("nenhum");
   });
 });
 
@@ -121,6 +125,12 @@ describe("Funções de I/O nunca fingem sucesso sem persistir de verdade (sem DA
   it("queueMessageForApproval nunca finge ter criado um rascunho sem banco real", async () => {
     await expect(
       queueMessageForApproval({ kind: "pos_venda", customerName: "João", vehicleModel: "Corolla", phoneMasked: "*******12", reason: "teste", draftText: "oi", dedupeKey: "k1" }),
+    ).rejects.toThrow(DatabaseUnavailableError);
+  });
+
+  it("queueMessageForApproval aceita customerId opcional (Missão Z6.2) sem mudar o comportamento sem banco", async () => {
+    await expect(
+      queueMessageForApproval({ kind: "reativacao", customerId: "cust-1", customerName: "Maria", vehicleModel: "HB20", phoneMasked: "*******34", reason: "teste", draftText: "oi", dedupeKey: "k2" }),
     ).rejects.toThrow(DatabaseUnavailableError);
   });
 

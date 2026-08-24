@@ -231,6 +231,8 @@ describe("inactive_customers — nunca envia nada, avisos honestos sempre presen
     expect(adminCandidatos[0].gasto_historico_total).toBe(900);
     expect(opCandidatos[0].gasto_historico_total).toBeNull();
     expect(adminCandidatos[0].ultima_visita).toBe("2026-07-10T12:00:00.000Z");
+    // Missão Z6.2 — expõe cliente_id real (nunca inventado) para permitir resolução de telefone completo no envio real futuro.
+    expect(adminCandidatos[0].cliente_id).toBe("c1");
   });
 
   it("sempre repassa os avisos honestos do agregador (nunca some com eles)", async () => {
