@@ -109,6 +109,39 @@ describe("answerGenerative", () => {
     expect(result?.text.startsWith("final")).toBe(false);
   });
 
+  it("Missão Z4 (quinta variante real, segunda confirmação com chamada real autenticada como admin) — remove 'final' colado direto num heading markdown ('final### Fechamento...')", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({
+      text: "final### Fechamento gerencial – dia de hoje\n\n| Item | Resultado |",
+      toolCalls: [],
+      steps: [{}],
+      usage: { inputTokens: 10, outputTokens: 10 },
+    });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("Fecha o dia", [], "admin");
+    expect(result?.text.startsWith("### Fechamento gerencial")).toBe(true);
+    expect(result?.text.startsWith("final")).toBe(false);
+  });
+
+  it("regra geral: nunca depende de uma lista fixa de marcadores — qualquer pontuação/markdown colado direto é removido (lista, citação, crase)", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    const cases = ["final- item da lista", "final> uma citação", "final`código`", "final(observação)"];
+    for (const text of cases) {
+      generateTextMock.mockResolvedValue({ text, toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      const result = await answerGenerative("oi", [], "operacional");
+      expect(result?.text.startsWith("final")).toBe(false);
+    }
+  });
+
+  it("nunca remove 'final' quando é o início de uma palavra real em português (ex.: 'finalizar', 'finalmente') — só depois de espaço é que a frase real continua", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({ text: "finalizar o atendimento está quase pronto.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await answerGenerative("oi", [], "operacional");
+    expect(result?.text).toBe("finalizar o atendimento está quase pronto.");
+  });
+
   it("nunca remove a palavra 'final' quando ela é parte legítima de uma frase real (com espaço depois)", async () => {
     process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
     generateTextMock.mockResolvedValue({ text: "final ajuste feito com sucesso.", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });

@@ -53,12 +53,17 @@ function stripLeakedReasoningChannel(text: string): string {
     }
   }
   const stage1 = bestIdx === -1 ? text : text.slice(bestIdx + bestMarkerLength);
-  // Nome de canal solto colado no início (sem espaço, seguido de maiúscula/aspas/dígito/parêntese/
-  // asterisco de markdown — nunca uma palavra real em português nessa posição) — cobre o caso
-  // "finalPelo que..." e, achado real na Missão Z4 (confirmação com chamada real autenticada como
-  // admin), "final**Fechamento..." (o modelo abre a resposta com negrito em markdown logo após o
-  // nome do canal, sem espaço).
-  const stage2 = stage1.replace(/^(analysis|commentary|final)(?=["'(*A-ZÀ-Ú0-9])/, "");
+  // Nome de canal solto colado no início (sem espaço nenhum antes do conteúdo real) — regra
+  // GERAL em vez de uma lista de caracteres permitidos: depois de dois achados reais em produção
+  // só com listas específicas ("finalPelo...", "final**Fechamento...") um terceiro apareceu com
+  // markdown diferente ("final### Fechamento...", confirmação real autenticada como admin,
+  // Missão Z4) — todo novo estilo de abertura do modelo (heading, citação, lista) quebraria uma
+  // lista fixa de novo. A regra segura é o oposto: um "final"/"analysis"/"commentary" bruto NUNCA
+  // é seguido de uma letra minúscula (isso indicaria uma palavra real em português, ex.:
+  // "finalizar", "finalmente") nem de espaço (frase real começando com a própria palavra "final",
+  // ex.: "final ajuste feito com sucesso.") — em QUALQUER outro caso (maiúscula, dígito, aspas,
+  // parênteses, ou qualquer marcador de markdown: *, #, -, >, `, etc.) é sempre o vazamento.
+  const stage2 = stage1.replace(/^(analysis|commentary|final)(?![a-zà-üç\s])/, "");
   return stage2.trim();
 }
 
