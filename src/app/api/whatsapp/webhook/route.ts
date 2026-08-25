@@ -3,6 +3,7 @@ import { loadWebhookVerifyToken, loadWebhookAppSecret } from "@/lib/integrations
 import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload } from "@/lib/integrations/whatsapp/webhook";
 import { normalizeBrazilianPhoneToE164 } from "@/lib/integrations/whatsapp/phone";
 import { recordInboundMessage } from "@/lib/management/inboundMessages";
+import { resolveWhatsAppAdminActor } from "@/lib/zezinho/generative/orchestrator";
 import { maskPhone } from "@/lib/utils/mask";
 
 /**
@@ -27,14 +28,20 @@ import { maskPhone } from "@/lib/utils/mask";
  * lido além do necessário para responder). Com o segredo configurado, assinatura inválida -> 401.
  *
  * Nenhuma mensagem recebida aciona qualquer ação administrativa aqui — só grava em
- * `inbound_messages` (idempotente por `externalMessageId`). Resolver um `actor` administrativo a
- * partir do remetente (`resolveAdminActorFromPhone`) e agir sobre isso é trabalho de uma missão
- * futura, deliberadamente não conectado agora. Nenhuma resposta automática é enviada ao cliente.
+ * `inbound_messages` (idempotente por `externalMessageId`) e loga se o remetente foi reconhecido
+ * como admin. Nenhuma resposta automática é enviada ao cliente.
  *
  * Missão Z6.4 — observabilidade segura: cada mensagem persistida gera uma linha de log
  * estruturada (timestamp, provider, external_message_id, tipo, telefone MASCARADO, customer_id,
  * se foi inserção nova ou duplicata) — nunca o texto da mensagem, nunca o telefone completo, nunca
  * token/app secret.
+ *
+ * Missão Z6.5 — `resolveWhatsAppAdminActor` (orquestrador) agora resolve, a partir do telefone JÁ
+ * VERIFICADO (assinatura validada acima, nunca do texto da mensagem), se o remetente é um admin
+ * cadastrado em `whatsapp_admin_numbers`. O resultado só é LOGADO (`remetenteReconhecidoComoAdmin`)
+ * — nada mais acontece a partir disso nesta missão: nenhuma chamada a `answerGenerative`, nenhuma
+ * ferramenta, nenhuma resposta automática. Conectar isso a um fluxo de conversa real (o gestor de
+ * fato interagindo com o Zézinho pelo WhatsApp) é trabalho de uma missão futura, explícita.
  */
 
 export async function GET(request: Request) {
@@ -93,6 +100,11 @@ export async function POST(request: Request) {
       receivedAt: parsed.receivedAt,
     });
 
+    // Missão Z6.5 — só RESOLVE identidade (telefone verificado -> actor), nunca aciona nada a
+    // partir disso: nenhuma chamada a `answerGenerative`, nenhuma ferramenta, nenhum envio. O
+    // reconhecimento existe apenas para observabilidade nesta fase.
+    const adminActor = await resolveWhatsAppAdminActor(record.phoneE164);
+
     // Missão Z6.4 — observabilidade segura: nunca loga texto da mensagem, telefone completo, token ou app secret.
     console.log(
       JSON.stringify({
@@ -106,6 +118,8 @@ export async function POST(request: Request) {
         receivedAt: record.receivedAt,
         wasNewInsert: record.wasNewInsert,
         status: record.wasNewInsert ? "recebida_e_persistida" : "duplicada_ignorada_idempotencia",
+        remetenteReconhecidoComoAdmin: adminActor !== null,
+        adminActorId: adminActor?.id ?? null,
       }),
     );
   }

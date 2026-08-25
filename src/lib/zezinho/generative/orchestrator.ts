@@ -5,6 +5,7 @@ import { getGenerativeConfig } from "@/lib/zezinho/generative/config";
 import { buildZezinhoTools } from "@/lib/zezinho/generative/tools";
 import { buildZezinhoSystemPrompt } from "@/lib/zezinho/generative/systemPrompt";
 import { logGenerativeInteraction } from "@/lib/zezinho/generative/logger";
+import { resolveAdminActorFromPhone } from "@/lib/management/inboundMessages";
 
 /**
  * Missão Z2 — orquestrador do Zézinho generativo: SESSÃO/ROLE (já resolvida por quem chama,
@@ -36,6 +37,24 @@ export interface GenerativeAnswer {
 export interface GenerativeActor {
   id: string;
   name: string;
+}
+
+/**
+ * Missão Z6.5 — mesma soberania de identidade do `GenerativeActor` de sessão HTTP, agora para o
+ * canal WhatsApp: resolve um `actor` real SÓ a partir do telefone do remetente já verificado pela
+ * assinatura do webhook (`X-Hub-Signature-256`, validada em `route.ts` antes de qualquer parsing)
+ * — nunca a partir do texto da mensagem. Um telefone fora de `whatsapp_admin_numbers` sempre
+ * devolve `null`, não importa o que a mensagem diga ("sou admin", "aprovo tudo" etc. não têm
+ * nenhum efeito aqui — esta função nem recebe o texto da mensagem como parâmetro).
+ *
+ * IMPORTANTE — escopo desta missão: esta função só RESOLVE IDENTIDADE. Nenhum chamador desta
+ * função aciona `answerGenerative`/ferramentas/resposta automática a partir do resultado — isso é
+ * trabalho de uma missão futura, explícita ("não habilitar respostas automáticas ainda").
+ */
+export async function resolveWhatsAppAdminActor(phoneE164: string): Promise<GenerativeActor | null> {
+  const admin = await resolveAdminActorFromPhone(phoneE164);
+  if (!admin) return null;
+  return { id: admin.id, name: admin.name };
 }
 
 /**

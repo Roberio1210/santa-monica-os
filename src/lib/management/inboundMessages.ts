@@ -7,11 +7,15 @@ import { DatabaseUnavailableError, type Actor } from "@/lib/management/outboundM
 import type { UserRole } from "@/lib/auth/roles";
 
 /**
- * Missão Z6.2 — o lado de RECEBIMENTO do canal WhatsApp. Preparado, mas não conectado a nenhuma
- * ação administrativa real ainda: `resolveAdminActorFromPhone` existe e é testável, mas nenhum
- * caminho de código do Zézinho (`orchestrator.ts`/`tools.ts`) o chama nesta missão — uma mensagem
- * recebida hoje NUNCA aciona nada sozinha, exatamente como pedido ("NÃO permitir ainda que uma
- * mensagem recebida execute automaticamente ações administrativas").
+ * Missão Z6.2 — o lado de RECEBIMENTO do canal WhatsApp.
+ *
+ * Missão Z6.5 — `resolveAdminActorFromPhone` agora está conectada ao orquestrador
+ * (`orchestrator.ts#resolveWhatsAppAdminActor`), mas só para RESOLVER IDENTIDADE — nenhuma
+ * mensagem recebida aciona `answerGenerative`, nenhuma ferramenta, nenhuma resposta automática.
+ * O reconhecimento de admin é logado (observabilidade) e nada mais, até uma missão futura
+ * explicitamente conectar isso a um fluxo de conversa real. Reconhecimento é SEMPRE pelo telefone
+ * verificado (assinatura do webhook já validada antes de chegar aqui) — nunca pelo texto da
+ * mensagem; um número fora da allowlist nunca vira admin, não importa o que a mensagem diga.
  */
 
 export interface InboundMessageInput {
@@ -114,23 +118,38 @@ export async function getLastInboundMessageAt(customerId: string | null): Promis
 }
 
 /**
- * PREPARADO, NÃO CONECTADO nesta missão. Resolve um `actor` administrativo real a partir de um
- * telefone JÁ VERIFICADO (assinatura do webhook validada antes de chegar aqui) — nunca a partir do
- * texto da mensagem. Cliente nunca vira admin: só telefones cadastrados manualmente em
- * `whatsapp_admin_numbers` (tabela vazia por padrão, nunca populada nesta missão) resolvem um
- * `actor`; qualquer outro número devolve `null`.
+ * Missão Z6.5 — extraída como função pura (nunca I/O), mesmo padrão de `matchCustomerIdByPhone`:
+ * dado o telefone JÁ VERIFICADO (assinatura do webhook validada antes de chegar aqui — nunca o
+ * texto da mensagem) e a lista de entradas ativas da allowlist, devolve o actor administrativo
+ * correspondente por igualdade EXATA de E.164 (a allowlist só guarda telefones já normalizados
+ * no momento da inserção — nunca precisa normalizar de novo aqui), ou `null` quando o telefone não
+ * está cadastrado. Cliente nunca vira admin só por mandar mensagem: SEM entrada na allowlist,
+ * SEMPRE `null`, não importa o que o texto da mensagem diga.
+ */
+export function matchAdminActorByPhone(
+  candidates: Array<{ phoneE164: string; id: string; name: string; role: UserRole }>,
+  phoneE164: string,
+): (Actor & { role: UserRole }) | null {
+  const match = candidates.find((c) => c.phoneE164 === phoneE164);
+  if (!match) return null;
+  return { id: match.id, name: match.name, role: match.role };
+}
+
+/**
+ * Resolve um `actor` administrativo real a partir de um telefone já verificado. Conectada ao
+ * orquestrador do Zézinho (`orchestrator.ts#resolveWhatsAppAdminActor`) desde a Missão Z6.5, mas
+ * SÓ para identidade — nenhuma ação/resposta é disparada automaticamente a partir disso; ver
+ * `route.ts` (webhook), que só loga o reconhecimento, nunca aciona `answerGenerative`.
  */
 export async function resolveAdminActorFromPhone(phoneE164: string): Promise<(Actor & { role: UserRole }) | null> {
   const db = getDb();
   if (!db) return null;
 
-  const [row] = await db
-    .select({ id: users.id, name: users.name, role: users.role })
+  const rows = await db
+    .select({ phoneE164: whatsappAdminNumbers.phoneE164, id: users.id, name: users.name, role: users.role })
     .from(whatsappAdminNumbers)
     .innerJoin(users, eq(whatsappAdminNumbers.userId, users.id))
-    .where(and(eq(whatsappAdminNumbers.phoneE164, phoneE164), eq(whatsappAdminNumbers.active, true)))
-    .limit(1);
+    .where(eq(whatsappAdminNumbers.active, true));
 
-  if (!row) return null;
-  return { id: row.id, name: row.name, role: row.role };
+  return matchAdminActorByPhone(rows, phoneE164);
 }

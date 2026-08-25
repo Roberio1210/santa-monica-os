@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { recordInboundMessage, getLastInboundMessageAt, resolveAdminActorFromPhone, matchCustomerIdByPhone } from "@/lib/management/inboundMessages";
+import { recordInboundMessage, getLastInboundMessageAt, resolveAdminActorFromPhone, matchCustomerIdByPhone, matchAdminActorByPhone } from "@/lib/management/inboundMessages";
 import { DatabaseUnavailableError } from "@/lib/management/outboundMessages";
 
 /**
@@ -31,22 +31,57 @@ describe("getLastInboundMessageAt", () => {
   });
 });
 
-describe("resolveAdminActorFromPhone — testes obrigatórios 15/16 (cliente nunca vira admin; allowlist preparada)", () => {
+describe("resolveAdminActorFromPhone — allowlist preparada", () => {
   it("sem banco configurado neste ambiente -> null (nunca resolve um actor administrativo por omissão)", async () => {
     expect(await resolveAdminActorFromPhone("+5511999998888")).toBeNull();
   });
 
-  it("teste obrigatório 15 — NUNCA é chamada por tools.ts/orchestrator.ts nesta missão (guarda estrutural: mensagem recebida não aciona ação administrativa sozinha)", () => {
-    const toolsSource = readFileSync(new URL("../zezinho/generative/tools.ts", import.meta.url), "utf-8");
-    const orchestratorSource = readFileSync(new URL("../zezinho/generative/orchestrator.ts", import.meta.url), "utf-8");
-    expect(toolsSource).not.toContain("resolveAdminActorFromPhone");
-    expect(orchestratorSource).not.toContain("resolveAdminActorFromPhone");
-  });
-
-  it("teste obrigatório 16 — whatsapp_admin_numbers nunca é populada por código desta missão (nenhum .insert nela fora do schema/migração)", () => {
+  it("Missão Z6.5 — whatsapp_admin_numbers nunca é populada por código de aplicação (só por script operacional avulso, fora do código versionado que roda em produção)", () => {
     const serviceSource = readFileSync(new URL("./inboundMessages.ts", import.meta.url), "utf-8");
     // Só a leitura (select/innerJoin) é esperada aqui — nenhuma linha de allowlist é inserida por este módulo.
     expect(serviceSource).not.toMatch(/insert\(whatsappAdminNumbers\)/);
+  });
+});
+
+describe("matchAdminActorByPhone — Missão Z6.5 (número autorizado x não autorizado, sem banco)", () => {
+  const candidates = [{ phoneE164: "+5548991741102", id: "user-1", name: "Robério", role: "admin" as const }];
+
+  it("teste obrigatório — número autorizado (na allowlist) é reconhecido como admin", () => {
+    const result = matchAdminActorByPhone(candidates, "+5548991741102");
+    expect(result).toEqual({ id: "user-1", name: "Robério", role: "admin" });
+  });
+
+  it("teste obrigatório — número não autorizado (fora da allowlist) é rejeitado como admin, devolve null", () => {
+    expect(matchAdminActorByPhone(candidates, "+5511999998888")).toBeNull();
+  });
+
+  it("allowlist vazia -> sempre null, nunca reconhece ninguém por omissão", () => {
+    expect(matchAdminActorByPhone([], "+5548991741102")).toBeNull();
+  });
+
+  it("teste obrigatório — reconhecimento é SÓ pelo telefone: a função nem recebe o texto da mensagem como parâmetro, então nenhuma declaração no texto ('sou admin', 'aprovo tudo') pode ter efeito algum", () => {
+    // Prova estrutural: a assinatura de matchAdminActorByPhone/resolveWhatsAppAdminActor só aceita um telefone — não existe parâmetro de texto para influenciar o resultado.
+    expect(matchAdminActorByPhone.length).toBe(2); // (candidates, phoneE164) — nenhum terceiro parâmetro de texto
+    // Mesmo telefone AUTORIZADO, o resultado nunca muda em função de nenhum conteúdo externo — só existe UMA saída possível por telefone.
+    const first = matchAdminActorByPhone(candidates, "+5548991741102");
+    const second = matchAdminActorByPhone(candidates, "+5548991741102");
+    expect(first).toEqual(second);
+  });
+});
+
+describe("Missão Z6.5 — resolução de admin conectada ao orquestrador, mas sem acionar nada automaticamente", () => {
+  it("orchestrator.ts está de fato conectado a resolveAdminActorFromPhone (conexão pedida pela missão)", () => {
+    const orchestratorSource = readFileSync(new URL("../zezinho/generative/orchestrator.ts", import.meta.url), "utf-8");
+    expect(orchestratorSource).toContain("resolveAdminActorFromPhone");
+    expect(orchestratorSource).toContain("export async function resolveWhatsAppAdminActor");
+  });
+
+  it("resolveWhatsAppAdminActor em si nunca chama answerGenerative/ferramentas — só resolve identidade", () => {
+    const orchestratorSource = readFileSync(new URL("../zezinho/generative/orchestrator.ts", import.meta.url), "utf-8");
+    const match = orchestratorSource.match(/export async function resolveWhatsAppAdminActor[\s\S]*?\n}/);
+    expect(match).not.toBeNull();
+    expect(match![0]).not.toContain("answerGenerative");
+    expect(match![0]).not.toContain("buildZezinhoTools");
   });
 });
 
@@ -86,8 +121,15 @@ describe("Missão Z6.4 (seção 9) — nenhum caminho de auto-resposta existe no
 
   it("a rota do webhook (route.ts) nunca importa/chama nenhuma função de envio", () => {
     const routeSource = readFileSync(new URL("../../app/api/whatsapp/webhook/route.ts", import.meta.url), "utf-8");
-    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel", "queueMessageForApproval", "answerGenerative"]) {
+    // "answerGenerative" é citado só em comentário (Missão Z6.5, reforçando que NÃO é chamado) — a prova real de que
+    // a rota nunca aciona o modelo generativo está em route.test.ts (resposta sempre {status:"ok"}, nunca um texto gerado).
+    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel", "queueMessageForApproval"]) {
       expect(routeSource).not.toContain(forbidden);
     }
+    const codeOnly = routeSource
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("//"))
+      .join("\n");
+    expect(codeOnly).not.toContain("answerGenerative");
   });
 });

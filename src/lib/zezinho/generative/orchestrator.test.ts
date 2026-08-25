@@ -12,11 +12,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const generateTextMock = vi.fn();
+const resolveAdminActorFromPhoneMock = vi.fn();
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
   stepCountIs: (n: number) => ({ type: "stepCount", n }),
   tool: (def: unknown) => def,
+}));
+
+vi.mock("@/lib/management/inboundMessages", () => ({
+  resolveAdminActorFromPhone: (...args: unknown[]) => resolveAdminActorFromPhoneMock(...args),
 }));
 
 describe("answerGenerative", () => {
@@ -25,6 +30,7 @@ describe("answerGenerative", () => {
   beforeEach(() => {
     vi.resetModules();
     generateTextMock.mockReset();
+    resolveAdminActorFromPhoneMock.mockReset();
   });
 
   afterEach(() => {
@@ -196,5 +202,34 @@ describe("answerGenerative", () => {
     const callArgs = generateTextMock.mock.calls[0][0] as { messages: Array<{ content: string }> };
     expect(callArgs.messages.length).toBeLessThanOrEqual(11); // teto de histórico + a pergunta atual
     expect(callArgs.messages[callArgs.messages.length - 1].content).toBe("pergunta atual");
+  });
+});
+
+describe("resolveWhatsAppAdminActor — Missão Z6.5 (identidade pelo WhatsApp, conectada mas sem acionar conversa)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    resolveAdminActorFromPhoneMock.mockReset();
+    generateTextMock.mockReset();
+  });
+
+  it("teste obrigatório — telefone autorizado devolve {id, name} no formato GenerativeActor (role nunca vaza para fora, adaptação de tipo correta)", async () => {
+    resolveAdminActorFromPhoneMock.mockResolvedValue({ id: "user-1", name: "Robério", role: "admin" });
+    const { resolveWhatsAppAdminActor } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await resolveWhatsAppAdminActor("+5548991741102");
+    expect(result).toEqual({ id: "user-1", name: "Robério" });
+  });
+
+  it("teste obrigatório — telefone não autorizado devolve null", async () => {
+    resolveAdminActorFromPhoneMock.mockResolvedValue(null);
+    const { resolveWhatsAppAdminActor } = await import("@/lib/zezinho/generative/orchestrator");
+    const result = await resolveWhatsAppAdminActor("+5511999998888");
+    expect(result).toBeNull();
+  });
+
+  it("resolveWhatsAppAdminActor nunca chama generateText — resolver identidade nunca aciona o modelo generativo", async () => {
+    resolveAdminActorFromPhoneMock.mockResolvedValue({ id: "user-1", name: "Robério", role: "admin" });
+    const { resolveWhatsAppAdminActor } = await import("@/lib/zezinho/generative/orchestrator");
+    await resolveWhatsAppAdminActor("+5548991741102");
+    expect(generateTextMock).not.toHaveBeenCalled();
   });
 });
