@@ -3,6 +3,7 @@ import { loadWebhookVerifyToken, loadWebhookAppSecret } from "@/lib/integrations
 import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload } from "@/lib/integrations/whatsapp/webhook";
 import { normalizeBrazilianPhoneToE164 } from "@/lib/integrations/whatsapp/phone";
 import { recordInboundMessage } from "@/lib/management/inboundMessages";
+import { maskPhone } from "@/lib/utils/mask";
 
 /**
  * Missão Z6.2 (seção 8) — endpoint do webhook oficial da Meta. Rota pública (ver `PUBLIC_PATHS` em
@@ -29,6 +30,11 @@ import { recordInboundMessage } from "@/lib/management/inboundMessages";
  * `inbound_messages` (idempotente por `externalMessageId`). Resolver um `actor` administrativo a
  * partir do remetente (`resolveAdminActorFromPhone`) e agir sobre isso é trabalho de uma missão
  * futura, deliberadamente não conectado agora. Nenhuma resposta automática é enviada ao cliente.
+ *
+ * Missão Z6.4 — observabilidade segura: cada mensagem persistida gera uma linha de log
+ * estruturada (timestamp, provider, external_message_id, tipo, telefone MASCARADO, customer_id,
+ * se foi inserção nova ou duplicata) — nunca o texto da mensagem, nunca o telefone completo, nunca
+ * token/app secret.
  */
 
 export async function GET(request: Request) {
@@ -79,13 +85,29 @@ export async function POST(request: Request) {
     const phoneE164 = normalizeBrazilianPhoneToE164(parsed.phoneRaw);
     if (!phoneE164) continue; // nunca persiste um telefone que não conseguimos validar
 
-    await recordInboundMessage({
+    const record = await recordInboundMessage({
       phoneE164,
       externalMessageId: parsed.externalMessageId,
       messageType: parsed.type,
       textBody: parsed.textBody,
       receivedAt: parsed.receivedAt,
     });
+
+    // Missão Z6.4 — observabilidade segura: nunca loga texto da mensagem, telefone completo, token ou app secret.
+    console.log(
+      JSON.stringify({
+        scope: "whatsapp-webhook-inbound",
+        loggedAt: new Date().toISOString(),
+        provider: "meta_whatsapp_cloud_api",
+        externalMessageId: record.externalMessageId,
+        messageType: record.messageType,
+        phoneMasked: maskPhone(record.phoneE164),
+        customerId: record.customerId,
+        receivedAt: record.receivedAt,
+        wasNewInsert: record.wasNewInsert,
+        status: record.wasNewInsert ? "recebida_e_persistida" : "duplicada_ignorada_idempotencia",
+      }),
+    );
   }
 
   // A Meta exige 200 rápido mesmo quando o payload não tinha mensagem relevante (ex.: eventos de status/entrega).

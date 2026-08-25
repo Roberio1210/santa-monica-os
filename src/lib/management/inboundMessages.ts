@@ -30,9 +30,11 @@ export interface InboundMessageRecord {
   messageType: string;
   textBody: string | null;
   receivedAt: string;
+  /** Missão Z6.4 — `true` só quando este `recordInboundMessage` de fato criou a linha; `false` quando devolveu um registro já existente (reentrega/duplicidade). Usado só para observabilidade — nunca muda o comportamento de persistência. */
+  wasNewInsert: boolean;
 }
 
-function toRecord(row: typeof inboundMessages.$inferSelect): InboundMessageRecord {
+function toRecord(row: typeof inboundMessages.$inferSelect, wasNewInsert: boolean): InboundMessageRecord {
   return {
     id: row.id,
     phoneE164: row.phoneE164,
@@ -41,20 +43,28 @@ function toRecord(row: typeof inboundMessages.$inferSelect): InboundMessageRecor
     messageType: row.messageType,
     textBody: row.textBody,
     receivedAt: row.receivedAt.toISOString(),
+    wasNewInsert,
   };
 }
 
 /**
- * Best-effort, nunca bloqueante: casa o telefone normalizado contra `customers.phone` (que nem
- * sempre está em E.164 — pode vir mascarado da JumpPark, ver `crm.ts`). `null` é um resultado
- * válido e comum, não um erro.
+ * Missão Z6.4 — extraída como função pura (nunca I/O) para ser diretamente testável: dado um
+ * telefone já normalizado e uma lista de candidatos (`id`, `phone` bruto), devolve o `id` do
+ * primeiro cujo telefone normaliza para o mesmo valor, ou `null` (resultado válido e comum, não
+ * um erro). `customers.phone` nem sempre está em E.164 — pode vir mascarado da JumpPark para
+ * ordens antigas, ver `crm.ts` — por isso a normalização acontece nos dois lados antes de comparar.
  */
+export function matchCustomerIdByPhone(candidates: Array<{ id: string; phone: string | null }>, phoneE164: string): string | null {
+  const match = candidates.find((c) => normalizeBrazilianPhoneToE164(c.phone) === phoneE164);
+  return match?.id ?? null;
+}
+
+/** Best-effort, nunca bloqueante: busca os candidatos reais e delega a comparação a `matchCustomerIdByPhone`. */
 async function findCustomerIdByPhone(phoneE164: string): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
   const rows = await db.select({ id: customers.id, phone: customers.phone }).from(customers).where(isNotNull(customers.phone));
-  const match = rows.find((r) => normalizeBrazilianPhoneToE164(r.phone) === phoneE164);
-  return match?.id ?? null;
+  return matchCustomerIdByPhone(rows, phoneE164);
 }
 
 /**
@@ -82,11 +92,11 @@ export async function recordInboundMessage(input: InboundMessageInput): Promise<
     .onConflictDoNothing({ target: inboundMessages.externalMessageId })
     .returning();
 
-  if (inserted[0]) return toRecord(inserted[0]);
+  if (inserted[0]) return toRecord(inserted[0], true);
 
   const [existing] = await db.select().from(inboundMessages).where(eq(inboundMessages.externalMessageId, input.externalMessageId)).limit(1);
   if (!existing) throw new Error(`Falha ao criar ou recuperar mensagem recebida para externalMessageId "${input.externalMessageId}".`);
-  return toRecord(existing);
+  return toRecord(existing, false);
 }
 
 /** Usado por `resolveMessageWindow` (`templates.ts`) para decidir se ainda estamos dentro da janela de 24h de uma conversa. */

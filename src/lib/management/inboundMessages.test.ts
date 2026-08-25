@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { recordInboundMessage, getLastInboundMessageAt, resolveAdminActorFromPhone } from "@/lib/management/inboundMessages";
+import { recordInboundMessage, getLastInboundMessageAt, resolveAdminActorFromPhone, matchCustomerIdByPhone } from "@/lib/management/inboundMessages";
 import { DatabaseUnavailableError } from "@/lib/management/outboundMessages";
 
 /**
@@ -47,5 +47,47 @@ describe("resolveAdminActorFromPhone — testes obrigatórios 15/16 (cliente nun
     const serviceSource = readFileSync(new URL("./inboundMessages.ts", import.meta.url), "utf-8");
     // Só a leitura (select/innerJoin) é esperada aqui — nenhuma linha de allowlist é inserida por este módulo.
     expect(serviceSource).not.toMatch(/insert\(whatsappAdminNumbers\)/);
+  });
+});
+
+describe("matchCustomerIdByPhone — Missão Z6.4 (teste real de resolução de cliente, sem banco)", () => {
+  it("encontra o cliente cujo telefone normaliza para o mesmo E.164", () => {
+    const candidates = [
+      { id: "cust-1", phone: "(11) 99999-8888" },
+      { id: "cust-2", phone: "48 91741102" },
+    ];
+    expect(matchCustomerIdByPhone(candidates, "+5511999998888")).toBe("cust-1");
+    expect(matchCustomerIdByPhone(candidates, "+554891741102")).toBe("cust-2");
+  });
+
+  it("telefone que não bate com nenhum candidato -> null, nunca um cliente errado", () => {
+    const candidates = [{ id: "cust-1", phone: "(11) 99999-8888" }];
+    expect(matchCustomerIdByPhone(candidates, "+5521988887777")).toBeNull();
+  });
+
+  it("lista vazia -> null", () => {
+    expect(matchCustomerIdByPhone([], "+5511999998888")).toBeNull();
+  });
+
+  it("telefone de candidato mascarado/inválido (nunca normaliza) -> nunca dá match por acidente", () => {
+    const candidates = [{ id: "cust-1", phone: "***mascarado***" }];
+    expect(matchCustomerIdByPhone(candidates, "+5511999998888")).toBeNull();
+  });
+});
+
+describe("Missão Z6.4 (seção 9) — nenhum caminho de auto-resposta existe no recebimento", () => {
+  it("inboundMessages.ts nunca importa/chama nenhuma função de envio real (sendApprovedOutboundMessage, whatsappCloudApiChannel)", () => {
+    const serviceSource = readFileSync(new URL("./inboundMessages.ts", import.meta.url), "utf-8");
+    // queueMessageForApproval é citado só em comentário como analogia de padrão de idempotência — não é um risco de auto-resposta (draft continua exigindo aprovação humana), por isso não entra nesta lista.
+    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel"]) {
+      expect(serviceSource).not.toContain(forbidden);
+    }
+  });
+
+  it("a rota do webhook (route.ts) nunca importa/chama nenhuma função de envio", () => {
+    const routeSource = readFileSync(new URL("../../app/api/whatsapp/webhook/route.ts", import.meta.url), "utf-8");
+    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel", "queueMessageForApproval", "answerGenerative"]) {
+      expect(routeSource).not.toContain(forbidden);
+    }
   });
 });

@@ -93,7 +93,10 @@ describe("POST /api/whatsapp/webhook", () => {
 
   it("teste obrigatório 12 — APP_SECRET configurado + assinatura válida + payload válido -> 200, grava a mensagem recebida", async () => {
     process.env.WHATSAPP_APP_SECRET = "secret-def";
-    recordInboundMessageMock.mockResolvedValue({ id: "in-1" });
+    recordInboundMessageMock.mockResolvedValue({
+      id: "in-1", phoneE164: "+5511999998888", externalMessageId: "wamid.ABC", customerId: null,
+      messageType: "text", textBody: "oi", receivedAt: "2026-08-24T10:00:00.000Z", wasNewInsert: true,
+    });
 
     const payload = JSON.stringify({
       entry: [{ changes: [{ value: { messages: [{ from: "5511999998888", id: "wamid.ABC", timestamp: "1700000000", type: "text", text: { body: "oi" } }] } }] }],
@@ -105,5 +108,59 @@ describe("POST /api/whatsapp/webhook", () => {
 
     expect(response.status).toBe(200);
     expect(recordInboundMessageMock).toHaveBeenCalledWith(expect.objectContaining({ phoneE164: "+5511999998888", externalMessageId: "wamid.ABC", textBody: "oi" }));
+  });
+
+  it("Missão Z6.4 — teste obrigatório de observabilidade: log estruturado nunca contém texto da mensagem, telefone completo, token ou app secret", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordInboundMessageMock.mockResolvedValue({
+      id: "in-2", phoneE164: "+5511999998888", externalMessageId: "wamid.DEF", customerId: "cust-7",
+      messageType: "text", textBody: "conteúdo sensível de teste que nunca deveria ir para o log", receivedAt: "2026-08-24T10:00:00.000Z", wasNewInsert: true,
+    });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { messages: [{ from: "5511999998888", id: "wamid.DEF", timestamp: "1700000000", type: "text", text: { body: "TESTE ZEZINHO WHATSAPP 01" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    const logged = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(logged).toContain("wamid.DEF");
+    expect(logged).toContain("cust-7");
+    expect(logged).toContain("*******88"); // telefone MASCARADO (maskPhone), nunca completo
+    expect(logged).not.toContain("5511999998888"); // telefone completo, nunca
+    expect(logged).not.toContain("conteúdo sensível"); // texto da mensagem, nunca
+    expect(logged).not.toContain("secret-def"); // app secret, nunca
+    consoleSpy.mockRestore();
+  });
+
+  it("Missão Z6.4 (seção 6) — evento duplicado simulado localmente: mesma entrega repetida (reentrega real da Meta) nunca é tratada como erro, e o log distingue nova inserção de duplicata", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { messages: [{ from: "5511999998888", id: "wamid.DUP", timestamp: "1700000000", type: "text", text: { body: "TESTE ZEZINHO WHATSAPP 01" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    // 1ª entrega: inserção nova. 2ª entrega (mesmo external_message_id, simulando reentrega real da Meta): o serviço devolveria o registro já existente.
+    recordInboundMessageMock
+      .mockResolvedValueOnce({ id: "in-3", phoneE164: "+5511999998888", externalMessageId: "wamid.DUP", customerId: null, messageType: "text", textBody: "x", receivedAt: "2026-08-24T10:00:00.000Z", wasNewInsert: true })
+      .mockResolvedValueOnce({ id: "in-3", phoneE164: "+5511999998888", externalMessageId: "wamid.DUP", customerId: null, messageType: "text", textBody: "x", receivedAt: "2026-08-24T10:00:00.000Z", wasNewInsert: false });
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+
+    const firstResponse = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+    const secondResponse = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200); // Meta espera 200 mesmo numa reentrega, nunca um erro
+    expect(recordInboundMessageMock).toHaveBeenCalledTimes(2);
+
+    const logged = consoleSpy.mock.calls.map((call) => String(call[0]));
+    expect(logged[0]).toContain("recebida_e_persistida");
+    expect(logged[1]).toContain("duplicada_ignorada_idempotencia");
+    consoleSpy.mockRestore();
   });
 });
