@@ -44,4 +44,23 @@ describe("sendWhatsAppText", () => {
     const outcome = await sendWhatsAppText(config, "+5511999998888", "Oi!");
     expect(outcome.result).not.toContain(config.accessToken);
   });
+
+  it("Missão Z6.7 — HTTP 400 com corpo de erro no formato documentado pela Meta ({error:{message,code,...}}): captura mensagem/código/subcódigo/fbtrace_id para diagnóstico, sem nunca incluir credencial (exemplo sintético, não representa um código real específico)", async () => {
+    const metaErrorShape = { error: { message: "Exemplo sintético de mensagem de erro", type: "OAuthException", code: 99999, error_subcode: 1234567, fbtrace_id: "AbCdEfGh123" } };
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(metaErrorShape), { status: 400 }));
+    const outcome = await sendWhatsAppText(config, "+5511999998888", "Oi!");
+    expect(outcome.success).toBe(false);
+    expect(outcome.result).toContain("Exemplo sintético de mensagem de erro");
+    expect(outcome.result).toContain("99999");
+    expect(outcome.result).toContain("1234567");
+    expect(outcome.result).toContain("AbCdEfGh123");
+    expect(outcome.result).not.toContain(config.accessToken);
+  });
+
+  it("HTTP de erro sem corpo JSON válido -> ainda devolve só o status, nunca lança", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response("texto simples, não é JSON", { status: 403 }));
+    const outcome = await sendWhatsAppText(config, "+5511999998888", "Oi!");
+    expect(outcome.success).toBe(false);
+    expect(outcome.result).toContain("403");
+  });
 });

@@ -36,7 +36,13 @@ export async function sendWhatsAppText(config: WhatsAppCloudApiConfig, phoneE164
     });
 
     if (!response.ok) {
-      return { success: false, result: `Falha no envio via WhatsApp Cloud API (HTTP ${response.status}).` };
+      // Missão Z6.7 (achado real) — captura o detalhe do erro que a própria Meta devolve
+      // (código, subcódigo, mensagem, fbtrace_id) para diagnóstico real. Esses campos nunca
+      // contêm credencial — são só o motivo estruturado da recusa, seguros para armazenar/logar.
+      const errorBody = (await response.json().catch(() => null)) as { error?: { message?: string; type?: string; code?: number; error_subcode?: number; fbtrace_id?: string } } | null;
+      const detail = errorBody?.error;
+      const detailText = detail ? ` — ${detail.message ?? "sem mensagem"} (code ${detail.code ?? "?"}${detail.error_subcode ? `, subcode ${detail.error_subcode}` : ""}, fbtrace_id ${detail.fbtrace_id ?? "?"})` : "";
+      return { success: false, result: `Falha no envio via WhatsApp Cloud API (HTTP ${response.status})${detailText}.` };
     }
 
     const data = (await response.json().catch(() => null)) as { messages?: Array<{ id?: string }> } | null;
