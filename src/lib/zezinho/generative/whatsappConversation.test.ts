@@ -62,7 +62,7 @@ describe("handleAdminConversationalMessage", () => {
   });
 
   it("teste obrigatório 7 — evento já processado (idempotência de saída): não chama answerGenerative nem tenta enviar de novo", async () => {
-    findExistingReplyForInboundMock.mockResolvedValue({ id: "reply-1", status: "enviada", phoneE164: "+5548991741102", content: "oi", triggeredByExternalMessageId: "wamid.1", externalMessageId: "wamid.OUT", sendResult: "ok" });
+    findExistingReplyForInboundMock.mockResolvedValue({ id: "reply-1", status: "accepted", phoneE164: "+5548991741102", content: "oi", triggeredByExternalMessageId: "wamid.1", externalMessageId: "wamid.OUT", sendResult: "ok" });
     const { handleAdminConversationalMessage } = await import("@/lib/zezinho/generative/whatsappConversation");
     const result = await handleAdminConversationalMessage({ phoneE164: "+5548991741102", actor: ACTOR, inboundExternalMessageId: "wamid.1", textBody: "oi" });
 
@@ -124,7 +124,7 @@ describe("handleAdminConversationalMessage", () => {
 
     expect(result).toEqual({ replied: true, reason: "Mensagem enviada com sucesso via WhatsApp Cloud API.", outboundReplyId: "reply-5", toolsCalled: ["service_catalog_search"] });
     expect(sendWhatsAppTextMock).toHaveBeenCalledWith(expect.objectContaining({ accessToken: SENTINEL_TOKEN }), "+5548991741102", "Recomendo a Vitrificação Premium.");
-    expect(updateOutboundReplyStatusMock).toHaveBeenCalledWith("reply-5", expect.objectContaining({ status: "enviada", externalMessageId: "wamid.OUT1" }));
+    expect(updateOutboundReplyStatusMock).toHaveBeenCalledWith("reply-5", expect.objectContaining({ status: "accepted", externalMessageId: "wamid.OUT1" }));
   });
 
   it("teste obrigatório 9 — erro no envio da Meta é tratado corretamente: não lança, registra falha_envio, replied:false", async () => {

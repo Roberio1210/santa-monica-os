@@ -28,6 +28,12 @@ vi.mock("@/lib/zezinho/generative/whatsappConversation", () => ({
   handleAdminConversationalMessage: (...args: unknown[]) => handleAdminConversationalMessageMock(...args),
 }));
 
+const recordDeliveryStatusUpdateMock = vi.fn();
+vi.mock("@/lib/management/whatsappConversations", () => ({
+  recordDeliveryStatusUpdate: (...args: unknown[]) => recordDeliveryStatusUpdateMock(...args),
+  isKnownDeliveryStatus: (status: string) => ["sent", "delivered", "read", "failed"].includes(status),
+}));
+
 const ENV_KEYS = ["WHATSAPP_ENABLED", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_BUSINESS_ACCOUNT_ID", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_WEBHOOK_VERIFY_TOKEN", "WHATSAPP_APP_SECRET"] as const;
 let snapshot: Record<string, string | undefined>;
 
@@ -39,6 +45,8 @@ beforeEach(() => {
   resolveWhatsAppAdminActorMock.mockResolvedValue(null); // padrão: número desconhecido, nunca admin por omissão
   handleAdminConversationalMessageMock.mockReset();
   handleAdminConversationalMessageMock.mockResolvedValue({ replied: false, reason: "não deveria ter sido chamado neste teste", outboundReplyId: null, toolsCalled: [] });
+  recordDeliveryStatusUpdateMock.mockReset();
+  recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: false, outboundReplyId: null });
 });
 
 afterEach(() => {
@@ -347,5 +355,129 @@ describe("POST /api/whatsapp/webhook", () => {
     expect(response.status).toBe(200);
     expect(recordInboundMessageMock).not.toHaveBeenCalled();
     expect(handleAdminConversationalMessageMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Missão Z6.7 — processamento de value.statuses[] (sent/delivered/read/failed), independente do
+ * processamento de messages[]. `recordDeliveryStatusUpdate` é mockado — nenhum banco real é
+ * tocado; a correlação de verdade já é testada em whatsappConversations.test.ts.
+ */
+describe("POST /api/whatsapp/webhook — processamento de status (Missão Z6.7)", () => {
+  it("teste obrigatório — webhook SOMENTE com statuses[] (sem messages[]): processa o status, nunca tenta persistir mensagem inbound", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: true, outboundReplyId: "reply-1" });
+    const payload = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: "wamid.OUT1", status: "delivered", timestamp: "1700000000", recipient_id: "5548991741102" }] } }] }] });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(recordInboundMessageMock).not.toHaveBeenCalled();
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledWith(expect.objectContaining({ wamid: "wamid.OUT1", status: "delivered" }));
+  });
+
+  it("teste obrigatório — payload com messages[] E statuses[]: os dois são processados, um não impede o outro", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordInboundMessageMock.mockResolvedValue({ id: "in-1", phoneE164: "+5511999998888", externalMessageId: "wamid.IN1", customerId: null, messageType: "text", textBody: "oi", receivedAt: "2026-08-25T10:00:00.000Z", wasNewInsert: true });
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: true, outboundReplyId: "reply-2" });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: {
+        messages: [{ from: "5511999998888", id: "wamid.IN1", timestamp: "1700000000", type: "text", text: { body: "oi" } }],
+        statuses: [{ id: "wamid.OUT2", status: "read", timestamp: "1700000100", recipient_id: "5548991741102" }],
+      } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(recordInboundMessageMock).toHaveBeenCalledWith(expect.objectContaining({ externalMessageId: "wamid.IN1" }));
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledWith(expect.objectContaining({ wamid: "wamid.OUT2", status: "read" }));
+  });
+
+  it('"failed" com errors[] -> error repassado para recordDeliveryStatusUpdate', async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: true, outboundReplyId: "reply-3" });
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { statuses: [{
+        id: "wamid.OUT3", status: "failed", timestamp: "1700000000", recipient_id: "5548991741102",
+        errors: [{ code: 131051, title: "Unsupported message type", message: "erro real", href: "https://developers.facebook.com/docs/whatsapp/", error_data: { details: "detalhe" } }],
+      }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledWith({
+      wamid: "wamid.OUT3",
+      status: "failed",
+      error: { code: 131051, title: "Unsupported message type", message: "erro real", href: "https://developers.facebook.com/docs/whatsapp/", errorData: { details: "detalhe" } },
+      rawErrors: [{ code: 131051, title: "Unsupported message type", message: "erro real", href: "https://developers.facebook.com/docs/whatsapp/", errorData: { details: "detalhe" } }],
+    });
+  });
+
+  it("teste obrigatório — status para wamid desconhecido: recordDeliveryStatusUpdate é chamado, mas a rota nunca lança nem muda o comportamento por isso", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: false, outboundReplyId: null });
+    const payload = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: "wamid.NUNCA_EXISTIU", status: "sent", timestamp: "1700000000" }] } }] }] });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledWith(expect.objectContaining({ wamid: "wamid.NUNCA_EXISTIU" }));
+  });
+
+  it("teste obrigatório — evento de status duplicado/reentregue: chamar duas vezes nunca lança, nunca quebra a resposta (idempotência é responsabilidade do UPDATE no serviço, já testada)", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: true, outboundReplyId: "reply-4" });
+    const payload = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: "wamid.OUT4", status: "delivered", timestamp: "1700000000", recipient_id: "5548991741102" }] } }] }] });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const first = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+    const second = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("status desconhecido/não documentado -> nunca chama recordDeliveryStatusUpdate (isKnownDeliveryStatus barra antes)", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    const payload = JSON.stringify({ entry: [{ changes: [{ value: { statuses: [{ id: "wamid.OUT5", status: "algo_novo_da_meta", timestamp: "1700000000" }] } }] }] });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(recordDeliveryStatusUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("erro inesperado no processamento de mensagens não impede o processamento de status (blocos independentes)", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    recordInboundMessageMock.mockRejectedValue(new Error("falha simulada no processamento de mensagens"));
+    recordDeliveryStatusUpdateMock.mockResolvedValue({ correlationFound: true, outboundReplyId: "reply-5" });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: {
+        messages: [{ from: "5511999998888", id: "wamid.IN2", timestamp: "1700000000", type: "text", text: { body: "oi" } }],
+        statuses: [{ id: "wamid.OUT6", status: "sent", timestamp: "1700000100", recipient_id: "5548991741102" }],
+      } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200); // nunca 500, mesmo com erro real no bloco de mensagens
+    expect(recordDeliveryStatusUpdateMock).toHaveBeenCalledWith(expect.objectContaining({ wamid: "wamid.OUT6" }));
   });
 });

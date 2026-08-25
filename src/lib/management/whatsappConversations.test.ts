@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { mergeConversationHistory, getConversationHistory, findExistingReplyForInbound, recordOutboundReply, updateOutboundReplyStatus } from "@/lib/management/whatsappConversations";
+import { mergeConversationHistory, getConversationHistory, findExistingReplyForInbound, recordOutboundReply, updateOutboundReplyStatus, recordDeliveryStatusUpdate, isKnownDeliveryStatus } from "@/lib/management/whatsappConversations";
 import { DatabaseUnavailableError } from "@/lib/management/outboundMessages";
 
 /**
@@ -74,6 +74,26 @@ describe("getConversationHistory / findExistingReplyForInbound / recordOutboundR
   });
 
   it("updateOutboundReplyStatus nunca finge sucesso sem banco real", async () => {
-    await expect(updateOutboundReplyStatus("id-1", { status: "enviada", sendResult: "ok" })).rejects.toThrow(DatabaseUnavailableError);
+    await expect(updateOutboundReplyStatus("id-1", { status: "accepted", sendResult: "ok" })).rejects.toThrow(DatabaseUnavailableError);
+  });
+
+  it("teste obrigatório (wamid desconhecido) — recordDeliveryStatusUpdate sem banco -> correlationFound:false, nunca lança", async () => {
+    const result = await recordDeliveryStatusUpdate({ wamid: "wamid.QUALQUER", status: "delivered" });
+    expect(result).toEqual({ correlationFound: false, outboundReplyId: null });
+  });
+});
+
+describe("isKnownDeliveryStatus — Missão Z6.7 (só os 4 valores documentados pela Meta)", () => {
+  it("sent/delivered/read/failed são reconhecidos", () => {
+    expect(isKnownDeliveryStatus("sent")).toBe(true);
+    expect(isKnownDeliveryStatus("delivered")).toBe(true);
+    expect(isKnownDeliveryStatus("read")).toBe(true);
+    expect(isKnownDeliveryStatus("failed")).toBe(true);
+  });
+
+  it("qualquer outro valor -> false, nunca aceito por engano (nunca gravado num enum estrito)", () => {
+    expect(isKnownDeliveryStatus("enviando")).toBe(false);
+    expect(isKnownDeliveryStatus("")).toBe(false);
+    expect(isKnownDeliveryStatus("SENT")).toBe(false); // case-sensitive, igual ao vocabulário exato da Meta
   });
 });

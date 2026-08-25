@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload } from "@/lib/integrations/whatsapp/webhook";
+import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload, parseWhatsAppStatusUpdates } from "@/lib/integrations/whatsapp/webhook";
 
 /** Missão Z6.2 (testes obrigatórios 11, 12, 13). Pura, sem I/O — nenhuma rota é chamada aqui. */
 
@@ -121,5 +121,87 @@ describe("parseInboundWhatsAppPayload — teste obrigatório 12 (webhook POST v�
       ],
     };
     expect(parseInboundWhatsAppPayload(payload)).toHaveLength(2);
+  });
+});
+
+/**
+ * Missão Z6.7 — testes obrigatórios: "sent"/"delivered"/"read"/"failed com errors[]"/"status para
+ * wamid desconhecido" (esse último é resolvido a nível de serviço, ver whatsappConversations.test.ts
+ * — aqui só provamos que o PARSING extrai corretamente qualquer wamid, conhecido ou não).
+ */
+describe("parseWhatsAppStatusUpdates", () => {
+  it('"sent" — extrai id/status/recipient_id/timestamp/conversation/pricing', () => {
+    const payload = {
+      entry: [{ changes: [{ value: {
+        statuses: [{
+          id: "wamid.OUT1", status: "sent", timestamp: "1700000000", recipient_id: "5511999998888",
+          conversation: { id: "conv-abc", origin: { type: "service" } },
+          pricing: { billable: true, pricing_model: "CBP", category: "service" },
+        }],
+      } }] }],
+    };
+    const result = parseWhatsAppStatusUpdates(payload);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ wamid: "wamid.OUT1", status: "sent", recipientId: "5511999998888", conversationId: "conv-abc", pricingCategory: "service" });
+    expect(result[0].timestamp).toEqual(new Date(1700000000 * 1000));
+    expect(result[0].errors).toEqual([]);
+  });
+
+  it('"delivered" — mesmo formato documentado oficialmente pela Meta', () => {
+    const payload = {
+      entry: [{ changes: [{ value: {
+        statuses: [{ id: "wamid.OUT2", status: "delivered", timestamp: "1700000100", recipient_id: "5511999998888", conversation: { id: "conv-abc" }, pricing: { category: "service" } }],
+      } }] }],
+    };
+    const result = parseWhatsAppStatusUpdates(payload);
+    expect(result[0].status).toBe("delivered");
+  });
+
+  it('"read" — extraído da mesma forma', () => {
+    const payload = { entry: [{ changes: [{ value: { statuses: [{ id: "wamid.OUT3", status: "read", timestamp: "1700000200", recipient_id: "5511999998888" }] } }] }] };
+    const result = parseWhatsAppStatusUpdates(payload);
+    expect(result[0].status).toBe("read");
+  });
+
+  it('"failed" com errors[] — captura code/title/message/href/error_data de cada erro', () => {
+    const payload = {
+      entry: [{ changes: [{ value: {
+        statuses: [{
+          id: "wamid.OUT4", status: "failed", timestamp: "1700000300", recipient_id: "5511999998888",
+          errors: [{ code: 131051, title: "Unsupported message type", message: "Mensagem não suportada", href: "https://developers.facebook.com/docs/whatsapp/", error_data: { details: "detalhe real" } }],
+        }],
+      } }] }],
+    };
+    const result = parseWhatsAppStatusUpdates(payload);
+    expect(result[0].status).toBe("failed");
+    expect(result[0].errors).toEqual([{ code: 131051, title: "Unsupported message type", message: "Mensagem não suportada", href: "https://developers.facebook.com/docs/whatsapp/", errorData: { details: "detalhe real" } }]);
+  });
+
+  it("payload com messages[] E statuses[] na mesma value -> os dois são extraídos, cada função só olha o seu array", () => {
+    const payload = {
+      entry: [{ changes: [{ value: {
+        messages: [{ from: "5511999998888", id: "wamid.IN1", timestamp: "1700000000", type: "text", text: { body: "oi" } }],
+        statuses: [{ id: "wamid.OUT5", status: "delivered", timestamp: "1700000100", recipient_id: "5511999998888" }],
+      } }] }],
+    };
+    expect(parseInboundWhatsAppPayload(payload)).toHaveLength(1);
+    expect(parseWhatsAppStatusUpdates(payload)).toHaveLength(1);
+  });
+
+  it("status sem id ou sem status -> descartado silenciosamente, nunca vira registro incompleto", () => {
+    const payload = { entry: [{ changes: [{ value: { statuses: [{ status: "sent", timestamp: "1700000000" }, { id: "wamid.SEMSTATUS", timestamp: "1700000000" }] } }] }] };
+    expect(parseWhatsAppStatusUpdates(payload)).toEqual([]);
+  });
+
+  it("payload malformado/vazio/nulo -> lista vazia, nunca lança", () => {
+    expect(parseWhatsAppStatusUpdates(null)).toEqual([]);
+    expect(parseWhatsAppStatusUpdates({})).toEqual([]);
+    expect(parseWhatsAppStatusUpdates({ entry: "não é array" })).toEqual([]);
+  });
+
+  it("wamid desconhecido (qualquer valor válido) ainda é extraído normalmente pelo parser — a correlação com o banco é responsabilidade de outra camada", () => {
+    const payload = { entry: [{ changes: [{ value: { statuses: [{ id: "wamid.NUNCA_EXISTIU", status: "delivered", timestamp: "1700000000" }] } }] }] };
+    const result = parseWhatsAppStatusUpdates(payload);
+    expect(result[0].wamid).toBe("wamid.NUNCA_EXISTIU");
   });
 });

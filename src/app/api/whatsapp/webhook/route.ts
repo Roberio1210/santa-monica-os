@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { loadWebhookVerifyToken, loadWebhookAppSecret } from "@/lib/integrations/whatsapp/config";
-import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload } from "@/lib/integrations/whatsapp/webhook";
+import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhatsAppPayload, parseWhatsAppStatusUpdates } from "@/lib/integrations/whatsapp/webhook";
 import { normalizeBrazilianPhoneToE164 } from "@/lib/integrations/whatsapp/phone";
 import { recordInboundMessage } from "@/lib/management/inboundMessages";
 import { resolveWhatsAppAdminActor } from "@/lib/zezinho/generative/orchestrator";
 import { handleAdminConversationalMessage } from "@/lib/zezinho/generative/whatsappConversation";
+import { recordDeliveryStatusUpdate, isKnownDeliveryStatus } from "@/lib/management/whatsappConversations";
 import { maskPhone } from "@/lib/utils/mask";
 
 /**
@@ -48,6 +49,13 @@ import { maskPhone } from "@/lib/utils/mask";
  * `WHATSAPP_ENABLED` estiver habilitado, envia a resposta. Prevenção de loop: uma mensagem cujo
  * remetente é o PRÓPRIO número comercial (`value.metadata.display_phone_number`) é descartada
  * antes de qualquer processamento — nunca é tratada como mensagem de cliente/admin.
+ *
+ * Missão Z6.7 (achado real: "accepted" ≠ entregue) — processa também `value.statuses[]` (evento
+ * assíncrono de entrega: sent/delivered/read/failed), num bloco totalmente independente do
+ * processamento de `messages[]` — cada bloco tem seu próprio try/catch, um nunca impede o outro
+ * de rodar, e nenhum dos dois impede a resposta 200 final. Correlaciona pelo wamid de SAÍDA
+ * (`externalMessageId`), nunca pelo wamid de entrada. Um `status` fora dos 4 valores documentados
+ * pela Meta é logado e ignorado, nunca gravado (a coluna é um enum estrito).
  */
 
 export async function GET(request: Request) {
@@ -93,64 +101,110 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Payload inválido (JSON malformado)." }, { status: 400 });
   }
 
-  const parsedMessages = parseInboundWhatsAppPayload(body);
-  for (const parsed of parsedMessages) {
-    const phoneE164 = normalizeBrazilianPhoneToE164(parsed.phoneRaw);
-    if (!phoneE164) continue; // nunca persiste um telefone que não conseguimos validar
+  // Missão Z6.7 — messages[] e statuses[] são processados em blocos independentes: um erro
+  // inesperado em qualquer mensagem individual (ou no processamento de status) nunca impede o
+  // outro array de ser processado, e nunca derruba a resposta 200 que a Meta espera.
+  try {
+    const parsedMessages = parseInboundWhatsAppPayload(body);
+    for (const parsed of parsedMessages) {
+      const phoneE164 = normalizeBrazilianPhoneToE164(parsed.phoneRaw);
+      if (!phoneE164) continue; // nunca persiste um telefone que não conseguimos validar
 
-    // Missão Z6.6 (seção 9, prevenção de loop) — uma mensagem "de" o próprio número comercial
-    // nunca é processada como mensagem de cliente/admin. Descartada ANTES de persistir.
-    const businessPhoneE164 = normalizeBrazilianPhoneToE164(parsed.businessPhoneRaw);
-    if (businessPhoneE164 && businessPhoneE164 === phoneE164) {
-      console.log(JSON.stringify({ scope: "whatsapp-webhook-inbound", loggedAt: new Date().toISOString(), status: "descartada_auto_mensagem_bloqueio_loop", externalMessageId: parsed.externalMessageId }));
-      continue;
-    }
+      // Missão Z6.6 (seção 9, prevenção de loop) — uma mensagem "de" o próprio número comercial
+      // nunca é processada como mensagem de cliente/admin. Descartada ANTES de persistir.
+      const businessPhoneE164 = normalizeBrazilianPhoneToE164(parsed.businessPhoneRaw);
+      if (businessPhoneE164 && businessPhoneE164 === phoneE164) {
+        console.log(JSON.stringify({ scope: "whatsapp-webhook-inbound", loggedAt: new Date().toISOString(), status: "descartada_auto_mensagem_bloqueio_loop", externalMessageId: parsed.externalMessageId }));
+        continue;
+      }
 
-    const record = await recordInboundMessage({
-      phoneE164,
-      externalMessageId: parsed.externalMessageId,
-      messageType: parsed.type,
-      textBody: parsed.textBody,
-      receivedAt: parsed.receivedAt,
-    });
-
-    // Missão Z6.5 — resolve identidade (telefone verificado -> actor), nunca do texto da mensagem.
-    const adminActor = await resolveWhatsAppAdminActor(record.phoneE164);
-
-    // Missão Z6.6 — só entra no fluxo conversacional quem já foi reconhecido como admin, e só
-    // numa entrega NOVA (uma duplicata já foi tratada por `recordInboundMessage`; evita round-trip
-    // redundante — `handleAdminConversationalMessage` tem sua própria idempotência de saída de
-    // qualquer forma, então isto é só uma otimização, nunca uma segunda camada de correção).
-    let conversation: { replied: boolean; reason: string; outboundReplyId: string | null; toolsCalled: string[] } | null = null;
-    if (adminActor && record.wasNewInsert) {
-      conversation = await handleAdminConversationalMessage({
-        phoneE164: record.phoneE164,
-        actor: adminActor,
-        inboundExternalMessageId: record.externalMessageId,
-        textBody: record.textBody,
+      const record = await recordInboundMessage({
+        phoneE164,
+        externalMessageId: parsed.externalMessageId,
+        messageType: parsed.type,
+        textBody: parsed.textBody,
+        receivedAt: parsed.receivedAt,
       });
-    }
 
-    // Missão Z6.4 — observabilidade segura: nunca loga texto da mensagem, telefone completo, token ou app secret.
-    console.log(
-      JSON.stringify({
-        scope: "whatsapp-webhook-inbound",
-        loggedAt: new Date().toISOString(),
-        provider: "meta_whatsapp_cloud_api",
-        externalMessageId: record.externalMessageId,
-        messageType: record.messageType,
-        phoneMasked: maskPhone(record.phoneE164),
-        customerId: record.customerId,
-        receivedAt: record.receivedAt,
-        wasNewInsert: record.wasNewInsert,
-        status: record.wasNewInsert ? "recebida_e_persistida" : "duplicada_ignorada_idempotencia",
-        remetenteReconhecidoComoAdmin: adminActor !== null,
-        adminActorId: adminActor?.id ?? null,
-        conversationalReplied: conversation?.replied ?? null,
-        conversationalReason: conversation?.reason ?? null,
-        conversationalToolsCalled: conversation?.toolsCalled ?? null,
-      }),
-    );
+      // Missão Z6.5 — resolve identidade (telefone verificado -> actor), nunca do texto da mensagem.
+      const adminActor = await resolveWhatsAppAdminActor(record.phoneE164);
+
+      // Missão Z6.6 — só entra no fluxo conversacional quem já foi reconhecido como admin, e só
+      // numa entrega NOVA (uma duplicata já foi tratada por `recordInboundMessage`; evita round-trip
+      // redundante — `handleAdminConversationalMessage` tem sua própria idempotência de saída de
+      // qualquer forma, então isto é só uma otimização, nunca uma segunda camada de correção).
+      let conversation: { replied: boolean; reason: string; outboundReplyId: string | null; toolsCalled: string[] } | null = null;
+      if (adminActor && record.wasNewInsert) {
+        conversation = await handleAdminConversationalMessage({
+          phoneE164: record.phoneE164,
+          actor: adminActor,
+          inboundExternalMessageId: record.externalMessageId,
+          textBody: record.textBody,
+        });
+      }
+
+      // Missão Z6.4 — observabilidade segura: nunca loga texto da mensagem, telefone completo, token ou app secret.
+      console.log(
+        JSON.stringify({
+          scope: "whatsapp-webhook-inbound",
+          loggedAt: new Date().toISOString(),
+          provider: "meta_whatsapp_cloud_api",
+          externalMessageId: record.externalMessageId,
+          messageType: record.messageType,
+          phoneMasked: maskPhone(record.phoneE164),
+          customerId: record.customerId,
+          receivedAt: record.receivedAt,
+          wasNewInsert: record.wasNewInsert,
+          status: record.wasNewInsert ? "recebida_e_persistida" : "duplicada_ignorada_idempotencia",
+          remetenteReconhecidoComoAdmin: adminActor !== null,
+          adminActorId: adminActor?.id ?? null,
+          conversationalReplied: conversation?.replied ?? null,
+          conversationalReason: conversation?.reason ?? null,
+          conversationalToolsCalled: conversation?.toolsCalled ?? null,
+        }),
+      );
+    }
+  } catch (error) {
+    console.log(JSON.stringify({ scope: "whatsapp-webhook-inbound", loggedAt: new Date().toISOString(), status: "erro_inesperado_no_processamento_de_mensagens", errorName: error instanceof Error ? error.constructor.name : "unknown" }));
+  }
+
+  // Missão Z6.7 — processamento de status assíncrono da Meta (value.statuses[]), independente do
+  // bloco de mensagens acima. Correlaciona pelo wamid de SAÍDA (`externalMessageId` em
+  // `whatsapp_outbound_replies`) — nunca confunde com o wamid do inbound que originou a resposta.
+  try {
+    const parsedStatuses = parseWhatsAppStatusUpdates(body);
+    for (const update of parsedStatuses) {
+      if (!isKnownDeliveryStatus(update.status)) {
+        console.log(JSON.stringify({ scope: "whatsapp-status-update", loggedAt: new Date().toISOString(), wamid: update.wamid, status: update.status, outcome: "status_desconhecido_ignorado" }));
+        continue;
+      }
+
+      const firstError = update.errors[0] ?? null;
+      const result = await recordDeliveryStatusUpdate({
+        wamid: update.wamid,
+        status: update.status,
+        error: firstError,
+        rawErrors: update.errors.length > 0 ? update.errors : null,
+      });
+
+      // Nunca loga telefone completo, token ou app secret — só o recipient_id mascarado e o resultado estruturado do erro (nunca credencial).
+      console.log(
+        JSON.stringify({
+          scope: "whatsapp-status-update",
+          loggedAt: new Date().toISOString(),
+          wamid: update.wamid,
+          status: update.status,
+          recipientIdMasked: update.recipientId ? maskPhone(update.recipientId) : null,
+          correlationFound: result.correlationFound,
+          outboundReplyId: result.outboundReplyId,
+          hasError: update.errors.length > 0,
+          errorCode: firstError?.code ?? null,
+          errorTitle: firstError?.title ?? null,
+        }),
+      );
+    }
+  } catch (error) {
+    console.log(JSON.stringify({ scope: "whatsapp-status-update", loggedAt: new Date().toISOString(), status: "erro_inesperado_no_processamento_de_status", errorName: error instanceof Error ? error.constructor.name : "unknown" }));
   }
 
   // A Meta exige 200 rápido mesmo quando o payload não tinha mensagem relevante (ex.: eventos de status/entrega).

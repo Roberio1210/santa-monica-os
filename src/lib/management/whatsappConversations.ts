@@ -66,8 +66,12 @@ export interface OutboundReplyRecord {
   content: string;
   triggeredByExternalMessageId: string;
   externalMessageId: string | null;
-  status: "pendente" | "enviada" | "falha_envio" | "envio_desabilitado";
+  /** Só descreve se a NOSSA chamada POST à Graph API teve sucesso — nunca a entrega final (ver `deliveryStatus`). */
+  status: "pendente" | "accepted" | "falha_envio" | "envio_desabilitado";
   sendResult: string | null;
+  /** Missão Z6.7 — última confirmação assíncrona real da Meta sobre o destino da mensagem. */
+  deliveryStatus: "desconhecido" | "sent" | "delivered" | "read" | "failed";
+  deliveryStatusUpdatedAt: string | null;
 }
 
 function toRecord(row: typeof whatsappOutboundReplies.$inferSelect): OutboundReplyRecord {
@@ -79,6 +83,8 @@ function toRecord(row: typeof whatsappOutboundReplies.$inferSelect): OutboundRep
     externalMessageId: row.externalMessageId,
     status: row.status,
     sendResult: row.sendResult,
+    deliveryStatus: row.deliveryStatus,
+    deliveryStatusUpdatedAt: row.deliveryStatusUpdatedAt ? row.deliveryStatusUpdatedAt.toISOString() : null,
   };
 }
 
@@ -120,4 +126,63 @@ export async function updateOutboundReplyStatus(id: string, update: { status: Ou
     .update(whatsappOutboundReplies)
     .set({ status: update.status, externalMessageId: update.externalMessageId ?? null, sendResult: update.sendResult, updatedAt: new Date() })
     .where(eq(whatsappOutboundReplies.id, id));
+}
+
+/** Missão Z6.7 — os únicos 4 valores que a Meta de fato documenta para `value.statuses[].status`; qualquer outra string é rejeitada antes de tocar o banco (enum estrito na coluna). */
+export type WhatsAppDeliveryStatus = "sent" | "delivered" | "read" | "failed";
+const KNOWN_DELIVERY_STATUSES: ReadonlySet<string> = new Set(["sent", "delivered", "read", "failed"]);
+
+export function isKnownDeliveryStatus(status: string): status is WhatsAppDeliveryStatus {
+  return KNOWN_DELIVERY_STATUSES.has(status);
+}
+
+export interface DeliveryStatusErrorDetail {
+  code: number | null;
+  title: string | null;
+  message: string | null;
+  href: string | null;
+  errorData: unknown;
+}
+
+export interface DeliveryStatusUpdateResult {
+  /** `false` quando nenhuma linha em `whatsapp_outbound_replies` tem esse `externalMessageId` — teste obrigatório "status para wamid desconhecido": nunca lança, nunca inventa uma linha. */
+  correlationFound: boolean;
+  outboundReplyId: string | null;
+}
+
+/**
+ * Missão Z6.7 — correlaciona um evento de status assíncrono da Meta (`value.statuses[]`) com a
+ * resposta de saída correspondente, por `externalMessageId` (o wamid que A PRÓPRIA MENSAGEM DE
+ * SAÍDA recebeu no envio — nunca `triggeredByExternalMessageId`, que é o wamid do INBOUND, um
+ * objeto diferente). "Last write wins": cada chamada substitui o `deliveryStatus` anterior — não
+ * há proteção contra eventos fora de ordem (limitação conhecida). Idempotente por natureza: o
+ * mesmo evento reentregue duas vezes só grava o mesmo valor duas vezes, nunca cria inconsistência
+ * nem uma segunda linha.
+ */
+export async function recordDeliveryStatusUpdate(update: {
+  wamid: string;
+  status: WhatsAppDeliveryStatus;
+  error?: DeliveryStatusErrorDetail | null;
+  rawErrors?: unknown;
+}): Promise<DeliveryStatusUpdateResult> {
+  const db = getDb();
+  if (!db) return { correlationFound: false, outboundReplyId: null };
+
+  const [updated] = await db
+    .update(whatsappOutboundReplies)
+    .set({
+      deliveryStatus: update.status,
+      deliveryStatusUpdatedAt: new Date(),
+      deliveryErrorCode: update.error?.code ?? null,
+      deliveryErrorTitle: update.error?.title ?? null,
+      deliveryErrorMessage: update.error?.message ?? null,
+      deliveryErrorHref: update.error?.href ?? null,
+      deliveryErrorData: update.error?.errorData ?? null,
+      deliveryRawErrors: update.rawErrors ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(whatsappOutboundReplies.externalMessageId, update.wamid))
+    .returning({ id: whatsappOutboundReplies.id });
+
+  return { correlationFound: !!updated, outboundReplyId: updated?.id ?? null };
 }

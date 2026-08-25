@@ -54,7 +54,7 @@ export async function handleAdminConversationalMessage(params: {
   const existing = await findExistingReplyForInbound(params.inboundExternalMessageId);
   if (existing) {
     logPhase("duplicado_ja_processado", { phoneMasked, adminActorId: params.actor.id, outboundReplyId: existing.id, status: existing.status, durationMs: Date.now() - start });
-    return { replied: existing.status === "enviada", reason: "já processado anteriormente (idempotência de saída)", outboundReplyId: existing.id, toolsCalled: [] };
+    return { replied: existing.status === "accepted", reason: "já processado anteriormente (idempotência de saída)", outboundReplyId: existing.id, toolsCalled: [] };
   }
 
   logPhase("processamento_generativo_iniciado", { phoneMasked, adminActorId: params.actor.id });
@@ -90,8 +90,11 @@ export async function handleAdminConversationalMessage(params: {
 
   logPhase("outbound_solicitado", { phoneMasked, adminActorId: params.actor.id, outboundReplyId: replyRow.id });
   const outcome = await sendWhatsAppText(config, params.phoneE164, generative.text);
+  // Missão Z6.7 (achado real) — "accepted" só descreve que a Graph API aceitou o POST e devolveu
+  // um wamid; NUNCA prova entrega. O destino real (sent/delivered/read/failed) só chega depois,
+  // de forma assíncrona, via value.statuses[] no mesmo webhook (ver route.ts).
   await updateOutboundReplyStatus(replyRow.id, {
-    status: outcome.success ? "enviada" : "falha_envio",
+    status: outcome.success ? "accepted" : "falha_envio",
     externalMessageId: outcome.externalMessageId ?? null,
     sendResult: outcome.result,
   });

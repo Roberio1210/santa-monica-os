@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, id, notes, source, timestamps } from "./common";
 import { users } from "./auth";
 import { customers } from "./crm";
@@ -72,8 +72,23 @@ export const whatsappAdminNumbers = pgTable("whatsapp_admin_numbers", {
  * Junto com `inbound_messages` (turnos do usuário), esta tabela é a fonte de verdade do histórico
  * de conversa por telefone (turnos do assistente) — reconstruído sob demanda, nunca um blob JSON
  * solto, mesmo estilo linha-por-evento do resto do schema.
+ *
+ * Missão Z6.7 (achado real: "enviada" não prova entrega) — `status` (`accepted`/`pendente`/
+ * `falha_envio`/`envio_desabilitado`) descreve só se a NOSSA chamada POST à Graph API teve
+ * sucesso — nunca o destino final da mensagem. O valor antigo "enviada" foi renomeado para
+ * "accepted" (via `ALTER TYPE ... RENAME VALUE`, migração 100% segura — nenhuma linha existente é
+ * reescrita, só o rótulo do enum muda) porque "enviada" sugeria entrega, e nunca provou isso.
+ *
+ * `deliveryStatus` é um campo SEPARADO: o que a Meta de fato confirmou depois, de forma
+ * assíncrona, via `value.statuses[]` no mesmo webhook (correlacionado por `externalMessageId`,
+ * nunca por `triggeredByExternalMessageId` — que é o wamid do INBOUND, um objeto diferente).
+ * Puramente "last write wins" — cada evento novo substitui o status anterior; não impede
+ * atualizações fora de ordem (limitação conhecida, aceitável nesta fase).
  */
-export const whatsappOutboundReplyStatusEnum = pgEnum("whatsapp_outbound_reply_status", ["pendente", "enviada", "falha_envio", "envio_desabilitado"]);
+export const whatsappOutboundReplyStatusEnum = pgEnum("whatsapp_outbound_reply_status", ["pendente", "accepted", "falha_envio", "envio_desabilitado"]);
+
+/** Estados que a própria Meta reporta de volta via `value.statuses[].status` — vocabulário dela, nunca traduzido. */
+export const whatsappDeliveryStatusEnum = pgEnum("whatsapp_delivery_status", ["desconhecido", "sent", "delivered", "read", "failed"]);
 
 export const whatsappOutboundReplies = pgTable("whatsapp_outbound_replies", {
   id: id(),
@@ -83,9 +98,22 @@ export const whatsappOutboundReplies = pgTable("whatsapp_outbound_replies", {
   triggeredByExternalMessageId: text("triggered_by_external_message_id").notNull().unique(),
   /** wamid devolvido pela Meta quando o envio real é bem-sucedido — null enquanto pendente/desabilitado/falho. */
   externalMessageId: text("external_message_id"),
+  /** Só descreve o resultado da NOSSA chamada POST — nunca a entrega final (ver `deliveryStatus`). */
   status: whatsappOutboundReplyStatusEnum("status").notNull().default("pendente"),
   /** Resultado seguro do canal (nunca token/segredo) — ex.: "WhatsApp Cloud API desabilitado neste ambiente.". */
   sendResult: text("send_result"),
+  /** Missão Z6.7 — última confirmação assíncrona da Meta sobre o destino real da mensagem. */
+  deliveryStatus: whatsappDeliveryStatusEnum("delivery_status").notNull().default("desconhecido"),
+  deliveryStatusUpdatedAt: timestamp("delivery_status_updated_at", { withTimezone: true }),
+  /** Preenchidos só quando `deliveryStatus = "failed"` e a Meta reportou `errors[]` no evento de status — nunca credencial. */
+  deliveryErrorCode: integer("delivery_error_code"),
+  deliveryErrorTitle: text("delivery_error_title"),
+  deliveryErrorMessage: text("delivery_error_message"),
+  deliveryErrorHref: text("delivery_error_href"),
+  /** `error_data` do primeiro erro (ex.: `{details: "..."}`) — objeto bruto, formato definido pela Meta. */
+  deliveryErrorData: jsonb("delivery_error_data"),
+  /** Array `errors[]` completo, bruto — rede de segurança: mesmo que a extração estruturada acima não cubra um campo novo da Meta, nada se perde. */
+  deliveryRawErrors: jsonb("delivery_raw_errors"),
   active: active(),
   source: source(),
   notes: notes(),

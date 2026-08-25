@@ -124,3 +124,96 @@ export function parseInboundWhatsAppPayload(body: unknown): ParsedInboundMessage
 
   return results;
 }
+
+export interface ParsedStatusUpdateError {
+  code: number | null;
+  title: string | null;
+  message: string | null;
+  href: string | null;
+  errorData: unknown;
+}
+
+export interface ParsedStatusUpdate {
+  /** wamid da mensagem de SAÍDA a que este status se refere — corresponde a `externalMessageId` em `whatsapp_outbound_replies`, nunca ao wamid de um inbound. */
+  wamid: string;
+  /** Valor bruto reportado pela Meta ("sent"/"delivered"/"read"/"failed" documentados — string livre aqui, a validação contra o enum fica em `recordDeliveryStatusUpdate`, nunca aqui). */
+  status: string;
+  recipientId: string | null;
+  timestamp: Date | null;
+  conversationId: string | null;
+  pricingCategory: string | null;
+  errors: ParsedStatusUpdateError[];
+}
+
+/**
+ * Missão Z6.7 — extrai `value.statuses[]` (documentação oficial da Meta, confirmada nesta missão:
+ * `{id, status, timestamp, recipient_id, conversation:{id,...}, pricing:{category,...},
+ * errors?:[{code,title,message,href,error_data}]}`). Independente de `parseInboundWhatsAppPayload`
+ * — os dois percorrem a mesma árvore `entry[].changes[].value`, mas cada um só olha o array que
+ * lhe interessa; um POST real da Meta pode conter `messages` e `statuses` na mesma `value`, e
+ * processar um nunca impede o outro (nenhum `continue`/retorno cruzado entre as duas funções).
+ * Nunca lança em formato inesperado — item sem `id`/`status` é descartado silenciosamente (não há
+ * o que correlacionar sem os dois).
+ */
+export function parseWhatsAppStatusUpdates(body: unknown): ParsedStatusUpdate[] {
+  if (typeof body !== "object" || body === null) return [];
+  const entries = (body as Record<string, unknown>).entry;
+  if (!Array.isArray(entries)) return [];
+
+  const results: ParsedStatusUpdate[] = [];
+
+  for (const entry of entries) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const changes = (entry as Record<string, unknown>).changes;
+    if (!Array.isArray(changes)) continue;
+
+    for (const change of changes) {
+      if (typeof change !== "object" || change === null) continue;
+      const value = (change as Record<string, unknown>).value;
+      if (typeof value !== "object" || value === null) continue;
+      const statuses = (value as Record<string, unknown>).statuses;
+      if (!Array.isArray(statuses)) continue;
+
+      for (const statusEntry of statuses) {
+        if (typeof statusEntry !== "object" || statusEntry === null) continue;
+        const s = statusEntry as Record<string, unknown>;
+        const wamid = typeof s.id === "string" ? s.id : null;
+        const status = typeof s.status === "string" ? s.status : null;
+        if (!wamid || !status) continue;
+
+        const recipientId = typeof s.recipient_id === "string" ? s.recipient_id : null;
+        const timestampRaw = typeof s.timestamp === "string" ? Number.parseInt(s.timestamp, 10) : null;
+        const timestamp = timestampRaw !== null && !Number.isNaN(timestampRaw) ? new Date(timestampRaw * 1000) : null;
+
+        const conversation = s.conversation;
+        const conversationId =
+          typeof conversation === "object" && conversation !== null && typeof (conversation as Record<string, unknown>).id === "string"
+            ? ((conversation as Record<string, unknown>).id as string)
+            : null;
+
+        const pricing = s.pricing;
+        const pricingCategory =
+          typeof pricing === "object" && pricing !== null && typeof (pricing as Record<string, unknown>).category === "string"
+            ? ((pricing as Record<string, unknown>).category as string)
+            : null;
+
+        const errorsRaw = Array.isArray(s.errors) ? s.errors : [];
+        const errors: ParsedStatusUpdateError[] = errorsRaw.map((e) => {
+          if (typeof e !== "object" || e === null) return { code: null, title: null, message: null, href: null, errorData: null };
+          const err = e as Record<string, unknown>;
+          return {
+            code: typeof err.code === "number" ? err.code : null,
+            title: typeof err.title === "string" ? err.title : null,
+            message: typeof err.message === "string" ? err.message : null,
+            href: typeof err.href === "string" ? err.href : null,
+            errorData: err.error_data ?? null,
+          };
+        });
+
+        results.push({ wamid, status, recipientId, timestamp, conversationId, pricingCategory, errors });
+      }
+    }
+  }
+
+  return results;
+}
