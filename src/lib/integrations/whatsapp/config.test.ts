@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { isWhatsappCloudApiEnabled, loadWhatsappCloudApiConfig } from "@/lib/integrations/whatsapp/config";
+import { isWhatsappCloudApiEnabled, loadWhatsappCloudApiConfig, loadWebhookVerifyToken, loadWebhookAppSecret } from "@/lib/integrations/whatsapp/config";
 
 /**
  * Missão Z6.2 (testes obrigatórios 1, 2, 3) — `loadWhatsappCloudApiConfig()` é o único ponto de
@@ -74,5 +74,31 @@ describe("isWhatsappCloudApiEnabled / loadWhatsappCloudApiConfig", () => {
       webhookVerifyToken: "verify-abc",
       appSecret: "secret-def",
     });
+  });
+});
+
+/**
+ * Missão Z6.3 — leitura mínima usada pelo webhook (GET/POST), independente de `WHATSAPP_ENABLED`
+ * e das credenciais de envio. É o que permite a Meta verificar a URL de callback sem habilitar
+ * envio real.
+ */
+describe("loadWebhookVerifyToken / loadWebhookAppSecret — independentes de WHATSAPP_ENABLED", () => {
+  it("loadWebhookVerifyToken: ausente -> null", () => {
+    expect(loadWebhookVerifyToken()).toBeNull();
+  });
+
+  it("loadWebhookVerifyToken: presente, mesmo com WHATSAPP_ENABLED=false e nenhuma outra credencial -> devolve o valor", () => {
+    process.env.WHATSAPP_ENABLED = "false";
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "meu-verify-token";
+    expect(loadWebhookVerifyToken()).toBe("meu-verify-token");
+  });
+
+  it("loadWebhookAppSecret: ausente -> null", () => {
+    expect(loadWebhookAppSecret()).toBeNull();
+  });
+
+  it("loadWebhookAppSecret: presente, mesmo com WHATSAPP_ENABLED ausente -> devolve o valor", () => {
+    process.env.WHATSAPP_APP_SECRET = "meu-app-secret";
+    expect(loadWebhookAppSecret()).toBe("meu-app-secret");
   });
 });

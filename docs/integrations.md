@@ -81,11 +81,15 @@
 - **Descrição**: agendamentos e relacionamento com clientes.
 - **Fonte**: WhatsApp Cloud API oficial da Meta (Graph API) — decisão de arquitetura confirmada na
   Missão Z6.1 (auditoria: nem Evolution API nem n8n/Cloudfy existem ou são usados neste projeto).
-- **Modo**: código real implementado (Missão Z6.2), mas DESABILITADO — `WHATSAPP_ENABLED=false` é
-  o padrão e nenhuma variável de credencial está configurada em produção. `MessageChannel.send()`
-  do canal (`whatsappCloudApiChannel`) falha fechado antes de qualquer chamada HTTP externa sempre
-  que `WHATSAPP_ENABLED !== "true"`, credencial ausente, mensagem não aprovada, ou destinatário não
-  resolvido.
+- **Modo**: código real implementado (Missão Z6.2), envio DESABILITADO — `WHATSAPP_ENABLED=false`
+  é o padrão em produção. `MessageChannel.send()` do canal (`whatsappCloudApiChannel`) falha
+  fechado antes de qualquer chamada HTTP externa sempre que `WHATSAPP_ENABLED !== "true"`,
+  credencial de envio ausente, mensagem não aprovada, ou destinatário não resolvido.
+- **Webhook (recebimento/verificação) — independente de `WHATSAPP_ENABLED`** (Missão Z6.3): o
+  GET de verificação da Meta só depende de `WHATSAPP_WEBHOOK_VERIFY_TOKEN` estar configurado; o
+  POST só processa eventos quando `WHATSAPP_APP_SECRET` está configurado (503 quando ausente, 401
+  quando a assinatura não bate). Isso permite completar a "Etapa 2" do painel da Meta (cadastrar
+  URL de callback + verify token) sem nunca precisar habilitar `WHATSAPP_ENABLED`.
 - **Fluxo de aprovação**: nenhuma mensagem sai sem aprovação explícita e específica do gestor — ver
   `outbound_messages`/`assertMessageApproved` (Missão "Regra Absoluta de Envio"). O canal em si
   nunca é a autorização; é só o transporte, chamado depois que o gate já aprovou.

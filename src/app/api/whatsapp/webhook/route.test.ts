@@ -2,10 +2,15 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Missão Z6.2 — teste de integração leve da rota (GET de verificação, POST com assinatura),
+ * Missão Z6.2/Z6.3 — teste de integração leve da rota (GET de verificação, POST com assinatura),
  * confirmando a fiação real (nomes de query param, nome do header, leitura do corpo bruto antes
  * do JSON.parse) além do que os testes puros de `webhook.ts` já cobrem. `recordInboundMessage` é
  * mockado — nenhum banco real é tocado.
+ *
+ * O ponto central desta versão (achado real da Z6.3): GET/POST agora dependem SÓ de
+ * `WHATSAPP_WEBHOOK_VERIFY_TOKEN`/`WHATSAPP_APP_SECRET`, nunca de `WHATSAPP_ENABLED` — a Meta
+ * precisa conseguir verificar a URL de callback ("Etapa 2" do painel) SEM que o envio real esteja
+ * habilitado. O teste "GET funciona com WHATSAPP_ENABLED=false" é a prova direta disso.
  */
 
 const recordInboundMessageMock = vi.fn();
@@ -29,56 +34,65 @@ afterEach(() => {
   }
 });
 
-function enableWithValidConfig() {
-  process.env.WHATSAPP_ENABLED = "true";
-  process.env.WHATSAPP_PHONE_NUMBER_ID = "phone-id-123";
-  process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = "waba-456";
-  process.env.WHATSAPP_ACCESS_TOKEN = "token-789";
-  process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify-abc";
-  process.env.WHATSAPP_APP_SECRET = "secret-def";
-}
-
 describe("GET /api/whatsapp/webhook", () => {
-  it("desabilitado (sem WHATSAPP_ENABLED) -> 404, nunca tenta verificar nada", async () => {
+  it("sem WHATSAPP_WEBHOOK_VERIFY_TOKEN configurado -> 404, nunca tenta verificar nada", async () => {
     const { GET } = await import("@/app/api/whatsapp/webhook/route");
     const response = await GET(new Request("https://x.test/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=verify-abc&hub.challenge=123"));
     expect(response.status).toBe(404);
   });
 
-  it("habilitado + token correto -> 200 ecoando o challenge", async () => {
-    enableWithValidConfig();
+  it("teste obrigatório da Z6.3 — token correto FUNCIONA mesmo com WHATSAPP_ENABLED=false (webhook independe de envio habilitado)", async () => {
+    process.env.WHATSAPP_ENABLED = "false";
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify-abc";
     const { GET } = await import("@/app/api/whatsapp/webhook/route");
     const response = await GET(new Request("https://x.test/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=verify-abc&hub.challenge=abc123"));
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("abc123");
   });
 
-  it("habilitado + token incorreto -> 403", async () => {
-    enableWithValidConfig();
+  it("token correto também funciona sem NENHUMA outra variável de envio configurada (nem phone_number_id, nem access_token, etc.)", async () => {
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify-abc";
+    const { GET } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await GET(new Request("https://x.test/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=verify-abc&hub.challenge=xyz"));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("xyz");
+  });
+
+  it("token incorreto -> 403, nunca revela o valor esperado", async () => {
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify-abc";
     const { GET } = await import("@/app/api/whatsapp/webhook/route");
     const response = await GET(new Request("https://x.test/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=errado&hub.challenge=abc123"));
     expect(response.status).toBe(403);
+    const text = await response.text();
+    expect(text).not.toContain("verify-abc");
   });
 });
 
 describe("POST /api/whatsapp/webhook", () => {
-  it("desabilitado -> 404, nunca lê/valida o corpo", async () => {
+  it("sem WHATSAPP_APP_SECRET configurado -> 503 (fail closed: sem segredo, nada é processado)", async () => {
     const { POST } = await import("@/app/api/whatsapp/webhook/route");
     const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: "{}" }));
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(503);
     expect(recordInboundMessageMock).not.toHaveBeenCalled();
   });
 
-  it("teste obrigatório 13 — assinatura ausente/inválida -> 401, nunca processa o payload", async () => {
-    enableWithValidConfig();
+  it("sem WHATSAPP_APP_SECRET, mesmo com WHATSAPP_ENABLED=true -> ainda 503 (POST não depende de ENABLED, depende do segredo)", async () => {
+    process.env.WHATSAPP_ENABLED = "true";
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: "{}" }));
+    expect(response.status).toBe(503);
+  });
+
+  it("teste obrigatório 13 — com APP_SECRET configurado, assinatura ausente/inválida -> 401, nunca processa o payload", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
     const { POST } = await import("@/app/api/whatsapp/webhook/route");
     const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: JSON.stringify({ entry: [] }) }));
     expect(response.status).toBe(401);
     expect(recordInboundMessageMock).not.toHaveBeenCalled();
   });
 
-  it("teste obrigatório 12 — assinatura válida + payload válido -> 200, grava a mensagem recebida", async () => {
-    enableWithValidConfig();
+  it("teste obrigatório 12 — APP_SECRET configurado + assinatura válida + payload válido -> 200, grava a mensagem recebida", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
     recordInboundMessageMock.mockResolvedValue({ id: "in-1" });
 
     const payload = JSON.stringify({

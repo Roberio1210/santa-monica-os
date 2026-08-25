@@ -12,10 +12,10 @@ import { isPathAllowedForRole, ROLE_HOME_PATH } from "@/lib/auth/permissions";
  * /api/jumppark/sync e /api/stone/sync (Missão 27 / Missão Financeiro V2 — ambos têm
  * autenticação própria por `CRON_SECRET`, verificada dentro da própria rota; precisam ficar
  * acessíveis sem Basic Auth para o cron diário da Vercel conseguir chamá-los), e
- * /api/whatsapp/webhook (Missão Z6.2 — a Meta precisa alcançar essa rota sem Basic Auth; a
- * autenticação própria é a assinatura `X-Hub-Signature-256`, verificada dentro da rota. Enquanto
- * `WHATSAPP_ENABLED` não estiver `true`, a rota sempre responde 404 antes de processar qualquer
- * coisa — ver `src/lib/integrations/whatsapp/config.ts`).
+ * /api/whatsapp/webhook (Missão Z6.2/Z6.3 — a Meta precisa alcançar essa rota sem Basic Auth; a
+ * autenticação própria é o verify token (GET) e a assinatura `X-Hub-Signature-256` (POST),
+ * verificados dentro da própria rota, independente de `WHATSAPP_ENABLED` — que controla só o
+ * ENVIO, nunca o recebimento/verificação do webhook. Ver `src/lib/integrations/whatsapp/config.ts`).
  */
 const PUBLIC_PATHS = ["/api/health", "/api/jumppark/sync", "/api/stone/sync", "/api/whatsapp/webhook"];
 
