@@ -4,6 +4,7 @@ import { loadWhatsappCloudApiConfig } from "./config";
 import { resolveRecipientPhone } from "./recipientResolution";
 import { resolveMessageWindow, findApprovedTemplate } from "./templates";
 import { getLastInboundMessageAt } from "@/lib/management/inboundMessages";
+import { sendWhatsAppText } from "./sendText";
 
 /**
  * Missão Z6.2 — implementação real do `MessageChannel` para a WhatsApp Cloud API oficial da Meta.
@@ -17,8 +18,6 @@ import { getLastInboundMessageAt } from "@/lib/management/inboundMessages";
  * Nenhum resultado devolvido por este módulo contém telefone completo ou credencial — só texto
  * seguro para log/auditoria (`outbound_messages.sendResult`).
  */
-
-const GRAPH_API_VERSION = "v21.0";
 
 export const whatsappCloudApiChannel: MessageChannel = {
   provider: "whatsapp_cloud_api",
@@ -47,31 +46,6 @@ export const whatsappCloudApiChannel: MessageChannel = {
     }
 
     const text = message.finalText ?? message.draftText;
-
-    try {
-      const response = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/${config.phoneNumberId}/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: phoneE164,
-          type: "text",
-          text: { body: text },
-        }),
-      });
-
-      if (!response.ok) {
-        return { success: false, result: `Falha no envio via WhatsApp Cloud API (HTTP ${response.status}).` };
-      }
-
-      const data = (await response.json().catch(() => null)) as { messages?: Array<{ id?: string }> } | null;
-      const externalMessageId = data?.messages?.[0]?.id;
-      return { success: true, result: "Mensagem enviada com sucesso via WhatsApp Cloud API.", externalMessageId };
-    } catch {
-      return { success: false, result: "Erro de rede ao tentar enviar via WhatsApp Cloud API." };
-    }
+    return sendWhatsAppText(config, phoneE164, text);
   },
 };

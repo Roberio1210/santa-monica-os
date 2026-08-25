@@ -4,6 +4,7 @@ import { verifyWebhookSubscription, verifyMetaWebhookSignature, parseInboundWhat
 import { normalizeBrazilianPhoneToE164 } from "@/lib/integrations/whatsapp/phone";
 import { recordInboundMessage } from "@/lib/management/inboundMessages";
 import { resolveWhatsAppAdminActor } from "@/lib/zezinho/generative/orchestrator";
+import { handleAdminConversationalMessage } from "@/lib/zezinho/generative/whatsappConversation";
 import { maskPhone } from "@/lib/utils/mask";
 
 /**
@@ -36,12 +37,17 @@ import { maskPhone } from "@/lib/utils/mask";
  * se foi inserção nova ou duplicata) — nunca o texto da mensagem, nunca o telefone completo, nunca
  * token/app secret.
  *
- * Missão Z6.5 — `resolveWhatsAppAdminActor` (orquestrador) agora resolve, a partir do telefone JÁ
+ * Missão Z6.5 — `resolveWhatsAppAdminActor` (orquestrador) resolve, a partir do telefone JÁ
  * VERIFICADO (assinatura validada acima, nunca do texto da mensagem), se o remetente é um admin
- * cadastrado em `whatsapp_admin_numbers`. O resultado só é LOGADO (`remetenteReconhecidoComoAdmin`)
- * — nada mais acontece a partir disso nesta missão: nenhuma chamada a `answerGenerative`, nenhuma
- * ferramenta, nenhuma resposta automática. Conectar isso a um fluxo de conversa real (o gestor de
- * fato interagindo com o Zézinho pelo WhatsApp) é trabalho de uma missão futura, explícita.
+ * cadastrado em `whatsapp_admin_numbers`.
+ *
+ * Missão Z6.6 — só para remetentes reconhecidos como admin (número fora da allowlist NUNCA chega
+ * a este bloco — a checagem estrutural acontece aqui, na entrada, antes de qualquer coisa),
+ * `handleAdminConversationalMessage` (mesmo Zézinho da sessão Web, `toolPolicy:
+ * "conversational_read_only"` — nenhuma ferramenta com efeito colateral) gera e, se
+ * `WHATSAPP_ENABLED` estiver habilitado, envia a resposta. Prevenção de loop: uma mensagem cujo
+ * remetente é o PRÓPRIO número comercial (`value.metadata.display_phone_number`) é descartada
+ * antes de qualquer processamento — nunca é tratada como mensagem de cliente/admin.
  */
 
 export async function GET(request: Request) {
@@ -92,6 +98,14 @@ export async function POST(request: Request) {
     const phoneE164 = normalizeBrazilianPhoneToE164(parsed.phoneRaw);
     if (!phoneE164) continue; // nunca persiste um telefone que não conseguimos validar
 
+    // Missão Z6.6 (seção 9, prevenção de loop) — uma mensagem "de" o próprio número comercial
+    // nunca é processada como mensagem de cliente/admin. Descartada ANTES de persistir.
+    const businessPhoneE164 = normalizeBrazilianPhoneToE164(parsed.businessPhoneRaw);
+    if (businessPhoneE164 && businessPhoneE164 === phoneE164) {
+      console.log(JSON.stringify({ scope: "whatsapp-webhook-inbound", loggedAt: new Date().toISOString(), status: "descartada_auto_mensagem_bloqueio_loop", externalMessageId: parsed.externalMessageId }));
+      continue;
+    }
+
     const record = await recordInboundMessage({
       phoneE164,
       externalMessageId: parsed.externalMessageId,
@@ -100,10 +114,22 @@ export async function POST(request: Request) {
       receivedAt: parsed.receivedAt,
     });
 
-    // Missão Z6.5 — só RESOLVE identidade (telefone verificado -> actor), nunca aciona nada a
-    // partir disso: nenhuma chamada a `answerGenerative`, nenhuma ferramenta, nenhum envio. O
-    // reconhecimento existe apenas para observabilidade nesta fase.
+    // Missão Z6.5 — resolve identidade (telefone verificado -> actor), nunca do texto da mensagem.
     const adminActor = await resolveWhatsAppAdminActor(record.phoneE164);
+
+    // Missão Z6.6 — só entra no fluxo conversacional quem já foi reconhecido como admin, e só
+    // numa entrega NOVA (uma duplicata já foi tratada por `recordInboundMessage`; evita round-trip
+    // redundante — `handleAdminConversationalMessage` tem sua própria idempotência de saída de
+    // qualquer forma, então isto é só uma otimização, nunca uma segunda camada de correção).
+    let conversation: { replied: boolean; reason: string; outboundReplyId: string | null; toolsCalled: string[] } | null = null;
+    if (adminActor && record.wasNewInsert) {
+      conversation = await handleAdminConversationalMessage({
+        phoneE164: record.phoneE164,
+        actor: adminActor,
+        inboundExternalMessageId: record.externalMessageId,
+        textBody: record.textBody,
+      });
+    }
 
     // Missão Z6.4 — observabilidade segura: nunca loga texto da mensagem, telefone completo, token ou app secret.
     console.log(
@@ -120,6 +146,9 @@ export async function POST(request: Request) {
         status: record.wasNewInsert ? "recebida_e_persistida" : "duplicada_ignorada_idempotencia",
         remetenteReconhecidoComoAdmin: adminActor !== null,
         adminActorId: adminActor?.id ?? null,
+        conversationalReplied: conversation?.replied ?? null,
+        conversationalReason: conversation?.reason ?? null,
+        conversationalToolsCalled: conversation?.toolsCalled ?? null,
       }),
     );
   }

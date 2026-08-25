@@ -6,6 +6,7 @@ import { buildZezinhoTools } from "@/lib/zezinho/generative/tools";
 import { buildZezinhoSystemPrompt } from "@/lib/zezinho/generative/systemPrompt";
 import { logGenerativeInteraction } from "@/lib/zezinho/generative/logger";
 import { resolveAdminActorFromPhone } from "@/lib/management/inboundMessages";
+import { applyToolPolicy, type ToolPolicy } from "@/lib/zezinho/generative/toolPolicy";
 
 /**
  * Missão Z2 — orquestrador do Zézinho generativo: SESSÃO/ROLE (já resolvida por quem chama,
@@ -92,12 +93,25 @@ function stripLeakedReasoningChannel(text: string): string {
   return stage2.trim();
 }
 
-export async function answerGenerative(freeText: string, history: GenerativeMessage[], role: UserRole, actor: GenerativeActor | null = null): Promise<GenerativeAnswer | null> {
+/**
+ * Missão Z6.6 — `toolPolicy` ("full" por padrão, preserva 100% o comportamento já existente da
+ * sessão HTTP/Web) permite ao canal WhatsApp administrativo pedir "conversational_read_only":
+ * mesmo cérebro, mesmo prompt, mesmas ferramentas de LEITURA — só as 3 ferramentas com efeito
+ * colateral somem do conjunto exposto ao modelo (`toolPolicy.ts`). Nenhuma lógica generativa
+ * paralela — é o MESMO `answerGenerative` de sempre, só com um filtro a mais sobre o `tools`.
+ */
+export async function answerGenerative(
+  freeText: string,
+  history: GenerativeMessage[],
+  role: UserRole,
+  actor: GenerativeActor | null = null,
+  toolPolicy: ToolPolicy = "full",
+): Promise<GenerativeAnswer | null> {
   const config = getGenerativeConfig();
   if (!config.enabled) return null;
 
   const trimmedHistory = history.slice(-MAX_HISTORY_MESSAGES);
-  const tools = buildZezinhoTools(role, actor);
+  const tools = applyToolPolicy(buildZezinhoTools(role, actor), toolPolicy);
   const start = Date.now();
 
   try {

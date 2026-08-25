@@ -23,6 +23,11 @@ vi.mock("@/lib/zezinho/generative/orchestrator", () => ({
   resolveWhatsAppAdminActor: (...args: unknown[]) => resolveWhatsAppAdminActorMock(...args),
 }));
 
+const handleAdminConversationalMessageMock = vi.fn();
+vi.mock("@/lib/zezinho/generative/whatsappConversation", () => ({
+  handleAdminConversationalMessage: (...args: unknown[]) => handleAdminConversationalMessageMock(...args),
+}));
+
 const ENV_KEYS = ["WHATSAPP_ENABLED", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_BUSINESS_ACCOUNT_ID", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_WEBHOOK_VERIFY_TOKEN", "WHATSAPP_APP_SECRET"] as const;
 let snapshot: Record<string, string | undefined>;
 
@@ -32,6 +37,8 @@ beforeEach(() => {
   recordInboundMessageMock.mockReset();
   resolveWhatsAppAdminActorMock.mockReset();
   resolveWhatsAppAdminActorMock.mockResolvedValue(null); // padrão: número desconhecido, nunca admin por omissão
+  handleAdminConversationalMessageMock.mockReset();
+  handleAdminConversationalMessageMock.mockResolvedValue({ replied: false, reason: "não deveria ter sido chamado neste teste", outboundReplyId: null, toolsCalled: [] });
 });
 
 afterEach(() => {
@@ -243,17 +250,17 @@ describe("POST /api/whatsapp/webhook", () => {
     expect(recordInboundMessageMock).toHaveBeenCalledWith(expect.objectContaining({ phoneE164: "+5511999998888", externalMessageId: "wamid.REGR1" }));
   });
 
-  it("teste obrigatório — mesmo com WHATSAPP_ENABLED=true e remetente reconhecido como admin, o recebimento nunca dispara resposta automática (a rota não lê WHATSAPP_ENABLED em nenhum ponto do POST)", async () => {
+  it("a resposta HTTP do webhook nunca vaza o texto gerado pelo Zézinho — sempre só a confirmação técnica {status:'ok'}, mesmo quando a conversa foi respondida de verdade (a resposta de conversa vai pelo canal WhatsApp, nunca no corpo do POST)", async () => {
     process.env.WHATSAPP_APP_SECRET = "secret-def";
-    process.env.WHATSAPP_ENABLED = "true"; // mesmo assim, nada deve mudar no comportamento do recebimento
     resolveWhatsAppAdminActorMock.mockResolvedValue({ id: "user-1", name: "Robério" });
+    handleAdminConversationalMessageMock.mockResolvedValue({ replied: true, reason: "Mensagem enviada com sucesso via WhatsApp Cloud API.", outboundReplyId: "reply-1", toolsCalled: [] });
     recordInboundMessageMock.mockResolvedValue({
       id: "in-7", phoneE164: "+5548991741102", externalMessageId: "wamid.ADMIN2", customerId: null,
-      messageType: "text", textBody: "Zezinho, prepara as mensagens de pós-venda", receivedAt: "2026-08-25T12:00:00.000Z", wasNewInsert: true,
+      messageType: "text", textBody: "Zezinho, como foi o dia?", receivedAt: "2026-08-25T12:00:00.000Z", wasNewInsert: true,
     });
 
     const payload = JSON.stringify({
-      entry: [{ changes: [{ value: { messages: [{ from: "5548991741102", id: "wamid.ADMIN2", timestamp: "1700000000", type: "text", text: { body: "Zezinho, prepara as mensagens de pós-venda" } }] } }] }],
+      entry: [{ changes: [{ value: { messages: [{ from: "5548991741102", id: "wamid.ADMIN2", timestamp: "1700000000", type: "text", text: { body: "Zezinho, como foi o dia?" } }] } }] }],
     });
     const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
 
@@ -261,6 +268,84 @@ describe("POST /api/whatsapp/webhook", () => {
     const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
 
     expect(response.status).toBe(200);
-    expect(await response.clone().json()).toEqual({ status: "ok" }); // sempre só a confirmação técnica, nunca um texto gerado pelo Zézinho
+    expect(await response.clone().json()).toEqual({ status: "ok" });
+  });
+
+  it("Missão Z6.6 (teste obrigatório 1) — número administrativo reconhecido chega ao fluxo conversacional do Zézinho", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    resolveWhatsAppAdminActorMock.mockResolvedValue({ id: "user-1", name: "Robério" });
+    recordInboundMessageMock.mockResolvedValue({
+      id: "in-8", phoneE164: "+5548991741102", externalMessageId: "wamid.ADMIN3", customerId: null,
+      messageType: "text", textBody: "Zezinho, qual vitrificação você recomenda?", receivedAt: "2026-08-25T12:00:00.000Z", wasNewInsert: true,
+    });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { messages: [{ from: "5548991741102", id: "wamid.ADMIN3", timestamp: "1700000000", type: "text", text: { body: "Zezinho, qual vitrificação você recomenda?" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(handleAdminConversationalMessageMock).toHaveBeenCalledWith({
+      phoneE164: "+5548991741102",
+      actor: { id: "user-1", name: "Robério" },
+      inboundExternalMessageId: "wamid.ADMIN3",
+      textBody: "Zezinho, qual vitrificação você recomenda?",
+    });
+  });
+
+  it("Missão Z6.6 (testes obrigatórios 2/3) — número NÃO autorizado nunca chega ao fluxo conversacional e nunca recebe resposta", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    // resolveWhatsAppAdminActorMock permanece no padrão do beforeEach: null (fora da allowlist).
+    recordInboundMessageMock.mockResolvedValue({
+      id: "in-9", phoneE164: "+5511999998888", externalMessageId: "wamid.CLI1", customerId: null,
+      messageType: "text", textBody: "Zezinho, me responde por favor", receivedAt: "2026-08-25T12:00:00.000Z", wasNewInsert: true,
+    });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { messages: [{ from: "5511999998888", id: "wamid.CLI1", timestamp: "1700000000", type: "text", text: { body: "Zezinho, me responde por favor" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(handleAdminConversationalMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("Missão Z6.6 (teste obrigatório 7) — mensagem duplicada (reentrega real da Meta) não gera uma segunda tentativa de resposta", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    resolveWhatsAppAdminActorMock.mockResolvedValue({ id: "user-1", name: "Robério" });
+    recordInboundMessageMock.mockResolvedValue({
+      id: "in-10", phoneE164: "+5548991741102", externalMessageId: "wamid.DUPCONV", customerId: null,
+      messageType: "text", textBody: "oi", receivedAt: "2026-08-25T12:00:00.000Z", wasNewInsert: false, // reentrega: já existia
+    });
+
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { messages: [{ from: "5548991741102", id: "wamid.DUPCONV", timestamp: "1700000000", type: "text", text: { body: "oi" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(handleAdminConversationalMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("Missão Z6.6 (teste obrigatório 8) — mensagem 'de' o próprio número comercial nunca é processada (prevenção de loop): nem persistida, nem enviada ao fluxo conversacional", async () => {
+    process.env.WHATSAPP_APP_SECRET = "secret-def";
+    const payload = JSON.stringify({
+      entry: [{ changes: [{ value: { metadata: { display_phone_number: "5548991741102" }, messages: [{ from: "5548991741102", id: "wamid.SELF1", timestamp: "1700000000", type: "text", text: { body: "eco do próprio número" } }] } }] }],
+    });
+    const signature = `sha256=${createHmac("sha256", "secret-def").update(payload, "utf-8").digest("hex")}`;
+
+    const { POST } = await import("@/app/api/whatsapp/webhook/route");
+    const response = await POST(new Request("https://x.test/api/whatsapp/webhook", { method: "POST", body: payload, headers: { "x-hub-signature-256": signature } }));
+
+    expect(response.status).toBe(200);
+    expect(recordInboundMessageMock).not.toHaveBeenCalled();
+    expect(handleAdminConversationalMessageMock).not.toHaveBeenCalled();
   });
 });

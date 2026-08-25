@@ -92,6 +92,20 @@ describe("parseInboundWhatsAppPayload — teste obrigatório 12 (webhook POST v�
     expect(parseInboundWhatsAppPayload(payload)).toEqual([]);
   });
 
+  it("Missão Z6.6 (prevenção de loop) — captura o número comercial de value.metadata.display_phone_number quando presente", () => {
+    const payload = {
+      entry: [{ changes: [{ value: { metadata: { display_phone_number: "554891741102", phone_number_id: "123" }, messages: [{ from: "5511999998888", id: "wamid.X", timestamp: "1700000000", type: "text", text: { body: "oi" } }] } }] }],
+    };
+    const result = parseInboundWhatsAppPayload(payload);
+    expect(result[0].businessPhoneRaw).toBe("554891741102");
+  });
+
+  it("sem metadata.display_phone_number -> businessPhoneRaw null, nunca inventado", () => {
+    const payload = { entry: [{ changes: [{ value: { messages: [{ from: "5511999998888", id: "wamid.Y", timestamp: "1700000000", type: "text", text: { body: "oi" } }] } }] }] };
+    const result = parseInboundWhatsAppPayload(payload);
+    expect(result[0].businessPhoneRaw).toBeNull();
+  });
+
   it("payload malformado/vazio/nulo -> lista vazia, nunca lança", () => {
     expect(parseInboundWhatsAppPayload(null)).toEqual([]);
     expect(parseInboundWhatsAppPayload({})).toEqual([]);

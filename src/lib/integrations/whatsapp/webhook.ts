@@ -55,6 +55,13 @@ export interface ParsedInboundMessage {
   type: string;
   textBody: string | null;
   receivedAt: Date;
+  /**
+   * Missão Z6.6 (seção 9, prevenção de loop) — `value.metadata.display_phone_number`: o próprio
+   * número comercial, reportado pela Meta em CADA evento. Nunca `null` por omissão quando o campo
+   * vem preenchido — compare com `phoneRaw` para nunca tratar uma mensagem como se tivesse vindo
+   * de um cliente/admin quando na verdade veio (ou parece ter vindo) do próprio número da empresa.
+   */
+  businessPhoneRaw: string | null;
 }
 
 /**
@@ -82,6 +89,12 @@ export function parseInboundWhatsAppPayload(body: unknown): ParsedInboundMessage
       const messages = (value as Record<string, unknown>).messages;
       if (!Array.isArray(messages)) continue;
 
+      const metadata = (value as Record<string, unknown>).metadata;
+      const businessPhoneRaw =
+        typeof metadata === "object" && metadata !== null && typeof (metadata as Record<string, unknown>).display_phone_number === "string"
+          ? ((metadata as Record<string, unknown>).display_phone_number as string)
+          : null;
+
       for (const message of messages) {
         if (typeof message !== "object" || message === null) continue;
         const m = message as Record<string, unknown>;
@@ -103,6 +116,7 @@ export function parseInboundWhatsAppPayload(body: unknown): ParsedInboundMessage
           type,
           textBody,
           receivedAt: new Date(timestampRaw * 1000),
+          businessPhoneRaw,
         });
       }
     }

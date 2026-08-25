@@ -192,6 +192,31 @@ describe("answerGenerative", () => {
     expect(callArgs.tools).toHaveProperty("cash_ledger_totals");
   });
 
+  it("Missão Z6.6 (teste obrigatório 6) — sem 5º parâmetro (uso normal da sessão Web), admin ainda recebe as ferramentas com efeito colateral (comportamento antigo 100% preservado)", async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    await answerGenerative("aprova a mensagem 1", [], "admin");
+
+    const callArgs = generateTextMock.mock.calls[0][0] as { tools: Record<string, unknown> };
+    expect(callArgs.tools).toHaveProperty("approve_messages");
+    expect(callArgs.tools).toHaveProperty("queue_message_for_approval");
+  });
+
+  it('Missão Z6.6 (teste obrigatório 6) — toolPolicy "conversational_read_only" remove as ferramentas com efeito colateral mesmo para admin', async () => {
+    process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+    generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+    const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+    await answerGenerative("aprova a mensagem 1", [], "admin", { id: "user-1", name: "Robério" }, "conversational_read_only");
+
+    const callArgs = generateTextMock.mock.calls[0][0] as { tools: Record<string, unknown> };
+    expect(callArgs.tools).not.toHaveProperty("approve_messages");
+    expect(callArgs.tools).not.toHaveProperty("queue_message_for_approval");
+    expect(callArgs.tools).not.toHaveProperty("discard_messages");
+    // mas continua o MESMO Zézinho — ferramentas de leitura continuam disponíveis
+    expect(callArgs.tools).toHaveProperty("cash_ledger_totals");
+  });
+
   it("histórico é limitado (nunca envia mais que o teto configurado) e a pergunta atual sempre é a última mensagem", async () => {
     process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
     generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });

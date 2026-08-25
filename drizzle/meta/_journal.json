@@ -351,6 +351,13 @@
       "when": 1787584805868,
       "tag": "0049_odd_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787665326641,
+      "tag": "0050_chemical_amphibian",
+      "breakpoints": true
     }
   ]
 }

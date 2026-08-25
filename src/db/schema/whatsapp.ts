@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { active, id, notes, source, timestamps } from "./common";
 import { users } from "./auth";
 import { customers } from "./crm";
@@ -57,5 +57,41 @@ export const whatsappAdminNumbers = pgTable("whatsapp_admin_numbers", {
   ...timestamps,
 });
 
+/**
+ * Missão Z6.6 — resposta CONVERSACIONAL do Zézinho para um administrador autorizado, enviada
+ * diretamente pelo WhatsApp SEM o gate de aprovação de `outbound_messages` (Missão "Regra Absoluta
+ * de Envio") — essa é uma trilha de governança DIFERENTE e deliberadamente separada: aprovação
+ * manual continua obrigatória para mensagens comerciais/pós-venda/reativação a clientes (ver
+ * `outbound_messages`/`assertMessageApproved`, intocados), mas uma resposta de CONVERSA para quem
+ * já está verificado como admin (telefone, nunca texto) não precisa desse fluxo.
+ *
+ * `triggeredByExternalMessageId` é a idempotência de SAÍDA: UNIQUE, então o mesmo evento de
+ * webhook (reentrega real da Meta) nunca gera uma segunda resposta nem uma segunda chamada de
+ * envio, mesmo que o processamento seja repetido.
+ *
+ * Junto com `inbound_messages` (turnos do usuário), esta tabela é a fonte de verdade do histórico
+ * de conversa por telefone (turnos do assistente) — reconstruído sob demanda, nunca um blob JSON
+ * solto, mesmo estilo linha-por-evento do resto do schema.
+ */
+export const whatsappOutboundReplyStatusEnum = pgEnum("whatsapp_outbound_reply_status", ["pendente", "enviada", "falha_envio", "envio_desabilitado"]);
+
+export const whatsappOutboundReplies = pgTable("whatsapp_outbound_replies", {
+  id: id(),
+  phoneE164: text("phone_e164").notNull(),
+  content: text("content").notNull(),
+  /** wamid do INBOUND que originou esta resposta — a idempotência de saída de verdade. */
+  triggeredByExternalMessageId: text("triggered_by_external_message_id").notNull().unique(),
+  /** wamid devolvido pela Meta quando o envio real é bem-sucedido — null enquanto pendente/desabilitado/falho. */
+  externalMessageId: text("external_message_id"),
+  status: whatsappOutboundReplyStatusEnum("status").notNull().default("pendente"),
+  /** Resultado seguro do canal (nunca token/segredo) — ex.: "WhatsApp Cloud API desabilitado neste ambiente.". */
+  sendResult: text("send_result"),
+  active: active(),
+  source: source(),
+  notes: notes(),
+  ...timestamps,
+});
+
 export type InboundMessageRow = typeof inboundMessages.$inferSelect;
 export type WhatsappAdminNumberRow = typeof whatsappAdminNumbers.$inferSelect;
+export type WhatsappOutboundReplyRow = typeof whatsappOutboundReplies.$inferSelect;

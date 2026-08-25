@@ -110,7 +110,7 @@ describe("matchCustomerIdByPhone — Missão Z6.4 (teste real de resolução de 
   });
 });
 
-describe("Missão Z6.4 (seção 9) — nenhum caminho de auto-resposta existe no recebimento", () => {
+describe("Missão Z6.4 (seção 9) — nenhum caminho de auto-resposta a CLIENTES existe no recebimento", () => {
   it("inboundMessages.ts nunca importa/chama nenhuma função de envio real (sendApprovedOutboundMessage, whatsappCloudApiChannel)", () => {
     const serviceSource = readFileSync(new URL("./inboundMessages.ts", import.meta.url), "utf-8");
     // queueMessageForApproval é citado só em comentário como analogia de padrão de idempotência — não é um risco de auto-resposta (draft continua exigindo aprovação humana), por isso não entra nesta lista.
@@ -119,17 +119,15 @@ describe("Missão Z6.4 (seção 9) — nenhum caminho de auto-resposta existe no
     }
   });
 
-  it("a rota do webhook (route.ts) nunca importa/chama nenhuma função de envio", () => {
+  it("Missão Z6.6 — route.ts NUNCA toca o fluxo de aprovação gerenciado de outbound_messages (categoria C — mensagens a clientes continuam exigindo aprovação manual, trilha separada e intocada)", () => {
     const routeSource = readFileSync(new URL("../../app/api/whatsapp/webhook/route.ts", import.meta.url), "utf-8");
-    // "answerGenerative" é citado só em comentário (Missão Z6.5, reforçando que NÃO é chamado) — a prova real de que
-    // a rota nunca aciona o modelo generativo está em route.test.ts (resposta sempre {status:"ok"}, nunca um texto gerado).
-    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel", "queueMessageForApproval"]) {
+    for (const forbidden of ["sendApprovedOutboundMessage", "whatsappCloudApiChannel", "queueMessageForApproval", "approveMessages", "assertMessageApproved"]) {
       expect(routeSource).not.toContain(forbidden);
     }
-    const codeOnly = routeSource
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("//"))
-      .join("\n");
-    expect(codeOnly).not.toContain("answerGenerative");
+  });
+
+  it("Missão Z6.6 — o disparo do fluxo conversacional em route.ts está estruturalmente condicionado a adminActor não-nulo (número fora da allowlist nunca aciona a conversa)", () => {
+    const routeSource = readFileSync(new URL("../../app/api/whatsapp/webhook/route.ts", import.meta.url), "utf-8");
+    expect(routeSource).toMatch(/if\s*\(\s*adminActor\s*&&[^)]*\)\s*\{\s*\n\s*conversation\s*=\s*await\s*handleAdminConversationalMessage/);
   });
 });

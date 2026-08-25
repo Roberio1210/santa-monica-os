@@ -118,4 +118,20 @@ describe("buildZezinhoSystemPrompt — política comercial", () => {
   it('Missão "Regra Absoluta de Envio" — lote sempre informa a quantidade antes de perguntar sobre aprovar tudo', () => {
     expect(prompt.toLowerCase()).toContain("quantidade total antes de perguntar");
   });
+
+  it("Missão Z6.6 — a regra de restrição continua exigindo a frase de restrição para dado interno sem ferramenta (nunca enfraquecida)", () => {
+    expect(prompt).toContain("DADO INTERNO DA SANTA MÔNICA");
+    expect(prompt).toContain("CUSTO INTERNO, MARGEM, LUCRO");
+    expect(prompt.toLowerCase()).toContain("sem pedir esclarecimento ou mais detalhes primeiro");
+  });
+
+  it("Missão Z6.6 — pode conversar normalmente sobre assuntos gerais fora do contexto da Santa Mônica, nunca usando a frase de restrição para isso", () => {
+    expect(prompt).toContain("CONVERSA GERAL, FORA DO CONTEXTO DA SANTA MÔNICA");
+    expect(prompt.toLowerCase()).toContain("nunca use a frase de restrição para isso");
+    expect(prompt.toLowerCase()).toContain("como qualquer assistente competente faria");
+  });
+
+  it("Missão Z6.6 — mesmo em conversa geral, nunca inventa fato específico da Santa Mônica fora de ferramenta", () => {
+    expect(prompt.toLowerCase()).toContain("nunca invente um fato específico da santa mônica");
+  });
 });
