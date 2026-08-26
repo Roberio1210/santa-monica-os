@@ -34,7 +34,7 @@ export default async function GestaoDoDiaPage({ searchParams }: { searchParams: 
         <p className="mt-0.5 text-sm text-foreground-subtle">Gestão do Dia</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-3 gap-2.5 lg:grid-cols-6">
         <StatTile icon={Car} label="Previstos" value={String(summary.countsToday.previstos)} />
         <StatTile icon={Car} label="Em atendimento" value={String(summary.countsToday.aguardandoAtendimento)} />
         <StatTile icon={Car} label="Em execução" value={String(summary.countsToday.emExecucao)} />
@@ -49,12 +49,14 @@ export default async function GestaoDoDiaPage({ searchParams }: { searchParams: 
         <StatTile icon={Timer} label="Tempo médio" value={summary.averageServiceDurationMinutes !== null ? formatDurationMinutes(summary.averageServiceDurationMinutes) : "—"} />
       </div>
 
-      <StatTile
-        icon={Target}
-        label="Meta do dia"
-        value={summary.goal ? formatCurrency(summary.goal.dailyTargetEstimate) : "—"}
-        hint={summary.goal ? `Estimativa a partir de "${summary.goal.label}"` : "Nenhuma meta ativa configurada"}
-      />
+      <div className="lg:max-w-sm">
+        <StatTile
+          icon={Target}
+          label="Meta do dia"
+          value={summary.goal ? formatCurrency(summary.goal.dailyTargetEstimate) : "—"}
+          hint={summary.goal ? `Estimativa a partir de "${summary.goal.label}"` : "Nenhuma meta ativa configurada"}
+        />
+      </div>
 
       <CheckIn />
 

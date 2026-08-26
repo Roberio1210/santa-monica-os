@@ -16,7 +16,13 @@ export function AtendimentoChrome({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className={cn("mx-auto min-h-screen max-w-md border-x border-border-subtle/60", !fullScreen && "pb-20")}>{children}</div>
+      {/*
+       * Mobile (padrão): coluna de largura de app (max-w-md) com bordas verticais, como antes.
+       * Desktop (lg+): a moldura de "app de celular" some — largura confortável de leitura, sem
+       * bordas artificiais — só a navegação inferior (pensada para toque) continua escondida em
+       * telas grandes (ver `bottom-nav.tsx`, `lg:hidden`).
+       */}
+      <div className={cn("mx-auto min-h-screen max-w-md border-x border-border-subtle/60 lg:max-w-5xl lg:border-x-0 lg:px-6", !fullScreen && "pb-20 lg:pb-6")}>{children}</div>
       {!fullScreen ? <BottomNav /> : null}
     </div>
   );

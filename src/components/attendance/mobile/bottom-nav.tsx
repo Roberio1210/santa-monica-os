@@ -19,13 +19,18 @@ function isActive(pathname: string, href: string, exact: boolean): boolean {
 /**
  * Navegação inferior — âncora do app mobile. Área de toque grande (56px+), nunca depende de
  * hover. `pb-[env(safe-area-inset-bottom)]` respeita a barra de gestos do iPhone.
+ *
+ * `lg:hidden` — em desktop (lg+) não faz sentido uma barra de toque fixa no rodapé; a navegação
+ * entre as telas do Atendimento em telas grandes continua pelos mesmos links internos da própria
+ * página (ex.: botões de ação da Gestão do Dia). Não reativa a sidebar do AppShell (fora do
+ * escopo desta correção) — só remove a barra inferior quando ela não faz sentido.
  */
 export function BottomNav() {
   const pathname = usePathname();
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border-subtle bg-background/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border-subtle bg-background/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden"
       aria-label="Navegação principal"
     >
       <div className="mx-auto flex max-w-md items-stretch justify-around">
