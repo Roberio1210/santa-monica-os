@@ -17,6 +17,13 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   role: userRoleEnum("role").notNull().default("operacional"),
   /**
+   * Missão de Identidade Contextual do Zézinho — cargo/função empresarial (ex.: "Proprietário/
+   * Administrador", "Gerente"), puramente informativo. Nunca usado por nenhuma decisão de RBAC
+   * (isso continua sendo função exclusiva de `role`, acima) — só contexto de conversa, para o
+   * Zézinho saber COM QUEM está falando sem precisar perguntar. Null até o gestor preencher.
+   */
+  businessTitle: text("business_title"),
+  /**
    * Hash da senha (scrypt, ver src/lib/auth/password.ts), nunca a senha em texto puro.
    * Fica null enquanto o usuário ainda não definiu a própria senha (ver `passwordSetupToken`).
    */

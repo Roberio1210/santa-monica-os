@@ -38,6 +38,15 @@ export interface GenerativeAnswer {
 export interface GenerativeActor {
   id: string;
   name: string;
+  /**
+   * Missão de Identidade Contextual do Zézinho — só preenchidos quando o actor vem do canal
+   * administrativo do WhatsApp (`resolveWhatsAppAdminActor`), nunca da sessão Web (que continua
+   * construindo `GenerativeActor` só com `id`/`name`, sem estes dois campos). Usados
+   * EXCLUSIVAMENTE para dar contexto de identidade ao modelo (`buildZezinhoSystemPrompt`) — nunca
+   * para RBAC, que continua sendo decidido só pelo parâmetro `role` de `answerGenerative`.
+   */
+  role?: UserRole;
+  businessTitle?: string | null;
 }
 
 /**
@@ -55,7 +64,7 @@ export interface GenerativeActor {
 export async function resolveWhatsAppAdminActor(phoneE164: string): Promise<GenerativeActor | null> {
   const admin = await resolveAdminActorFromPhone(phoneE164);
   if (!admin) return null;
-  return { id: admin.id, name: admin.name };
+  return { id: admin.id, name: admin.name, role: admin.role, businessTitle: admin.businessTitle };
 }
 
 /**
@@ -114,10 +123,17 @@ export async function answerGenerative(
   const tools = applyToolPolicy(buildZezinhoTools(role, actor), toolPolicy);
   const start = Date.now();
 
+  // Missão de Identidade Contextual — `actor.role` só existe quando o actor veio do canal
+  // administrativo do WhatsApp (`resolveWhatsAppAdminActor`); a sessão Web nunca preenche esse
+  // campo, então `actorContext` naturalmente fica `undefined` lá, sem precisar tocar em nada do
+  // fluxo Web. Nunca usa o parâmetro `role` (RBAC) como fallback aqui de propósito — a identidade
+  // exibida ao modelo só existe quando resolvida de ponta a ponta a partir do telefone verificado.
+  const actorContext = actor?.role ? { name: actor.name, role: actor.role, businessTitle: actor.businessTitle ?? null } : undefined;
+
   try {
     const result = await generateText({
       model: config.model,
-      system: buildZezinhoSystemPrompt(),
+      system: buildZezinhoSystemPrompt(actorContext),
       messages: [...trimmedHistory, { role: "user" as const, content: freeText }],
       tools,
       stopWhen: stepCountIs(MAX_TOOL_STEPS),

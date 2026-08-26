@@ -44,11 +44,11 @@ describe("resolveAdminActorFromPhone — allowlist preparada", () => {
 });
 
 describe("matchAdminActorByPhone — Missão Z6.5 (número autorizado x não autorizado, sem banco)", () => {
-  const candidates = [{ phoneE164: "+5548991741102", id: "user-1", name: "Robério", role: "admin" as const }];
+  const candidates = [{ phoneE164: "+5548991741102", id: "user-1", name: "Robério", role: "admin" as const, businessTitle: "Proprietário/Administrador" }];
 
   it("teste obrigatório — número autorizado (na allowlist) é reconhecido como admin", () => {
     const result = matchAdminActorByPhone(candidates, "+5548991741102");
-    expect(result).toEqual({ id: "user-1", name: "Robério", role: "admin" });
+    expect(result).toEqual({ id: "user-1", name: "Robério", role: "admin", businessTitle: "Proprietário/Administrador" });
   });
 
   it("teste obrigatório — número não autorizado (fora da allowlist) é rejeitado como admin, devolve null", () => {
@@ -76,17 +76,17 @@ describe("matchAdminActorByPhone — Missão Z6.5 (número autorizado x não aut
  * arbitrariamente quando dois candidatos diferentes poderiam corresponder ao mesmo identificador.
  */
 describe("matchAdminActorByPhone — equivalência brasileira do nono dígito", () => {
-  const admin = { phoneE164: "+5521980746463", id: "admin-1", name: "Robério", role: "admin" as const };
-  const gerente = { phoneE164: "+5548998161302", id: "gerente-1", name: "Vinicius Anacleto", role: "operacional" as const };
+  const admin = { phoneE164: "+5521980746463", id: "admin-1", name: "Robério", role: "admin" as const, businessTitle: "Proprietário/Administrador" };
+  const gerente = { phoneE164: "+5548998161302", id: "gerente-1", name: "Vinicius Anacleto", role: "operacional" as const, businessTitle: "Gerente" };
 
   it("meu número (admin, 9 dígitos) continua reconhecido exatamente como antes — o caminho de equivalência nem precisa ser exercitado", () => {
     const result = matchAdminActorByPhone([admin, gerente], "+5521980746463");
-    expect(result).toEqual({ id: "admin-1", name: "Robério", role: "admin" });
+    expect(result).toEqual({ id: "admin-1", name: "Robério", role: "admin", businessTitle: "Proprietário/Administrador" });
   });
 
   it("Vinicius entregue pela Meta SEM o nono dígito (8 dígitos, formato real do incidente) é reconhecido via equivalência", () => {
     const result = matchAdminActorByPhone([admin, gerente], "+554898161302");
-    expect(result).toEqual({ id: "gerente-1", name: "Vinicius Anacleto", role: "operacional" });
+    expect(result).toEqual({ id: "gerente-1", name: "Vinicius Anacleto", role: "operacional", businessTitle: "Gerente" });
   });
 
   it("Vinicius continua 'operacional', nunca herda 'admin' por causa da equivalência", () => {
@@ -101,15 +101,15 @@ describe("matchAdminActorByPhone — equivalência brasileira do nono dígito", 
   it("colisão ambígua entre dois candidatos diferentes -> null, NUNCA escolhe um deles arbitrariamente", () => {
     // Dois usuários diferentes cadastrados em formas equivalentes: um com 9 dígitos, outro já
     // com 8 — um número recebido de 8 dígitos bate exato num e, por equivalência, no outro.
-    const candidatoA = { phoneE164: "+5548998161302", id: "user-A", name: "Fulano", role: "operacional" as const };
-    const candidatoB = { phoneE164: "+554898161302", id: "user-B", name: "Beltrano", role: "operacional" as const };
+    const candidatoA = { phoneE164: "+5548998161302", id: "user-A", name: "Fulano", role: "operacional" as const, businessTitle: null };
+    const candidatoB = { phoneE164: "+554898161302", id: "user-B", name: "Beltrano", role: "operacional" as const, businessTitle: null };
     expect(matchAdminActorByPhone([candidatoA, candidatoB], "+554898161302")).toBeNull();
     // Mesmo o telefone de A (9 dígitos) sendo enviado diretamente, ainda colide via equivalência com B.
     expect(matchAdminActorByPhone([candidatoA, candidatoB], "+5548998161302")).toBeNull();
   });
 
   it("fixo de 8 dígitos cadastrado nunca é confundido com um celular equivalente de 9 dígitos", () => {
-    const fixo = { phoneE164: "+551133334444", id: "fixo-1", name: "Recepção", role: "operacional" as const };
+    const fixo = { phoneE164: "+551133334444", id: "fixo-1", name: "Recepção", role: "operacional" as const, businessTitle: null };
     expect(matchAdminActorByPhone([fixo], "+5511933334444")).toBeNull();
   });
 });

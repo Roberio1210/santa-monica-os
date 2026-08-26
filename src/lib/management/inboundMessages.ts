@@ -139,9 +139,9 @@ export async function getLastInboundMessageAt(customerId: string | null): Promis
  * código abaixo.
  */
 export function matchAdminActorByPhone(
-  candidates: Array<{ phoneE164: string; id: string; name: string; role: UserRole }>,
+  candidates: Array<{ phoneE164: string; id: string; name: string; role: UserRole; businessTitle: string | null }>,
   phoneE164: string,
-): (Actor & { role: UserRole }) | null {
+): (Actor & { role: UserRole; businessTitle: string | null }) | null {
   const equivalent = brazilianNineDigitEquivalent(phoneE164);
   const matches = candidates.filter((c) => c.phoneE164 === phoneE164 || (equivalent !== null && c.phoneE164 === equivalent));
 
@@ -149,7 +149,7 @@ export function matchAdminActorByPhone(
   if (distinctUserIds.size !== 1) return null;
 
   const match = matches[0];
-  return { id: match.id, name: match.name, role: match.role };
+  return { id: match.id, name: match.name, role: match.role, businessTitle: match.businessTitle };
 }
 
 /**
@@ -158,12 +158,12 @@ export function matchAdminActorByPhone(
  * SÓ para identidade — nenhuma ação/resposta é disparada automaticamente a partir disso; ver
  * `route.ts` (webhook), que só loga o reconhecimento, nunca aciona `answerGenerative`.
  */
-export async function resolveAdminActorFromPhone(phoneE164: string): Promise<(Actor & { role: UserRole }) | null> {
+export async function resolveAdminActorFromPhone(phoneE164: string): Promise<(Actor & { role: UserRole; businessTitle: string | null }) | null> {
   const db = getDb();
   if (!db) return null;
 
   const rows = await db
-    .select({ phoneE164: whatsappAdminNumbers.phoneE164, id: users.id, name: users.name, role: users.role })
+    .select({ phoneE164: whatsappAdminNumbers.phoneE164, id: users.id, name: users.name, role: users.role, businessTitle: users.businessTitle })
     .from(whatsappAdminNumbers)
     .innerJoin(users, eq(whatsappAdminNumbers.userId, users.id))
     .where(eq(whatsappAdminNumbers.active, true));
