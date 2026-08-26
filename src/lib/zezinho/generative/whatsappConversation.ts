@@ -57,9 +57,23 @@ export async function handleAdminConversationalMessage(params: {
     return { replied: existing.status === "accepted", reason: "já processado anteriormente (idempotência de saída)", outboundReplyId: existing.id, toolsCalled: [] };
   }
 
-  logPhase("processamento_generativo_iniciado", { phoneMasked, adminActorId: params.actor.id });
+  // Papel real de RBAC do remetente (nunca "admin" fixo) — resolvido do mesmo telefone verificado
+  // que já autorizou a entrada neste fluxo (`route.ts`/`resolveWhatsAppAdminActor`). Um segundo
+  // número na allowlist pode ter `role: "operacional"` (ex.: gerente em treinamento) — nesse caso
+  // `buildZezinhoTools` (via `answerGenerative`) já esconde do modelo, por completo, as
+  // ADMIN_ONLY_TOOLS (financeiro/DRE/Stone/etc.) e redige campos de custo/gasto nas ferramentas
+  // que continuam visíveis — mesma regra de menor privilégio já usada pela sessão Web, agora
+  // também neste canal. Checagem redundante com o chamador de propósito: nunca confia cegamente
+  // que quem chamou resolveu a role corretamente.
+  const adminRecord = await resolveAdminActorFromPhone(params.phoneE164);
+  if (!adminRecord) {
+    logPhase("bloqueado_fora_da_allowlist_no_processamento", { phoneMasked, adminActorId: params.actor.id, durationMs: Date.now() - start });
+    return { replied: false, reason: "remetente fora da allowlist administrativa (checagem no início do processamento)", outboundReplyId: null, toolsCalled: [] };
+  }
+
+  logPhase("processamento_generativo_iniciado", { phoneMasked, adminActorId: params.actor.id, role: adminRecord.role });
   const history = await getConversationHistory(params.phoneE164);
-  const generative = await answerGenerative(params.textBody, history, "admin", params.actor, "conversational_read_only");
+  const generative = await answerGenerative(params.textBody, history, adminRecord.role, params.actor, "conversational_read_only");
 
   if (!generative) {
     logPhase("processamento_generativo_indisponivel", { phoneMasked, adminActorId: params.actor.id, durationMs: Date.now() - start });

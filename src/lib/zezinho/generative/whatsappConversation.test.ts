@@ -79,7 +79,7 @@ describe("handleAdminConversationalMessage", () => {
     expect(recordOutboundReplyMock).not.toHaveBeenCalled();
   });
 
-  it("answerGenerative é chamado com toolPolicy 'conversational_read_only' e role 'admin'", async () => {
+  it("answerGenerative é chamado com toolPolicy 'conversational_read_only' e o role real do remetente (admin)", async () => {
     answerGenerativeMock.mockResolvedValue({ text: "resposta", toolsCalled: [] });
     recordOutboundReplyMock.mockResolvedValue({ id: "reply-2" });
     loadWhatsappCloudApiConfigMock.mockReturnValue(null);
@@ -87,6 +87,27 @@ describe("handleAdminConversationalMessage", () => {
     await handleAdminConversationalMessage({ phoneE164: "+5548991741102", actor: ACTOR, inboundExternalMessageId: "wamid.1", textBody: "Zezinho, como foi o dia?" });
 
     expect(answerGenerativeMock).toHaveBeenCalledWith("Zezinho, como foi o dia?", [], "admin", ACTOR, "conversational_read_only");
+  });
+
+  it("Missão de menor privilégio (gerente) — quando o telefone resolve para role 'operacional', answerGenerative é chamado com 'operacional', NUNCA 'admin' fixo", async () => {
+    resolveAdminActorFromPhoneMock.mockResolvedValue({ id: "user-2", name: "Vinicius Anacleto", role: "operacional" });
+    answerGenerativeMock.mockResolvedValue({ text: "resposta", toolsCalled: [] });
+    recordOutboundReplyMock.mockResolvedValue({ id: "reply-2b" });
+    loadWhatsappCloudApiConfigMock.mockReturnValue(null);
+    const { handleAdminConversationalMessage } = await import("@/lib/zezinho/generative/whatsappConversation");
+    await handleAdminConversationalMessage({ phoneE164: "+5548998161302", actor: { id: "user-2", name: "Vinicius Anacleto" }, inboundExternalMessageId: "wamid.1", textBody: "Zezinho, quanto temos de V-Floc?" });
+
+    expect(answerGenerativeMock).toHaveBeenCalledWith("Zezinho, quanto temos de V-Floc?", [], "operacional", { id: "user-2", name: "Vinicius Anacleto" }, "conversational_read_only");
+  });
+
+  it("remetente não resolve mais nenhum actor logo no início do processamento (allowlist mudou entre a checagem do chamador e agora) -> bloqueia antes de gerar qualquer resposta", async () => {
+    resolveAdminActorFromPhoneMock.mockResolvedValue(null);
+    const { handleAdminConversationalMessage } = await import("@/lib/zezinho/generative/whatsappConversation");
+    const result = await handleAdminConversationalMessage({ phoneE164: "+5548991741102", actor: ACTOR, inboundExternalMessageId: "wamid.1", textBody: "oi" });
+
+    expect(result.replied).toBe(false);
+    expect(answerGenerativeMock).not.toHaveBeenCalled();
+    expect(recordOutboundReplyMock).not.toHaveBeenCalled();
   });
 
   it("WHATSAPP_ENABLED desabilitado (config null) -> resposta é gerada e registrada, mas não enviada", async () => {
@@ -105,7 +126,10 @@ describe("handleAdminConversationalMessage", () => {
     answerGenerativeMock.mockResolvedValue({ text: "resposta", toolsCalled: [] });
     recordOutboundReplyMock.mockResolvedValue({ id: "reply-4" });
     loadWhatsappCloudApiConfigMock.mockReturnValue({ phoneNumberId: "p", businessAccountId: "b", accessToken: SENTINEL_TOKEN, webhookVerifyToken: "v", appSecret: "s" });
-    resolveAdminActorFromPhoneMock.mockResolvedValue(null); // não está mais na allowlist
+    // 1ª chamada (início do processamento, resolve o role real) ainda encontra o admin; só a 2ª
+    // chamada (defesa em profundidade, imediatamente antes do envio) já não encontra mais —
+    // simula a allowlist mudando NO MEIO do processamento (ex.: desativado enquanto o modelo gerava a resposta).
+    resolveAdminActorFromPhoneMock.mockResolvedValueOnce({ ...ACTOR, role: "admin" }).mockResolvedValueOnce(null);
     const { handleAdminConversationalMessage } = await import("@/lib/zezinho/generative/whatsappConversation");
     const result = await handleAdminConversationalMessage({ phoneE164: "+5548991741102", actor: ACTOR, inboundExternalMessageId: "wamid.1", textBody: "oi" });
 
