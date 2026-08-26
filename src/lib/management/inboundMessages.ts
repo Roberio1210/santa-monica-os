@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { customers, inboundMessages, whatsappAdminNumbers, users } from "@/db/schema";
-import { normalizeBrazilianPhoneToE164 } from "@/lib/integrations/whatsapp/phone";
+import { normalizeBrazilianPhoneToE164, brazilianNineDigitEquivalent } from "@/lib/integrations/whatsapp/phone";
 import { DatabaseUnavailableError, type Actor } from "@/lib/management/outboundMessages";
 import type { UserRole } from "@/lib/auth/roles";
 
@@ -126,12 +126,29 @@ export async function getLastInboundMessageAt(customerId: string | null): Promis
  * está cadastrado. Cliente nunca vira admin só por mandar mensagem: SEM entrada na allowlist,
  * SEMPRE `null`, não importa o que o texto da mensagem diga.
  */
+/**
+ * Achado real (Vinicius Anacleto, DDD 48) — algumas contas do WhatsApp reportam o remetente sem
+ * o nono dígito mesmo quando o número cadastrado tem 9. Além da igualdade exata, um candidato
+ * também conta como match se seu `phoneE164` for a equivalência brasileira (`phone.ts`,
+ * `brazilianNineDigitEquivalent`) do telefone recebido — nunca o contrário (nunca alteramos o
+ * telefone recebido, só comparamos contra as duas formas possíveis).
+ *
+ * Trava de ambiguidade: se essa comparação (exata OU equivalente) encontrar mais de UM usuário
+ * distinto, a função devolve `null` — nunca escolhe um deles arbitrariamente. Isso é
+ * estruturalmente impossível de "escolher errado": não existe nenhum critério de desempate no
+ * código abaixo.
+ */
 export function matchAdminActorByPhone(
   candidates: Array<{ phoneE164: string; id: string; name: string; role: UserRole }>,
   phoneE164: string,
 ): (Actor & { role: UserRole }) | null {
-  const match = candidates.find((c) => c.phoneE164 === phoneE164);
-  if (!match) return null;
+  const equivalent = brazilianNineDigitEquivalent(phoneE164);
+  const matches = candidates.filter((c) => c.phoneE164 === phoneE164 || (equivalent !== null && c.phoneE164 === equivalent));
+
+  const distinctUserIds = new Set(matches.map((m) => m.id));
+  if (distinctUserIds.size !== 1) return null;
+
+  const match = matches[0];
   return { id: match.id, name: match.name, role: match.role };
 }
 

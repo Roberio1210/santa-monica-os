@@ -69,6 +69,51 @@ describe("matchAdminActorByPhone — Missão Z6.5 (número autorizado x não aut
   });
 });
 
+/**
+ * Achado real (Vinicius Anacleto, DDD 48) — a conta WhatsApp dele entrega o remetente sem o nono
+ * dígito. `matchAdminActorByPhone` agora também reconhece a equivalência brasileira 8/9 dígitos
+ * (`phone.ts#brazilianNineDigitEquivalent`), com trava de ambiguidade: nunca escolhe um usuário
+ * arbitrariamente quando dois candidatos diferentes poderiam corresponder ao mesmo identificador.
+ */
+describe("matchAdminActorByPhone — equivalência brasileira do nono dígito", () => {
+  const admin = { phoneE164: "+5521980746463", id: "admin-1", name: "Robério", role: "admin" as const };
+  const gerente = { phoneE164: "+5548998161302", id: "gerente-1", name: "Vinicius Anacleto", role: "operacional" as const };
+
+  it("meu número (admin, 9 dígitos) continua reconhecido exatamente como antes — o caminho de equivalência nem precisa ser exercitado", () => {
+    const result = matchAdminActorByPhone([admin, gerente], "+5521980746463");
+    expect(result).toEqual({ id: "admin-1", name: "Robério", role: "admin" });
+  });
+
+  it("Vinicius entregue pela Meta SEM o nono dígito (8 dígitos, formato real do incidente) é reconhecido via equivalência", () => {
+    const result = matchAdminActorByPhone([admin, gerente], "+554898161302");
+    expect(result).toEqual({ id: "gerente-1", name: "Vinicius Anacleto", role: "operacional" });
+  });
+
+  it("Vinicius continua 'operacional', nunca herda 'admin' por causa da equivalência", () => {
+    const result = matchAdminActorByPhone([admin, gerente], "+554898161302");
+    expect(result?.role).toBe("operacional");
+  });
+
+  it("número totalmente fora da allowlist (válido, brasileiro, não cadastrado) continua rejeitado mesmo considerando equivalência", () => {
+    expect(matchAdminActorByPhone([admin, gerente], "+5511988887777")).toBeNull();
+  });
+
+  it("colisão ambígua entre dois candidatos diferentes -> null, NUNCA escolhe um deles arbitrariamente", () => {
+    // Dois usuários diferentes cadastrados em formas equivalentes: um com 9 dígitos, outro já
+    // com 8 — um número recebido de 8 dígitos bate exato num e, por equivalência, no outro.
+    const candidatoA = { phoneE164: "+5548998161302", id: "user-A", name: "Fulano", role: "operacional" as const };
+    const candidatoB = { phoneE164: "+554898161302", id: "user-B", name: "Beltrano", role: "operacional" as const };
+    expect(matchAdminActorByPhone([candidatoA, candidatoB], "+554898161302")).toBeNull();
+    // Mesmo o telefone de A (9 dígitos) sendo enviado diretamente, ainda colide via equivalência com B.
+    expect(matchAdminActorByPhone([candidatoA, candidatoB], "+5548998161302")).toBeNull();
+  });
+
+  it("fixo de 8 dígitos cadastrado nunca é confundido com um celular equivalente de 9 dígitos", () => {
+    const fixo = { phoneE164: "+551133334444", id: "fixo-1", name: "Recepção", role: "operacional" as const };
+    expect(matchAdminActorByPhone([fixo], "+5511933334444")).toBeNull();
+  });
+});
+
 describe("Missão Z6.5 — resolução de admin conectada ao orquestrador, mas sem acionar nada automaticamente", () => {
   it("orchestrator.ts está de fato conectado a resolveAdminActorFromPhone (conexão pedida pela missão)", () => {
     const orchestratorSource = readFileSync(new URL("../zezinho/generative/orchestrator.ts", import.meta.url), "utf-8");

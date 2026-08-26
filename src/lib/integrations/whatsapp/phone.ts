@@ -47,3 +47,56 @@ export function normalizeBrazilianPhoneToE164(raw: string | null | undefined): s
 export function isValidBrazilianPhone(raw: string | null | undefined): boolean {
   return normalizeBrazilianPhoneToE164(raw) !== null;
 }
+
+/**
+ * Faixa de prefixo (1º dígito do número local, sem DDD e sem o nono dígito) reservada a celular
+ * no plano da Anatel — 6 a 9. Fixo usa 2 a 5. É exatamente por a faixa de celular ter ficado sem
+ * espaço nessa faixa que o nono dígito foi criado. Usado só para decidir com segurança se um
+ * número de 8 dígitos É PROVAVELMENTE um celular sem o nono dígito — nunca para validar telefone
+ * em geral (`isValidBrazilianPhone` já aceita fixo de 8 dígitos livremente).
+ */
+const MOBILE_LOCAL_PREFIX_DIGITS = new Set(["6", "7", "8", "9"]);
+
+/**
+ * Nono dígito brasileiro — algumas contas do WhatsApp (cadastradas antes da regra do nono dígito,
+ * ou em determinadas operadoras/aparelhos) reportam o número do remetente no formato ANTIGO (8
+ * dígitos, sem o "9" inicial do celular) mesmo quando o número comercial/discado hoje tem 9
+ * dígitos (achado real: conta do Vinicius Anacleto, DDD 48, entregue pela Meta como
+ * `554898161302`, 8 dígitos). `normalizeBrazilianPhoneToE164` aceita as duas formas como válidas
+ * DE PROPÓSITO, sem uni-las (nunca inventa um dígito que não veio na entrada) — esta função é o
+ * único lugar que conecta as duas formas, e só quando isso é seguro.
+ *
+ * Devolve a ÚNICA outra representação plausível do mesmo número, nunca uma lista de "talvez", ou
+ * `null` quando a equivalência não se aplica com segurança:
+ * - `+55DDD9NNNNNNNN` (9 dígitos) -> `+55DDDNNNNNNNN` (remove o "9"), só se o dígito seguinte
+ *   estiver em `MOBILE_LOCAL_PREFIX_DIGITS` (celular plausível) — nunca gera um "fixo equivalente".
+ * - `+55DDDNNNNNNNN` (8 dígitos) começando em `MOBILE_LOCAL_PREFIX_DIGITS` -> `+55DDD9NNNNNNNN`
+ *   (adiciona o "9"). Um fixo de 8 dígitos (prefixo 2-5) NUNCA gera equivalente — fixo não tem
+ *   nono dígito para adicionar, nunca "vira celular".
+ * - Qualquer forma fora de `+55DDD` + 8/9 dígitos, ou DDD inválido -> `null`.
+ *
+ * Nunca decide identidade sozinha — quem usa este valor (`matchAdminActorByPhone`) precisa tratar
+ * a possibilidade de duas pessoas diferentes colidirem no mesmo identificador equivalente como
+ * ambíguo (nunca escolher uma arbitrariamente).
+ */
+export function brazilianNineDigitEquivalent(phoneE164: string): string | null {
+  const match = /^\+55(\d{2})(\d{8,9})$/.exec(phoneE164);
+  if (!match) return null;
+
+  const [, ddd, number] = match;
+  if (!VALID_DDDS.has(Number.parseInt(ddd, 10))) return null;
+
+  if (number.length === 9) {
+    if (number[0] !== "9") return null;
+    const withoutNine = number.slice(1);
+    if (!MOBILE_LOCAL_PREFIX_DIGITS.has(withoutNine[0])) return null;
+    return `+55${ddd}${withoutNine}`;
+  }
+
+  if (number.length === 8) {
+    if (!MOBILE_LOCAL_PREFIX_DIGITS.has(number[0])) return null;
+    return `+55${ddd}9${number}`;
+  }
+
+  return null;
+}
