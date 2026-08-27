@@ -37,7 +37,10 @@ export type ProcessStep =
   | "batentes"
   | "descontaminacao_ferrosa"
   | "cromados"
-  | "estepe";
+  | "estepe"
+  // Missão de Fechamento da Fase 1 (Bronze/Silver/Gold) — hidratação/revitalização de plásticos
+  // internos e externos da Gold, distinta de "plasticos_internos" (higienização).
+  | "hidratacao_plasticos";
 
 export const processSteps: ProcessStep[] = [
   "pre_lavagem",
@@ -72,6 +75,7 @@ export const processSteps: ProcessStep[] = [
   "descontaminacao_ferrosa",
   "cromados",
   "estepe",
+  "hidratacao_plasticos",
 ];
 
 export type RecipeStatus = "rascunho" | "em_calibracao" | "aprovada" | "suspensa";

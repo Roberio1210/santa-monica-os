@@ -1,0 +1,1 @@
+ALTER TYPE "public"."process_step" ADD VALUE 'hidratacao_plasticos';

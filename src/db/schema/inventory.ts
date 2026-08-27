@@ -121,6 +121,11 @@ export const processStepEnum = pgEnum("process_step", [
   "descontaminacao_ferrosa",
   "cromados",
   "estepe",
+  // Missão de Fechamento da Fase 1 (Bronze/Silver/Gold) — o gestor confirmou que a Gold possui
+  // hidratação/revitalização de plásticos internos e externos como etapa própria, distinta de
+  // "plasticos_internos" (higienização, já existente). Valor aditivo — nunca remove nem reaproveita
+  // um valor já usado por outra etapa.
+  "hidratacao_plasticos",
 ]);
 
 export const recipeStatusEnum = pgEnum("recipe_status", ["rascunho", "em_calibracao", "aprovada", "suspensa"]);
