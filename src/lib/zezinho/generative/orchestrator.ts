@@ -133,7 +133,7 @@ export async function answerGenerative(
   try {
     const result = await generateText({
       model: config.model,
-      system: buildZezinhoSystemPrompt(actorContext),
+      system: buildZezinhoSystemPrompt(role, actorContext),
       messages: [...trimmedHistory, { role: "user" as const, content: freeText }],
       tools,
       stopWhen: stepCountIs(MAX_TOOL_STEPS),

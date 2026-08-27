@@ -327,4 +327,91 @@ describe("resolveWhatsAppAdminActor — Missão Z6.5 (identidade pelo WhatsApp, 
     await resolveWhatsAppAdminActor("+5548991741102");
     expect(generateTextMock).not.toHaveBeenCalled();
   });
+
+  /**
+   * Missão de Grounding Obrigatório/Anti-Alucinação (27/08/2026) — incidente real: perguntado
+   * "Como está o dia aí hoje?" pelo WhatsApp administrativo, o Zézinho respondeu com uma tabela
+   * completa (7 clientes, 8 veículos, Bronze 4/Silver 1/Gold 1, R$1.240,00, estoque) sem ter
+   * chamado NENHUMA ferramenta — tudo inventado. Minutos depois, perguntado o fechamento
+   * financeiro de ontem, respondeu "Essa informação é restrita à administração da Santa Mônica"
+   * mesmo sendo Robério (admin) quem perguntava. Investigação confirmou: `isToolBlockedForRole`/
+   * `buildZezinhoTools`/`resolveAdminActorFromPhone` sempre estiveram corretos (cobertura já
+   * exaustiva em `access.test.ts`/`service.rbac.test.ts`) — a causa raiz foi o MODELO não seguir
+   * as instruções do prompt (não chamar a ferramenta, recusar sem tentar). A correção real é
+   * reforço de prompt (`systemPrompt.ts`); os testes abaixo travam que (1) esse reforço chega de
+   * fato na chamada real ao provider e (2) a infraestrutura de RBAC continua correta para a
+   * identidade exata do incidente (Robério, admin, "Proprietário/Administrador") — nunca provam
+   * que o modelo vai obedecer, isso nenhum teste de unidade prova.
+   */
+  describe("Missão de Grounding Obrigatório/Anti-Alucinação (incidente real 27/08/2026)", () => {
+    it("o system prompt real enviado ao provider contém a regra de nunca reaproveitar número de outro momento da conversa", async () => {
+      process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+      generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      await answerGenerative("Como está o dia aí hoje?", [], "admin");
+
+      const callArgs = generateTextMock.mock.calls[0][0] as { system: string };
+      expect(callArgs.system).toContain("NUNCA REAPROVEITE UM NÚMERO DE OUTRO MOMENTO DA CONVERSA");
+      expect(callArgs.system).toContain("daily_management_summary");
+      expect(callArgs.system.toLowerCase()).toContain("7 clientes atendidos");
+    });
+
+    it("o system prompt real enviado ao provider exige tentar ferramentas relacionadas antes da frase de restrição", async () => {
+      process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+      generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      await answerGenerative("Me passe o resultado financeiro de ontem.", [], "admin");
+
+      const callArgs = generateTextMock.mock.calls[0][0] as { system: string };
+      expect(callArgs.system).toContain("TENTE AS FERRAMENTAS RELACIONADAS QUE VOCÊ REALMENTE TEM");
+      expect(callArgs.system.toLowerCase()).toContain("como assim? eu sou o dono");
+    });
+
+    it("identidade exata do incidente (Robério, admin, Proprietário/Administrador) continua recebendo todas as ferramentas financeiras — RBAC nunca foi a causa raiz", async () => {
+      process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+      generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      const roberioActor = { id: "user-1", name: "Robério", role: "admin" as const, businessTitle: "Proprietário/Administrador" };
+      await answerGenerative("Me passe o resultado de ontem: estacionamento e lavação, quantidade de carros, faturamento e formas de pagamento.", [], "admin", roberioActor, "conversational_read_only");
+
+      const callArgs = generateTextMock.mock.calls[0][0] as { tools: Record<string, unknown>; system: string };
+      expect(callArgs.tools).toHaveProperty("daily_management_summary");
+      expect(callArgs.tools).toHaveProperty("cash_ledger_totals");
+      expect(callArgs.tools).toHaveProperty("stone_reconciliation_summary");
+      expect(callArgs.tools).toHaveProperty("accounts_payable");
+      expect(callArgs.tools).toHaveProperty("accounts_receivable");
+      expect(callArgs.system).toContain("Papel de acesso (RBAC): admin");
+      expect(callArgs.system).toContain("Função empresarial: Proprietário/Administrador");
+    });
+
+    it("Vinicius (operacional) nunca recebe as ferramentas financeiras, mesmo perguntando exatamente a mesma coisa que Robério perguntou no incidente", async () => {
+      process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+      generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      const viniciusActor = { id: "user-2", name: "Vinicius Anacleto", role: "operacional" as const, businessTitle: "Gerente" };
+      await answerGenerative("Me passe o resultado de ontem: estacionamento e lavação, quantidade de carros, faturamento e formas de pagamento.", [], "operacional", viniciusActor, "conversational_read_only");
+
+      const callArgs = generateTextMock.mock.calls[0][0] as { tools: Record<string, unknown> };
+      expect(callArgs.tools).not.toHaveProperty("cash_ledger_totals");
+      expect(callArgs.tools).not.toHaveProperty("stone_reconciliation_summary");
+      expect(callArgs.tools).not.toHaveProperty("dre_result");
+      expect(callArgs.tools).not.toHaveProperty("accounts_payable");
+      expect(callArgs.tools).not.toHaveProperty("accounts_receivable");
+      // "Quantos carros estão em atendimento?" (item 10 da missão) continua consultável — é operacional, não financeiro.
+      expect(callArgs.tools).toHaveProperty("daily_management_summary");
+    });
+
+    it("Robério (admin) nunca recebe a instrução de restrição no system prompt real enviado ao provider — 'Tem algum cliente na loja?' (incidente real 28/08/2026)", async () => {
+      process.env.ZEZINHO_GENERATIVE_ENABLED = "true";
+      generateTextMock.mockResolvedValue({ text: "ok", toolCalls: [], steps: [{}], usage: { inputTokens: 1, outputTokens: 1 } });
+      const { answerGenerative } = await import("@/lib/zezinho/generative/orchestrator");
+      const roberioActor = { id: "user-1", name: "Robério", role: "admin" as const, businessTitle: "Proprietário/Administrador" };
+      await answerGenerative("Tem algum cliente na loja?", [], "admin", roberioActor, "conversational_read_only");
+
+      const callArgs = generateTextMock.mock.calls[0][0] as { system: string };
+      expect(callArgs.system).not.toContain('responda IMEDIATAMENTE apenas: "Essa informação é restrita à administração da Santa Mônica."');
+      expect(callArgs.system).toContain("NUNCA USE A FRASE DE RESTRIÇÃO");
+      expect(callArgs.system.toLowerCase()).toContain("tem algum cliente na loja?");
+    });
+  });
 });
