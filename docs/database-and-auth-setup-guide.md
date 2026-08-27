@@ -147,6 +147,29 @@ Depois de cada etapa:
   ambiente da Vercel e faça um novo deploy — o app volta sozinho para o modo de armazenamento em
   memória (é exatamente assim que ele funciona hoje, sem banco nenhum).
 
+## Como rodar os testes com segurança
+
+**Nunca rode `vitest`/`npm test` carregando `.env.local` de produção** (ex.: `npx dotenv-cli -e
+.env.local -- vitest`, `npx tsx --env-file=.env.local ...` para testes, ou qualquer variação que
+injete `DATABASE_URL` de produção no processo de teste). Incidente real em 28/08/2026: exatamente
+esse padrão fez os repositórios "dual-mode" (que escolhem Postgres quando há `DATABASE_URL`, senão
+caem em memória) escreverem de verdade no banco de produção durante a suíte, contaminando dezenas
+de tabelas — auditado e limpo depois (ver `docs/decisions.md`, linha 2026-08-28).
+
+Proteção estrutural (não depende de disciplina manual): `src/db/client.ts` e
+`src/lib/storage/mode.ts` checam `NODE_ENV === "test"` (o próprio `vitest` já define isso
+sozinho) e, nesse caso, **ignoram `DATABASE_URL` por completo** — só uma variável deliberadamente
+separada, `TEST_DATABASE_URL`, pode autorizar um Postgres real durante testes. Sem ela, o resultado
+é sempre armazenamento em memória, nunca uma conexão silenciosa com produção. Isso é coberto por
+testes isolados em `src/db/client.test.ts` e `src/lib/storage/mode.test.ts` (nenhum dos dois abre
+uma conexão real).
+
+- **Rodar a suíte normalmente (modo memória, o padrão para o dia a dia):** `npm test`. Não precisa
+  de nenhuma variável de ambiente.
+- **Se algum dia for necessário testar contra um Postgres real:** crie um banco de teste separado
+  (nunca reaproveite o de produção) e exporte `TEST_DATABASE_URL` com a connection string dele —
+  nunca `DATABASE_URL`. Exemplo: `TEST_DATABASE_URL=postgres://... npm test`.
+
 ## Dúvidas comuns
 
 **"Preciso rodar isso tudo agora?"** Não. O app continua funcionando normalmente sem banco. Isso

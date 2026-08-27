@@ -143,6 +143,58 @@ export interface ForecastEntry {
 /** `calculable: false` sempre que não houver amostra histórica suficiente ou capacidade configurada. */
 export type Forecast = { calculable: false } | { calculable: true; entries: ForecastEntry[] };
 
+/**
+ * Missão 3.1 (Fase 3 — Motor de Disponibilidade e Conflito) — resultado da checagem estrutural
+ * de sobreposição de horário. "insufficient_data" cobre tanto duração desconhecida quanto
+ * capacidade (`operational_capacity_config`) não configurada — nunca um veredito otimista
+ * quando falta dado real para decidir com segurança.
+ */
+export type AvailabilityStatus = "available" | "conflict" | "insufficient_data";
+
+export interface ConflictingAppointmentRef {
+  id: string;
+  scheduledAt: string;
+  expectedDurationMinutes: number;
+}
+
+/** Agendamento do mesmo dia cuja duração não pôde ser determinada (nem própria, nem do catálogo do serviço) — nunca tratado como 0 minutos. */
+export interface UndeterminedAppointmentRef {
+  id: string;
+  scheduledAt: string;
+}
+
+export type AvailabilityCheckResult =
+  | { status: "available" }
+  | { status: "conflict"; conflictingAppointments: ConflictingAppointmentRef[] }
+  | {
+      status: "insufficient_data";
+      reason: string;
+      conflictingAppointments?: ConflictingAppointmentRef[];
+      undeterminedAppointments?: UndeterminedAppointmentRef[];
+    };
+
+/** Já com a duração resolvida (própria ou fallback do catálogo) — `durationMinutes: null` = indeterminada, nunca 0 inventado. */
+export interface OccupyingAppointmentForCheck {
+  id: string;
+  scheduledAt: string;
+  durationMinutes: number | null;
+}
+
+export interface AvailabilityCandidate {
+  scheduledAt: string;
+  durationMinutes: number | null;
+}
+
+/** Parâmetros de uma consulta de disponibilidade — nunca cria/altera nenhum agendamento. */
+export interface AvailabilityRequest {
+  serviceId: string;
+  scheduledAt: string;
+  /** Duração explícita do candidato, quando já conhecida — cai para `services.estimatedDurationMinutes` quando ausente. */
+  expectedDurationMinutes?: number | null;
+  /** Exclui este agendamento da comparação (reavaliação de um agendamento já existente) — não usado nesta missão, disponível para uso futuro. */
+  excludeAppointmentId?: string;
+}
+
 export interface TomorrowPreparation {
   vehicleCount: number;
   serviceCount: number;

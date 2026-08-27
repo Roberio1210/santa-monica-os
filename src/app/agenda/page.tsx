@@ -1,3 +1,10 @@
+/**
+ * ATENÇÃO: esta página é 100% mock/demonstrativa (dados de `@/data/mock/schedule`), nunca lê
+ * `appointments` nem nenhuma tabela real. A agenda REAL do sistema é `/planejamento`
+ * (`src/lib/planning/*`, tabela `appointments`) — nunca use este arquivo como fonte de dado ou
+ * de lógica de disponibilidade/conflito. Ver `src/lib/planning/availability.ts` (Missão 3.1) para
+ * o motor real de disponibilidade/conflito.
+ */
 import { PageHeader } from "@/components/shared/page-header";
 import { DemoDataBadge } from "@/components/shared/demo-data-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

@@ -9,6 +9,11 @@ import { fieldClasses, labelClasses } from "@/components/attendance/mobile/wizar
 import type { CustomerSelection } from "@/components/attendance/mobile/wizard/types";
 import { cn } from "@/lib/utils/cn";
 import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
+import type { ConflictingAppointmentRef } from "@/lib/planning/types";
+
+function formatConflictTime(iso: string): string {
+  return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
 
 export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: ServiceCatalogEntry[] }) {
   const router = useRouter();
@@ -28,6 +33,9 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
   const [notes, setNotes] = useState("");
 
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<ConflictingAppointmentRef[] | null>(null);
+  const [insufficientDataReason, setInsufficientDataReason] = useState<string | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   if (!customer) {
@@ -37,11 +45,13 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
   const existingVehicles = customer.kind === "existing" ? customer.result.vehicles : [];
   const customerName = customer.kind === "existing" ? (customer.result.customer.name ?? "Cliente") : customer.name;
 
-  const canSubmit = date.length > 0 && time.length > 0 && serviceId.length > 0 && (selectedVehicleId !== null || plate.trim().length > 0);
+  // Missão 3.2 — enquanto houver um aviso de disponibilidade insuficiente sem confirmação humana explícita, o botão fica bloqueado.
+  const canSubmit = date.length > 0 && time.length > 0 && serviceId.length > 0 && (selectedVehicleId !== null || plate.trim().length > 0) && (!insufficientDataReason || acknowledged);
 
   function handleSubmit() {
     if (!canSubmit || !customer) return;
     setError(null);
+    setConflict(null);
 
     const selectedExistingVehicle = existingVehicles.find((v) => v.id === selectedVehicleId);
     const scheduledAt = `${date}T${time}:00-03:00`;
@@ -58,8 +68,17 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
           vehicleYear: selectedExistingVehicle?.year ?? (year ? Number(year) : null),
           vehicleColor: selectedExistingVehicle?.color ?? (color || null),
         },
-        { serviceId, scheduledAt, expectedDurationMinutes: duration ? Number(duration) : null, notes: notes.trim() || null },
+        { serviceId, scheduledAt, expectedDurationMinutes: duration ? Number(duration) : null, notes: notes.trim() || null, acknowledgedInsufficientData: acknowledged },
       );
+      if (result.availabilityConflict) {
+        setConflict(result.availabilityConflict.conflictingAppointments);
+        setInsufficientDataReason(null);
+        return;
+      }
+      if (result.availabilityInsufficientData) {
+        setInsufficientDataReason(result.availabilityInsufficientData.reason);
+        return;
+      }
       if (result.error) {
         setError(result.error);
         return;
@@ -187,6 +206,30 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
         </div>
       </div>
 
+      {conflict ? (
+        <div className="space-y-2 rounded-xl border border-critical/40 bg-critical-bg p-3 text-sm text-critical">
+          <p className="font-medium">Já existe atendimento ocupando esse intervalo.</p>
+          <ul className="space-y-1 text-xs">
+            {conflict.map((c) => (
+              <li key={c.id}>
+                {formatConflictTime(c.scheduledAt)} — {c.expectedDurationMinutes} min
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs">Escolha outro horário para continuar.</p>
+        </div>
+      ) : null}
+
+      {insufficientDataReason ? (
+        <div className="space-y-2 rounded-xl border border-warning/30 bg-warning-bg p-3 text-sm text-warning">
+          <p>Não foi possível validar automaticamente a disponibilidade: {insufficientDataReason}</p>
+          <label className="flex items-start gap-2 text-xs">
+            <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5" />
+            Estou ciente de que a disponibilidade não pôde ser validada automaticamente.
+          </label>
+        </div>
+      ) : null}
+
       {error ? <p className="text-sm text-critical">{error}</p> : null}
 
       <button
@@ -195,7 +238,7 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
         onClick={handleSubmit}
         className="flex h-12 w-full items-center justify-center rounded-xl bg-accent text-sm font-medium text-accent-foreground transition-transform active:scale-[0.98] disabled:opacity-50"
       >
-        {isPending ? "Salvando..." : "Agendar"}
+        {isPending ? "Verificando disponibilidade..." : "Agendar"}
       </button>
     </div>
   );

@@ -175,4 +175,15 @@ export class PostgresPlanningRepository implements PlanningRepository {
       .map((o) => ({ serviceNames: namesByOrder.get(o.orderId) ?? [], visitCreatedAt: o.visitCreatedAt.toISOString(), updatedAt: o.updatedAt.toISOString() }))
       .filter((o) => o.serviceNames.length === 1);
   }
+
+  async getServiceEstimatedDurations(serviceIds: string[]): Promise<Record<string, number | null>> {
+    if (serviceIds.length === 0) return {};
+    const rows = await this.db()
+      .select({ id: services.id, estimatedDurationMinutes: services.estimatedDurationMinutes })
+      .from(services)
+      .where(inArray(services.id, serviceIds));
+    const result: Record<string, number | null> = {};
+    for (const row of rows) result[row.id] = row.estimatedDurationMinutes;
+    return result;
+  }
 }

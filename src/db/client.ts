@@ -23,15 +23,35 @@ export type DbOrTx = Database | PostgresJsTransaction<typeof schema, ExtractTabl
  */
 let cached: Database | null | undefined;
 
-export function isDatabaseConfigured(): boolean {
-  return !!process.env.DATABASE_URL;
+/**
+ * Missão Emergencial de Limpeza de Contaminação de Testes (28/08/2026) — incidente real: rodar
+ * `vitest` com `DATABASE_URL` de produção carregada no processo (ex.: `dotenv-cli -e .env.local`)
+ * fazia qualquer módulo dual-mode (attendance/planning/finance/inventory/recipes/
+ * organizationalMemory/etc.) escrever de verdade no Neon de produção — `NODE_ENV` nunca era
+ * considerado. Isso contaminou clientes, veículos, agendamentos, ordens de serviço, notificações,
+ * memória organizacional e parte de contas a pagar reais, ao longo de múltiplas sessões, até ser
+ * auditado e limpo (ver relatório da missão).
+ *
+ * Correção fail-closed: em `NODE_ENV === "test"`, `DATABASE_URL` NUNCA é usada para conectar —
+ * só `TEST_DATABASE_URL` (variável deliberadamente separada, nunca a de produção) autoriza um
+ * Postgres real em teste. Sem ela, o resultado é sempre "não configurada" (cai em memória via
+ * `getStorageMode()`), nunca uma conexão silenciosa. Fora de teste, comportamento 100%
+ * preservado: só `DATABASE_URL` é considerada, exatamente como antes desta missão.
+ */
+function resolveConnectionUrl(): string | undefined {
+  if (process.env.NODE_ENV === "test") return process.env.TEST_DATABASE_URL;
+  return process.env.DATABASE_URL;
 }
 
-/** Retorna null quando DATABASE_URL não está configurada — o chamador decide o fallback. */
+export function isDatabaseConfigured(): boolean {
+  return !!resolveConnectionUrl();
+}
+
+/** Retorna null quando não há URL de conexão válida para o ambiente atual — o chamador decide o fallback. */
 export function getDb(): Database | null {
   if (cached !== undefined) return cached;
 
-  const url = process.env.DATABASE_URL;
+  const url = resolveConnectionUrl();
   if (!url) {
     cached = null;
     return cached;

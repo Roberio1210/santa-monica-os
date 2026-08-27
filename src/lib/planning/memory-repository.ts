@@ -108,4 +108,13 @@ export class MemoryPlanningRepository implements PlanningRepository {
   async listCompletedSingleServiceOrders(): Promise<CompletedOrderSample[]> {
     return [];
   }
+
+  /**
+   * Missão 3.1 — o catálogo de serviços em memória (`ServiceCatalogEntry`) não carrega
+   * `estimatedDurationMinutes`; mesmo espírito de `listCompletedSingleServiceOrders` acima —
+   * mapa vazio (nunca inventa duração), aceitável pois memória nunca é usada em produção.
+   */
+  async getServiceEstimatedDurations(): Promise<Record<string, number | null>> {
+    return {};
+  }
 }

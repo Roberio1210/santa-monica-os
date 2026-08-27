@@ -1,6 +1,7 @@
 import "server-only";
 import { fetchCustomerSearchResult } from "@/lib/attendance/service";
 import type { CustomerHistorySummary } from "@/lib/attendance/types";
+import { checkAvailability, resolveCandidateDuration } from "@/lib/planning/availability";
 import { computeAverageDurationByServiceName, computeCapacitySummary, computeForecast, computeTomorrowPreparation } from "@/lib/planning/capacity";
 import { deriveClientSignals } from "@/lib/planning/clientSignals";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
@@ -10,10 +11,13 @@ import {
   type Appointment,
   type AppointmentStatus,
   type AppointmentView,
+  type AvailabilityCheckResult,
+  type AvailabilityRequest,
   type CapacityConfig,
   type ClientSignal,
   type CreateAppointmentInput,
   type NextClientCard,
+  type OccupyingAppointmentForCheck,
   type PlanningBoard,
   type PlanningDay,
   type PlanningRangeKey,
@@ -201,6 +205,47 @@ export async function setCapacityConfig(input: SetCapacityConfigInput): Promise<
     throw new Error("Boxes disponíveis e minutos de expediente devem ser maiores que zero.");
   }
   return getPlanningRepository().setCapacityConfig(input);
+}
+
+/**
+ * Missão 3.1 (Fase 3 — Motor de Disponibilidade e Conflito) — checagem estrutural de sobreposição
+ * de horário para um candidato de agendamento. SOMENTE LEITURA: nunca cria, altera ou cancela
+ * nenhum `appointment` — é a camada que uma futura tool/ação de criação deveria consultar antes
+ * de escrever, mas essa escrita não está autorizada nesta missão.
+ *
+ * Considera só agendamentos do MESMO DIA (calendário de São Paulo) cujo status ocupe capacidade
+ * (`OCCUPYING_STATUSES` — cancelado/reagendado nunca bloqueiam horário). Duração é sempre a
+ * informada explicitamente ou, na ausência dela, `services.estimatedDurationMinutes` — nunca uma
+ * média inventada. Capacidade é sempre `operational_capacity_config` ativa — nunca assumida como
+ * 1 box quando não configurada.
+ */
+export async function checkAvailabilityForRequest(request: AvailabilityRequest): Promise<AvailabilityCheckResult> {
+  const repo = getPlanningRepository();
+  const dateIso = saoPauloDateISO(new Date(request.scheduledAt));
+
+  const rows = await repo.listAppointmentsInRange(dateIso, dateIso);
+  const occupyingRows = rows.filter((r) => OCCUPYING_STATUSES.includes(r.status) && r.id !== request.excludeAppointmentId);
+
+  const serviceIdsNeedingFallback = new Set<string>();
+  if (request.expectedDurationMinutes == null) serviceIdsNeedingFallback.add(request.serviceId);
+  for (const row of occupyingRows) {
+    if (row.expectedDurationMinutes === null) serviceIdsNeedingFallback.add(row.serviceId);
+  }
+
+  const [config, durationFallbacks] = await Promise.all([
+    repo.getActiveCapacityConfig(),
+    serviceIdsNeedingFallback.size > 0 ? repo.getServiceEstimatedDurations(Array.from(serviceIdsNeedingFallback)) : Promise.resolve({} as Record<string, number | null>),
+  ]);
+
+  const candidateDuration = resolveCandidateDuration(request.expectedDurationMinutes ?? null, durationFallbacks[request.serviceId] ?? null);
+
+  const sameDayOccupying: OccupyingAppointmentForCheck[] = occupyingRows.map((row) => ({
+    id: row.id,
+    scheduledAt: row.scheduledAt,
+    durationMinutes: resolveCandidateDuration(row.expectedDurationMinutes, durationFallbacks[row.serviceId] ?? null),
+  }));
+
+  return checkAvailability({ scheduledAt: request.scheduledAt, durationMinutes: candidateDuration }, sameDayOccupying, config ? { boxesCount: config.boxesCount } : null);
 }
 
 export { fetchPackageServiceNames };

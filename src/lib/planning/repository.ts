@@ -45,4 +45,11 @@ export interface PlanningRepository {
 
   /** Ordens entregues com exatamente 1 serviço aprovado — base real para duração média por serviço. */
   listCompletedSingleServiceOrders(): Promise<CompletedOrderSample[]>;
+
+  /**
+   * Missão 3.1 — `services.estimated_duration_minutes` dos ids pedidos, usado só como fallback
+   * quando um agendamento não tem `expectedDurationMinutes` próprio. `null` no valor = serviço
+   * sem duração cadastrada (nunca inventado); ids não encontrados simplesmente não aparecem no mapa.
+   */
+  getServiceEstimatedDurations(serviceIds: string[]): Promise<Record<string, number | null>>;
 }
