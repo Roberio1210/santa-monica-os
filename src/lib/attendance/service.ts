@@ -122,7 +122,13 @@ export interface QuickRegisterInput {
   customerName: string;
   customerPhone: string;
   customerCpf?: string | null;
-  vehiclePlate: string;
+  /**
+   * Missão 3.2.3 — `null` só é aceito pelo fluxo de Planejamento (agendamento futuro, veículo
+   * ainda não chegou). O Atendimento continua exigindo placa não vazia na validação do próprio
+   * formulário antes de chamar esta função — este tipo ficou permissivo de propósito, mas isso
+   * não afrouxa o Atendimento porque a exigência dele nunca dependeu deste tipo, só do seu form.
+   */
+  vehiclePlate: string | null;
   vehicleBrand?: string | null;
   vehicleModel?: string | null;
   vehicleYear?: number | null;
@@ -196,7 +202,11 @@ export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput)
     customer = await repo.createCustomer({ name: input.customerName, phone: input.customerPhone, cpf: input.customerCpf ?? null });
   }
 
-  const existingVehicle = await repo.findVehicleByPlate(input.vehiclePlate);
+  // Missão 3.2.3 — sem placa (agendamento futuro do Planejamento), não há chave nenhuma para
+  // buscar ou deduplicar: nunca tenta casar por modelo/nome, sempre cria veículo novo com
+  // plate=null. `findVehicleByPlate`/`findVehiclesByNormalizedPlate` recebem `string`, não
+  // `string | null` — por isso só são chamadas quando a placa existe.
+  const existingVehicle = input.vehiclePlate ? await repo.findVehicleByPlate(input.vehiclePlate) : null;
   let possibleDuplicateVehicles: Vehicle[] = [];
   let vehicle: Vehicle;
   if (existingVehicle && existingVehicle.customerId === customer.id) {
@@ -206,7 +216,9 @@ export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput)
     // EXACT/HIGH_CONFIDENCE de qualquer forma — evita uma chamada redundante ao motor aqui).
     possibleDuplicateVehicles = existingVehicle
       ? [existingVehicle]
-      : filterVehicleCandidatesByEngine({ plate: input.vehiclePlate, model: input.vehicleModel ?? null }, await repo.findVehiclesByNormalizedPlate(input.vehiclePlate));
+      : input.vehiclePlate
+        ? filterVehicleCandidatesByEngine({ plate: input.vehiclePlate, model: input.vehicleModel ?? null }, await repo.findVehiclesByNormalizedPlate(input.vehiclePlate))
+        : [];
     vehicle = await repo.createVehicle({
       customerId: customer.id,
       plate: input.vehiclePlate,

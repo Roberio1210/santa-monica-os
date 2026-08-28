@@ -242,4 +242,72 @@ describe("createAppointmentAction — Missão 3.2 (motor de disponibilidade cone
     expect(second.error).toBe("Já existe atendimento ocupando esse intervalo.");
     expect(await countAppointmentsOnDay(dayIso)).toBe(1);
   });
+
+  /**
+   * Missão 3.2.3 — placa deixa de ser obrigatória para criar veículo/agendamento pelo
+   * Planejamento (o carro pode ainda não ter chegado à loja). `NULL` é a única representação
+   * aceita — nunca um placeholder como "SEMPLACA"/"0000000". O Atendimento (check-in físico) NÃO
+   * é tocado por esta missão: sua exigência de placa vive só em `step-veiculo.tsx`
+   * (`canSubmitNew = plate.trim().length > 0`), fora do escopo deste arquivo/teste.
+   */
+  it("13. registerQuickCustomerAndVehicle aceita vehiclePlate: null — veículo é criado com plate=null, nunca um placeholder", async () => {
+    counter++;
+    const { vehicle, customer } = await registerQuickCustomerAndVehicle({
+      customerName: `SemPlaca ${counter}`,
+      customerPhone: `4899977${String(counter).padStart(4, "0")}`,
+      vehiclePlate: null,
+      vehicleModel: "Ford Fiesta",
+    });
+
+    expect(vehicle.plate).toBeNull();
+    expect(vehicle.model).toBe("Ford Fiesta");
+    expect(customer.name).toBe(`SemPlaca ${counter}`);
+  });
+
+  it("14. createAppointmentAction com vehiclePlate: null -> cria appointment normalmente (disponibilidade nunca depende de placa)", async () => {
+    counter++;
+    const dayIso = addDaysIso(saoPauloDateISO(), 40);
+    const catalog = await fetchServiceCatalog();
+
+    const result = await createAppointmentAction(
+      { customerName: `Kawe ${counter}`, customerPhone: `4899988${String(counter).padStart(4, "0")}`, vehiclePlate: null, vehicleModel: "Ford Fiesta" },
+      { serviceId: catalog[0].id, scheduledAt: `${dayIso}T08:00:00-03:00`, expectedDurationMinutes: 60, notes: null },
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.availabilityConflict).toBeFalsy();
+    expect(result.availabilityInsufficientData).toBeFalsy();
+    expect(await countAppointmentsOnDay(dayIso)).toBe(1);
+  });
+
+  it("15. dois agendamentos sem placa em conflito real (boxesCount=1) -> conflito continua detectado normalmente, ausência de placa nunca contorna capacidade", async () => {
+    const dayIso = addDaysIso(saoPauloDateISO(), 41);
+    const catalog = await fetchServiceCatalog();
+
+    counter++;
+    await createAppointmentAction(
+      { customerName: `SemPlacaA ${counter}`, customerPhone: `4899911${String(counter).padStart(4, "0")}`, vehiclePlate: null, vehicleModel: "Ford Fiesta" },
+      { serviceId: catalog[0].id, scheduledAt: `${dayIso}T10:00:00-03:00`, expectedDurationMinutes: 60, notes: null },
+    );
+
+    counter++;
+    const second = await createAppointmentAction(
+      { customerName: `SemPlacaB ${counter}`, customerPhone: `4899922${String(counter).padStart(4, "0")}`, vehiclePlate: null, vehicleModel: "Chevrolet Onix" },
+      { serviceId: catalog[0].id, scheduledAt: `${dayIso}T10:30:00-03:00`, expectedDurationMinutes: 60, notes: null },
+    );
+
+    expect(second.error).toBe("Já existe atendimento ocupando esse intervalo.");
+    expect(await countAppointmentsOnDay(dayIso)).toBe(1);
+  });
+
+  it("16. placa informada continua funcionando exatamente como antes (regressão) — reaproveita veículo existente pela placa exata", async () => {
+    counter++;
+    const phone = `4899933${String(counter).padStart(4, "0")}`;
+    const plate = `N44${String(counter).padStart(4, "0")}`;
+    const first = await registerQuickCustomerAndVehicle({ customerName: `ComPlaca ${counter}`, customerPhone: phone, vehiclePlate: plate });
+    const second = await registerQuickCustomerAndVehicle({ customerName: `ComPlaca ${counter}`, customerPhone: phone, vehiclePlate: plate });
+
+    expect(second.vehicle.id).toBe(first.vehicle.id);
+    expect(second.vehicle.plate).toBe(plate);
+  });
 });

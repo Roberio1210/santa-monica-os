@@ -35,7 +35,14 @@ export interface Vehicle {
 
 export interface CreateVehicleInput {
   customerId: string;
-  plate: string;
+  /**
+   * Missão 3.2.3 — `null` quando o veículo ainda não chegou fisicamente à loja (agendamento
+   * futuro criado pelo Planejamento, placa só conhecida na chegada). Nunca um placeholder
+   * ("SEMPLACA" etc.) — `NULL` é a única representação honesta de "ainda não sabemos". O
+   * Atendimento (check-in físico, carro já presente) continua exigindo placa não vazia através
+   * da própria validação do seu formulário (`step-veiculo.tsx`), não deste tipo.
+   */
+  plate: string | null;
   brand?: string | null;
   model?: string | null;
   year?: number | null;

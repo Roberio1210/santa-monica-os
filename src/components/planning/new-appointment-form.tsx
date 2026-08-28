@@ -46,7 +46,8 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
   const customerName = customer.kind === "existing" ? (customer.result.customer.name ?? "Cliente") : customer.name;
 
   // Missão 3.2 — enquanto houver um aviso de disponibilidade insuficiente sem confirmação humana explícita, o botão fica bloqueado.
-  const canSubmit = date.length > 0 && time.length > 0 && serviceId.length > 0 && (selectedVehicleId !== null || plate.trim().length > 0) && (!insufficientDataReason || acknowledged);
+  // Missão 3.2.3 — placa NÃO é mais obrigatória para veículo novo (o carro pode ainda não ter chegado à loja); modelo continua obrigatório.
+  const canSubmit = date.length > 0 && time.length > 0 && serviceId.length > 0 && (selectedVehicleId !== null || model.trim().length > 0) && (!insufficientDataReason || acknowledged);
 
   function handleSubmit() {
     if (!canSubmit || !customer) return;
@@ -62,7 +63,7 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
           customerName,
           customerPhone: customer.kind === "existing" ? (customer.result.customer.phone ?? "") : customer.phone,
           customerCpf: customer.kind === "new" ? customer.cpf || null : null,
-          vehiclePlate: (selectedExistingVehicle?.plate ?? plate).toUpperCase(),
+          vehiclePlate: selectedExistingVehicle ? selectedExistingVehicle.plate : plate.trim() ? plate.trim().toUpperCase() : null,
           vehicleBrand: selectedExistingVehicle?.brand ?? (brand || null),
           vehicleModel: selectedExistingVehicle?.model ?? (model || null),
           vehicleYear: selectedExistingVehicle?.year ?? (year ? Number(year) : null),
@@ -127,7 +128,7 @@ export function NewAppointmentForm({ serviceCatalog }: { serviceCatalog: Service
           <div className="grid grid-cols-2 gap-2.5 rounded-xl border border-border-subtle bg-background-panel p-3">
             <div className="col-span-2">
               <label className={labelClasses} htmlFor="na-placa">
-                Placa
+                Placa (opcional — se o veículo ainda não chegou à loja)
               </label>
               <input id="na-placa" value={plate} onChange={(e) => setPlate(e.target.value.toUpperCase())} className={fieldClasses} placeholder="ABC1D23" />
             </div>
