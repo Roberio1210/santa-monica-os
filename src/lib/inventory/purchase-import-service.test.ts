@@ -114,3 +114,27 @@ describe("confirmPurchaseImportLine — validações antes de qualquer escrita",
     ).rejects.toThrow(/banco não configurado/i);
   });
 });
+
+/**
+ * Missão de Fechamento da Reconciliação dos Snow Foams — decisão "já contabilizado manualmente"
+ * (linha vinculada a um produto existente cuja entrada já foi lançada fora do fluxo de
+ * importação, nunca gera `inventory_movement`). Mesma limitação de ambiente das suítes acima:
+ * sem Postgres configurado em teste, a validação pré-banco é o que dá para verificar de forma
+ * automatizada aqui — a persistência real (matchedItemId gravado, resultingMovementId permanece
+ * null, nenhum movimento/alteração de saldo, idempotência em linha já processada) foi verificada
+ * ponta a ponta contra o Neon real nesta mesma missão, com dados 100% temporários criados e
+ * removidos ao final (nunca tocando nas 4 linhas reais de Snow Foam nem em nenhum outro registro).
+ */
+describe("confirmPurchaseImportLine — decision 'ja_contabilizado_manualmente'", () => {
+  it("exige o id do produto vinculado, com a mesma mensagem de vincular_existente", async () => {
+    await expect(
+      confirmPurchaseImportLine(confirmInput({ decision: "ja_contabilizado_manualmente", linkItemId: undefined })),
+    ).rejects.toThrow(/selecione o produto/i);
+  });
+
+  it("não exige newProduct nem embalagem/quantidade (não há conversão a calcular) — com o id do produto, chega até a camada de banco", async () => {
+    await expect(
+      confirmPurchaseImportLine(confirmInput({ decision: "ja_contabilizado_manualmente", linkItemId: "item-existente-1" })),
+    ).rejects.toThrow(/banco não configurado/i);
+  });
+});

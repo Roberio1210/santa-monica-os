@@ -1,0 +1,1 @@
+ALTER TYPE "public"."purchase_line_decision" ADD VALUE 'ja_contabilizado_manualmente';

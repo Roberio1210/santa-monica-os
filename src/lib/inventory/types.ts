@@ -157,10 +157,24 @@ export const STOCK_TRACKED_CLASSIFICATIONS: ItemClassification[] = Object.entrie
   .filter(([, behavior]) => behavior.tracksQuantity)
   .map(([classification]) => classification as ItemClassification);
 
-/** Missão 23, seção 8 — decisão do usuário para cada linha da importação de compras, na Etapa 2 (confirmação). */
-export type PurchaseLineDecision = "vincular_existente" | "criar_produto" | "ignorar" | "patrimonio" | "despesa_manutencao" | "revisar_depois";
+/**
+ * Missão 23, seção 8 — decisão do usuário para cada linha da importação de compras, na Etapa 2
+ * (confirmação). "ja_contabilizado_manualmente" (Missão de Fechamento da Reconciliação dos Snow
+ * Foams) cobre o caso em que a compra já foi identificada e vinculada a um produto existente, mas
+ * sua entrada de estoque já foi contabilizada por outro processo — nunca gera
+ * `inventory_movement` (ver `resultingMovementId` em `inventoryAudit.ts`).
+ */
+export type PurchaseLineDecision = "vincular_existente" | "criar_produto" | "ignorar" | "patrimonio" | "despesa_manutencao" | "revisar_depois" | "ja_contabilizado_manualmente";
 
-export const purchaseLineDecisions: PurchaseLineDecision[] = ["vincular_existente", "criar_produto", "ignorar", "patrimonio", "despesa_manutencao", "revisar_depois"];
+export const purchaseLineDecisions: PurchaseLineDecision[] = [
+  "vincular_existente",
+  "criar_produto",
+  "ignorar",
+  "patrimonio",
+  "despesa_manutencao",
+  "revisar_depois",
+  "ja_contabilizado_manualmente",
+];
 
 export const purchaseLineDecisionLabels: Record<PurchaseLineDecision, string> = {
   vincular_existente: "Vincular a produto existente",
@@ -169,6 +183,7 @@ export const purchaseLineDecisionLabels: Record<PurchaseLineDecision, string> = 
   patrimonio: "Marcar como equipamento/patrimônio",
   despesa_manutencao: "Marcar como despesa ou manutenção",
   revisar_depois: "Revisar depois",
+  ja_contabilizado_manualmente: "Já contabilizado manualmente (vincular sem gerar entrada)",
 };
 
 export type PurchaseLineStatus = "pendente" | "confirmado" | "ignorado" | "duplicado";

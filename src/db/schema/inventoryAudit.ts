@@ -100,6 +100,16 @@ export const purchaseLineDecisionEnum = pgEnum("purchase_line_decision", [
   "patrimonio",
   "despesa_manutencao",
   "revisar_depois",
+  /**
+   * Missão de Fechamento da Reconciliação dos Snow Foams — a compra já foi identificada e
+   * vinculada a um `inventory_item` existente, mas sua entrada de estoque já foi contabilizada
+   * por outro processo (ex.: lançamento manual de auditoria feito antes de a NF ter sido
+   * cruzada). Nunca gera `inventory_movement`: ao contrário de "vincular_existente", esta decisão
+   * NUNCA popula `resultingMovementId` (permanece `null` — nenhum movimento nasceu desta
+   * confirmação, mesmo com a linha indo para `status="confirmado"`). Valor aditivo via
+   * `ALTER TYPE ... ADD VALUE` — nunca remove nem reaproveita um valor existente.
+   */
+  "ja_contabilizado_manualmente",
 ]);
 
 export const purchaseLineStatusEnum = pgEnum("purchase_line_status", ["pendente", "confirmado", "ignorado", "duplicado"]);
@@ -153,7 +163,12 @@ export const purchaseImportLines = pgTable("purchase_import_lines", {
   classification: itemClassificationEnum("classification"),
   decision: purchaseLineDecisionEnum("decision"),
   status: purchaseLineStatusEnum("status").notNull().default("pendente"),
-  /** Preenchido só quando a decisão gera uma movimentação real de estoque (vincular/criar produto químico/consumível). */
+  /**
+   * Preenchido só quando a decisão gera uma movimentação real de estoque (vincular/criar produto
+   * químico/consumível). `decision="ja_contabilizado_manualmente"` também leva a
+   * `status="confirmado"`, mas por definição NUNCA preenche este campo — a movimentação já existe
+   * fora deste fluxo, e apontar para ela aqui sugeriria falsamente que esta confirmação a gerou.
+   */
   resultingMovementId: uuid("resulting_movement_id").references(() => inventoryMovements.id),
 
   ...timestamps,

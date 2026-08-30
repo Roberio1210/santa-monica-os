@@ -189,7 +189,7 @@ export interface ConfirmPurchaseLineInput {
   lineId: string;
   decision: PurchaseLineDecision;
   performedBy: string;
-  /** Obrigatório quando `decision === "vincular_existente"`. */
+  /** Obrigatório quando `decision === "vincular_existente"` ou `decision === "ja_contabilizado_manualmente"`. */
   linkItemId?: string;
   /** Obrigatórios quando `decision === "criar_produto"`. */
   newProduct?: { category: InventoryCategory; brand: string; classification: ItemClassification };
@@ -220,6 +220,9 @@ function round2(value: number): number {
 export async function confirmPurchaseImportLine(input: ConfirmPurchaseLineInput): Promise<ConfirmPurchaseLineResult> {
   if (!input.performedBy.trim()) throw new Error("Responsável é obrigatório.");
   if (input.decision === "vincular_existente" && !input.linkItemId) throw new Error("Selecione o produto existente para vincular esta linha.");
+  if (input.decision === "ja_contabilizado_manualmente" && !input.linkItemId) {
+    throw new Error("Selecione o produto existente para marcar esta linha como já contabilizada.");
+  }
   if (input.decision === "criar_produto") {
     if (!input.newProduct) throw new Error("Informe categoria, marca e classificação para criar um novo produto.");
     if (!STOCK_TRACKED_CLASSIFICATIONS.includes(input.newProduct.classification)) {
@@ -257,6 +260,31 @@ export async function confirmPurchaseImportLine(input: ConfirmPurchaseLineInput)
         .set({ status: "confirmado", decision: input.decision, classification, updatedAt: new Date() })
         .where(eq(purchaseImportLines.id, line.id));
       return { lineId: line.id, status: "confirmado", itemId: null, movementId: null, alreadyProcessed: false };
+    }
+
+    /**
+     * A compra já foi contabilizada por um lançamento manual anterior (ex.: auditoria de
+     * reconciliação) — apenas vincula a linha ao produto correto e a tira da fila de pendências,
+     * SEM gerar movimentação nova (`resultingMovementId` é explicitamente mantido `null`: nenhum
+     * movimento nasceu desta confirmação). Nunca requer packageUnit/packageQuantity/packageCount
+     * — não há conversão a calcular, porque não há entrada a lançar.
+     */
+    if (input.decision === "ja_contabilizado_manualmente") {
+      if (!input.linkItemId) throw new Error("Selecione o produto existente para marcar esta linha como já contabilizada.");
+      const [item] = await tx.select({ id: inventoryItems.id }).from(inventoryItems).where(eq(inventoryItems.id, input.linkItemId)).limit(1);
+      if (!item) throw new Error("Produto selecionado não encontrado.");
+
+      await tx
+        .update(purchaseImportLines)
+        .set({
+          status: "confirmado",
+          decision: "ja_contabilizado_manualmente",
+          matchedItemId: item.id,
+          resultingMovementId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(purchaseImportLines.id, line.id));
+      return { lineId: line.id, status: "confirmado", itemId: item.id, movementId: null, alreadyProcessed: false };
     }
 
     if (line.packageUnit === null || line.packageQuantity === null || line.packageCount === null) {
