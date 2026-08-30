@@ -386,6 +386,13 @@
       "when": 1788055913089,
       "tag": "0054_jittery_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788097542485,
+      "tag": "0055_pale_alice",
+      "breakpoints": true
     }
   ]
 }

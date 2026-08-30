@@ -1,4 +1,4 @@
-import { date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { id, timestamps } from "./common";
 
 /**
@@ -268,4 +268,57 @@ export const stoneDivergences = pgTable(
     periodTo: date("period_to").notNull(),
     ...timestamps,
   },
+);
+
+/**
+ * Missão Financeiro Fase 2 — tabela de taxas Stone VERSIONADA POR VIGÊNCIA, substituindo a
+ * necessidade de `feeTable.ts` (hardcoded, sem data-base, não comprovado por nenhum dado real —
+ * ver `stoneFeeScheduleSourceEnum`, valor `legado_feetable_nao_comprovado`, mantido só como
+ * referência histórica, nunca apagado). Cada linha é um "regime" observado ou contratual, imutável
+ * uma vez criada: uma mudança de taxa NUNCA sobrescreve uma linha existente — fecha `effectiveTo`
+ * da linha antiga e insere uma linha nova. `effectiveTo = null` significa "vigente".
+ */
+export const stoneFeeScheduleBrandEnum = pgEnum("stone_fee_schedule_brand", ["visa", "mastercard", "elo", "amex"]);
+
+export const stoneFeeSchedulePaymentMethodEnum = pgEnum("stone_fee_schedule_payment_method", ["debito", "credito"]);
+
+/** "indeterminado" quando o padrão de liquidação observado não pôde ser atribuído com segurança a D0/D1 (ex.: regimes sem liquidação somada, R0/R1). */
+export const stoneFeeScheduleSettlementModeEnum = pgEnum("stone_fee_schedule_settlement_mode", ["d0", "d1", "nenhuma", "indeterminado"]);
+
+/** "observado_historico" = taxa praticada real medida nos relatórios Stone, sem contrato-fonte conhecido (regimes anteriores ao Termo de Incentivo). */
+export const stoneFeeScheduleRateTypeEnum = pgEnum("stone_fee_schedule_rate_type", ["regular", "incentivada", "observado_historico"]);
+
+export const stoneFeeScheduleSourceEnum = pgEnum("stone_fee_schedule_source", ["contrato_pdf", "reconstrucao_historica_dados_reais", "legado_feetable_nao_comprovado"]);
+
+export const stoneFeeScheduleVersions = pgTable(
+  "stone_fee_schedule_versions",
+  {
+    id: id(),
+    provider: text("provider").notNull().default("stone"),
+    brand: stoneFeeScheduleBrandEnum("brand").notNull(),
+    paymentMethod: stoneFeeSchedulePaymentMethodEnum("payment_method").notNull(),
+    installments: integer("installments").notNull(),
+    /**
+     * Componente CET, quando decomponível com segurança do valor observado (ver `notes` de cada
+     * linha para o raciocínio). Null quando o regime não permite separar CET de liquidação (ex.:
+     * R0 — valor único observado, sem padrão de soma reconhecível).
+     */
+    cetRate: numeric("cet_rate", { precision: 6, scale: 4 }),
+    settlementMode: stoneFeeScheduleSettlementModeEnum("settlement_mode").notNull().default("indeterminado"),
+    settlementRate: numeric("settlement_rate", { precision: 6, scale: 4 }),
+    /** Taxa total efetiva — sempre preenchida, é o valor realmente observado/contratual (`cetRate + settlementRate` quando ambos existem, senão o valor observado diretamente). */
+    expectedEffectiveRate: numeric("expected_effective_rate", { precision: 6, scale: 4 }).notNull(),
+    rateType: stoneFeeScheduleRateTypeEnum("rate_type").notNull(),
+    isIncentivized: boolean("is_incentivized").notNull().default(false),
+    source: stoneFeeScheduleSourceEnum("source").notNull(),
+    /** Texto livre citando o documento/arquivo exato (ex.: "Contrato de Incentivo (1).pdf — Anexo I" ou "vendas-2026-01-01_2026-01-31.xlsx, regime R1"). */
+    sourceReference: text("source_reference").notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    /** Null = regime vigente. Preenchido só quando um regime posterior o encerra — nunca apagado nem sobrescrito. */
+    effectiveTo: date("effective_to"),
+    active: boolean("active").notNull().default(true),
+    notes: text("notes"),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("stone_fee_schedule_versions_natural_key_idx").on(table.brand, table.paymentMethod, table.installments, table.effectiveFrom)],
 );
