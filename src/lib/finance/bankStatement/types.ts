@@ -24,6 +24,22 @@ export type BankStatementLineStatus = "conciliado" | "sugerido" | "nao_conciliad
 /** Tipos elegíveis à conciliação automática contra `stone_normalized_transactions` — nunca geram receita nova. */
 export const STONE_SETTLEMENT_LINE_TYPES: readonly BankStatementLineType[] = ["recebimento_venda_stone", "antecipacao_credito"];
 
+/**
+ * Missão Financeiro V7 (saneamento de auditoria, 30/08/2026) — incidente real: uma auditoria
+ * gerencial concluiu que três Pix recebidos via maquininha Stone "não existiam na Stone", quando
+ * na verdade existiam desde a importação original — só não apareciam porque a consulta usava
+ * `type = "pix_recebido"` sozinho. Todo Pix de cliente recebido
+ * via maquininha cujo texto original bate no padrão "Pix | Maquininha" é classificado como
+ * `recebimento_venda_stone` por decisão deliberada da Missão V2.3 (ver `classification.ts`,
+ * regra "pix\s*\|?\s*maquininha") — uma representação legítima e igualmente válida de "Pix
+ * recebido de cliente", nunca um tipo "diferente" ou "menos correto" que `pix_recebido`. Qualquer
+ * consulta que precise enumerar recebimentos Pix de clientes na Stone DEVE usar esta constante
+ * (via `listPixStoneReceivedLines`, `pixStoneQueries.ts`) em vez de comparar contra um único
+ * valor de `type` — o objetivo é que esta classe de erro não possa se repetir, nem aqui nem em
+ * nenhuma consulta futura que reutilize esta lista.
+ */
+export const PIX_STONE_RECEIVED_LINE_TYPES: readonly BankStatementLineType[] = ["pix_recebido", "recebimento_venda_stone"];
+
 export interface BankStatementImport {
   id: string;
   financialAccountId: string;

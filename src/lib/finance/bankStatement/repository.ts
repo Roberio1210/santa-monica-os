@@ -40,7 +40,13 @@ export interface BankStatementRepository {
   listExistingDedupeKeys(financialAccountId: string): Promise<Set<string>>;
   createImportWithLines(input: CreateImportWithLinesInput): Promise<BankStatementImport>;
   listImports(financialAccountId?: string): Promise<BankStatementImport[]>;
-  listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]>;
+  /**
+   * `types` (plural) filtra por qualquer um dos tipos da lista — use para representações
+   * legítimas mas heterogêneas do mesmo fato (ver `PIX_STONE_RECEIVED_LINE_TYPES`,
+   * `types.ts`). Independente de `type` (singular); se ambos forem passados, a linha precisa
+   * satisfazer os dois.
+   */
+  listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"]; types?: BankStatementLine["type"][] }): Promise<BankStatementLine[]>;
   getLine(id: string): Promise<BankStatementLine | null>;
   updateLine(input: UpdateBankStatementLineInput): Promise<BankStatementLine>;
 

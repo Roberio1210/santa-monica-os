@@ -68,7 +68,7 @@ export class BankStatementMemoryRepository implements BankStatementRepository {
     return (financialAccountId ? all.filter((i) => i.financialAccountId === financialAccountId) : all).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]> {
+  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"]; types?: BankStatementLine["type"][] }): Promise<BankStatementLine[]> {
     let result = [...this.lines.values()];
     if (filter?.financialAccountId) {
       const importIds = new Set([...this.imports.values()].filter((i) => i.financialAccountId === filter.financialAccountId).map((i) => i.id));
@@ -79,6 +79,7 @@ export class BankStatementMemoryRepository implements BankStatementRepository {
     if (filter?.dateTo) result = result.filter((l) => l.date <= filter.dateTo!);
     if (filter?.direction) result = result.filter((l) => l.direction === filter.direction);
     if (filter?.type) result = result.filter((l) => l.type === filter.type);
+    if (filter?.types && filter.types.length > 0) result = result.filter((l) => filter.types!.includes(l.type));
     return result.sort((a, b) => b.date.localeCompare(a.date) || a.rowIndex - b.rowIndex).map((l) => ({ ...l }));
   }
 

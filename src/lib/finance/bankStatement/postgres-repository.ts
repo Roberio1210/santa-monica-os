@@ -132,13 +132,14 @@ export class BankStatementPostgresRepository implements BankStatementRepository 
     return rows.map(toImport).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"] }): Promise<BankStatementLine[]> {
+  async listLines(filter?: { financialAccountId?: string; status?: BankStatementLine["status"]; dateFrom?: string; dateTo?: string; direction?: BankStatementLine["direction"]; type?: BankStatementLine["type"]; types?: BankStatementLine["type"][] }): Promise<BankStatementLine[]> {
     const conditions = [];
     if (filter?.status) conditions.push(eq(linesTable.status, filter.status));
     if (filter?.dateFrom) conditions.push(gte(linesTable.date, filter.dateFrom));
     if (filter?.dateTo) conditions.push(lte(linesTable.date, filter.dateTo));
     if (filter?.direction) conditions.push(eq(linesTable.direction, filter.direction));
     if (filter?.type) conditions.push(eq(linesTable.type, filter.type));
+    if (filter?.types && filter.types.length > 0) conditions.push(inArray(linesTable.type, filter.types));
 
     if (filter?.financialAccountId) {
       const importIds = await this.db().select({ id: importsTable.id }).from(importsTable).where(eq(importsTable.financialAccountId, filter.financialAccountId));
