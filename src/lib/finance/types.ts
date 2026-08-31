@@ -209,6 +209,20 @@ export interface CreateCashMovementInput {
   notes?: string | null;
 }
 
+/** Fechamento C8 — corrige a competência de um cash_movement já existente (lacuna real: não havia update para cash_movements antes desta correção). */
+export interface UpdateCashMovementCompetenceInput {
+  id: string;
+  competenceDate: string;
+  reason: string;
+}
+
+/** Fechamento C8 — reduz o valor de um cash_movement já existente quando um único Pix continha duas naturezas econômicas (ex.: semanal + meta). */
+export interface ReduceCashMovementAmountInput {
+  id: string;
+  newAmount: number;
+  reason: string;
+}
+
 export interface InformAccountBalanceInput {
   financialAccountId: string;
   informedBalance: number;
@@ -835,6 +849,61 @@ export interface ReopenAccountingPeriodInput {
 }
 
 // --- DRE Gerencial ---
+
+/**
+ * Missão Financeiro V7 (Fase C7) — espelha `src/db/schema/accounting.ts` (dreSnapshots). Um
+ * fechamento imutável do `DreReport`, preservado mesmo depois de reaberturas (ver `isOfficial`).
+ */
+export interface DreSnapshot {
+  id: string;
+  competenceMonth: string;
+  version: number;
+  isOfficial: boolean;
+  regime: DreRegime;
+  computedAt: string;
+  computedBy: string;
+  closedAt: string;
+  closedBy: string;
+  supersededAt: string | null;
+  supersededByVersionId: string | null;
+  methodologyVersion: string;
+  reportPayload: DreReport;
+  payloadHash: string;
+  hashAlgorithm: string;
+  pendingCount: number;
+  lineItemCount: number;
+  accountingPeriodId: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Persistência atômica de um fechamento: cria a nova versão do snapshot, desmarca a versão
+ * oficial anterior (se existir) e fecha/atualiza o `accounting_period` — tudo em uma única
+ * transação (ver `persistDreSnapshotAndClosePeriod`). O cálculo do `DreReport` e as validações
+ * (naoClassificados, invariantes) acontecem ANTES, em `dreSnapshot.ts` — o repositório nunca
+ * calcula a DRE sozinho (evitaria depender de `dre.ts`/`service.ts`, criando dependência circular
+ * com a camada de repositório).
+ */
+export interface PersistDreSnapshotInput {
+  competenceMonth: string;
+  version: number;
+  regime: DreRegime;
+  computedAt: string;
+  computedBy: string;
+  closedBy: string;
+  methodologyVersion: string;
+  reportPayload: DreReport;
+  payloadHash: string;
+  hashAlgorithm: string;
+  pendingCount: number;
+  lineItemCount: number;
+  notes?: string | null;
+  /** id da versão oficial anterior desta competência, se existir — será marcada `isOfficial=false` na mesma transação. */
+  previousOfficialSnapshotId?: string | null;
+  closeAccountingPeriodInput: CloseAccountingPeriodInput;
+}
 
 /**
  * "gerencial" (Missão V3.0) é o regime híbrido: usa competência quando ela é conhecida (accounts_payable/

@@ -49,7 +49,7 @@ export function mapOrdersToRevenueCandidates(orders: RawJumpParkOrderRow[], item
   return orders.map((order) => {
     const items = (itemsByOrderId.get(order.id) ?? []).map((it) => ({ description: it.description, amount: Number(it.amount ?? 0) }));
     const exclusionAmount = resolveOrderCorporateExclusionAmount(
-      { servicesAmount: Number(order.servicesAmount), discountAmount: order.discountAmount !== null ? Number(order.discountAmount) : null, partnerId: order.partnerId },
+      { servicesAmount: Number(order.servicesAmount), discountAmount: order.discountAmount !== null ? Number(order.discountAmount) : null, partnerId: order.partnerId, clientName: order.clientName },
       items,
     );
     const discountAmount = Number(order.discountAmount ?? 0);

@@ -21,6 +21,7 @@ import type {
   CreateClassificationRuleInput,
   CreateContractInput,
   CreatePartnerInput,
+  DreSnapshot,
   FinancialAccount,
   FinancialAccountBalance,
   FinancialCategory,
@@ -29,7 +30,9 @@ import type {
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
+  PersistDreSnapshotInput,
   ReceivableSettlement,
+  ReduceCashMovementAmountInput,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
@@ -39,6 +42,7 @@ import type {
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
+  UpdateCashMovementCompetenceInput,
 } from "@/lib/finance/types";
 import { initialAccountsReceivable } from "@/lib/finance/data/accounts-receivable";
 import { initialCashMovements } from "@/lib/finance/data/cash-movements";
@@ -102,6 +106,7 @@ export class StaticFinanceRepository implements FinanceRepository {
   private classificationRules: ClassificationRule[] = [];
   private allocationRules: AllocationRule[] = [];
   private accountingPeriods: AccountingPeriod[] = [];
+  private dreSnapshots: DreSnapshot[] = [];
 
   /** Aceita dados iniciais alternativos — usado pelos testes para preparar cenários específicos. */
   constructor(seed: StaticFinanceRepositorySeed = {}) {
@@ -402,6 +407,30 @@ export class StaticFinanceRepository implements FinanceRepository {
     this.cashMovements.push(row);
     this.appendAudit("create", "cash_movement", row.id, null, row);
     return { ...row };
+  }
+
+  async updateCashMovementCompetence(input: UpdateCashMovementCompetenceInput): Promise<CashMovement> {
+    const existing = this.cashMovements.find((m) => m.id === input.id);
+    if (!existing) throw new Error(`Movimento de caixa não encontrado: ${input.id}`);
+    const before = { ...existing };
+    const updated: CashMovement = { ...existing, competenceDate: input.competenceDate };
+    this.cashMovements = this.cashMovements.map((m) => (m.id === input.id ? updated : m));
+    this.appendAudit("update_competence", "cash_movement", updated.id, before, updated);
+    return { ...updated };
+  }
+
+  async reduceCashMovementAmount(input: ReduceCashMovementAmountInput): Promise<CashMovement> {
+    const existing = this.cashMovements.find((m) => m.id === input.id);
+    if (!existing) throw new Error(`Movimento de caixa não encontrado: ${input.id}`);
+    if (input.newAmount <= 0 || input.newAmount >= existing.amount) {
+      throw new Error(`Novo valor (${input.newAmount}) precisa ser positivo e menor que o valor atual (${existing.amount}).`);
+    }
+    const before = { ...existing };
+    const balanceAfter = Math.round(((existing.balanceBefore ?? 0) + (existing.type === "entrada" ? input.newAmount : -input.newAmount)) * 100) / 100;
+    const updated: CashMovement = { ...existing, amount: input.newAmount, balanceAfter };
+    this.cashMovements = this.cashMovements.map((m) => (m.id === input.id ? updated : m));
+    this.appendAudit("reduce_amount", "cash_movement", updated.id, before, updated);
+    return { ...updated };
   }
 
   async linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement> {
@@ -991,6 +1020,84 @@ export class StaticFinanceRepository implements FinanceRepository {
     };
     this.accountingPeriods = this.accountingPeriods.map((p) => (p.id === existing.id ? updated : p));
     this.appendAudit("reopen", "accounting_period", updated.id, before, updated);
+
+    const officialSnapshot = this.dreSnapshots.find((s) => s.competenceMonth === input.competenceMonth && s.isOfficial);
+    if (officialSnapshot) {
+      const beforeSnapshot = { ...officialSnapshot };
+      const supersededSnapshot: DreSnapshot = { ...officialSnapshot, isOfficial: false, supersededAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      this.dreSnapshots = this.dreSnapshots.map((s) => (s.id === officialSnapshot.id ? supersededSnapshot : s));
+      this.appendAudit("reopen", "dre_snapshot", officialSnapshot.id, beforeSnapshot, supersededSnapshot);
+    }
+
     return { ...updated };
+  }
+
+  async listDreSnapshots(competenceMonth: string): Promise<DreSnapshot[]> {
+    return this.dreSnapshots
+      .filter((s) => s.competenceMonth === competenceMonth)
+      .sort((a, b) => b.version - a.version)
+      .map((s) => ({ ...s, reportPayload: JSON.parse(JSON.stringify(s.reportPayload)) }));
+  }
+
+  async getOfficialDreSnapshot(competenceMonth: string): Promise<DreSnapshot | null> {
+    const snapshot = this.dreSnapshots.find((s) => s.competenceMonth === competenceMonth && s.isOfficial);
+    return snapshot ? { ...snapshot, reportPayload: JSON.parse(JSON.stringify(snapshot.reportPayload)) } : null;
+  }
+
+  async persistDreSnapshotAndClosePeriod(input: PersistDreSnapshotInput): Promise<{ accountingPeriod: AccountingPeriod; snapshot: DreSnapshot }> {
+    if (input.previousOfficialSnapshotId) {
+      this.dreSnapshots = this.dreSnapshots.map((s) =>
+        s.id === input.previousOfficialSnapshotId ? { ...s, isOfficial: false, supersededAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : s,
+      );
+    }
+
+    const existingPeriod = this.accountingPeriods.find((p) => p.competenceMonth === input.closeAccountingPeriodInput.competenceMonth);
+    const periodBefore = existingPeriod ? { ...existingPeriod } : null;
+    const period: AccountingPeriod = {
+      id: existingPeriod?.id ?? generateId("competencia"),
+      competenceMonth: input.closeAccountingPeriodInput.competenceMonth,
+      status: "fechado",
+      closedBy: input.closeAccountingPeriodInput.closedBy,
+      closedAt: new Date().toISOString(),
+      reopenedBy: existingPeriod?.reopenedBy ?? null,
+      reopenedAt: existingPeriod?.reopenedAt ?? null,
+      reopenJustification: existingPeriod?.reopenJustification ?? null,
+      notes: input.closeAccountingPeriodInput.notes ?? null,
+    };
+    if (existingPeriod) {
+      this.accountingPeriods = this.accountingPeriods.map((p) => (p.id === existingPeriod.id ? period : p));
+    } else {
+      this.accountingPeriods.push(period);
+    }
+    this.appendAudit("close", "accounting_period", period.id, periodBefore, period);
+
+    const now = new Date().toISOString();
+    const snapshot: DreSnapshot = {
+      id: generateId("dre-snapshot"),
+      competenceMonth: input.competenceMonth,
+      version: input.version,
+      isOfficial: true,
+      regime: input.regime,
+      computedAt: input.computedAt,
+      computedBy: input.computedBy,
+      closedAt: now,
+      closedBy: input.closeAccountingPeriodInput.closedBy,
+      supersededAt: null,
+      supersededByVersionId: null,
+      methodologyVersion: input.methodologyVersion,
+      reportPayload: input.reportPayload,
+      payloadHash: input.payloadHash,
+      hashAlgorithm: input.hashAlgorithm,
+      pendingCount: input.pendingCount,
+      lineItemCount: input.lineItemCount,
+      accountingPeriodId: period.id,
+      notes: input.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.dreSnapshots.push(snapshot);
+    this.appendAudit("create", "dre_snapshot", snapshot.id, null, snapshot);
+
+    return { accountingPeriod: { ...period }, snapshot: { ...snapshot, reportPayload: JSON.parse(JSON.stringify(snapshot.reportPayload)) } };
   }
 }

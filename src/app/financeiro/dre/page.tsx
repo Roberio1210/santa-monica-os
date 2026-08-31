@@ -9,7 +9,10 @@ import {
   fetchDreSourceData,
   computeAccountingAlerts,
   computeDreCoverage,
+  lastDayOfMonth,
 } from "@/lib/finance/service";
+import { getOfficialClosedDre } from "@/lib/finance/dreSnapshot";
+import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { fetchRevenueReconciliation } from "@/lib/finance/revenueReconciliation";
 import { getStorageMode } from "@/lib/storage/mode";
 import type { DreCostCenterGroup, DreRegime } from "@/lib/finance/types";
@@ -36,6 +39,8 @@ interface DreSearchParams {
   from?: string;
   to?: string;
   costCenterGroup?: string;
+  /** Fase C7 — força a visão ao vivo mesmo quando a competência está oficialmente fechada. Nunca automático: só quando o usuário pede explicitamente ("Ver dados atuais recalculados"). */
+  live?: string;
 }
 
 function monthsFromJanuaryToCurrent(): string[] {
@@ -73,10 +78,26 @@ export default async function DrePage({ searchParams }: { searchParams: Promise<
   const faturamentoOperacional =
     comparison.current.receitaBruta !== null ? Math.round((comparison.current.receitaBrutaEstetica.amount + comparison.current.receitaBrutaEstacionamento.amount) * 100) / 100 : null;
   const [pendencyOverview, revenueReconciliation] = await Promise.all([fetchDrePendencyOverview(comparison.current), fetchRevenueReconciliation(from, to, faturamentoOperacional)]);
-  const coverage = computeDreCoverage(comparison.current);
   const isPartialPeriod = to > today;
-  const alerts = computeAccountingAlerts(comparison.current, comparison.previous, byCostCenter, coverage, isPartialPeriod);
   const storageMode = getStorageMode();
+
+  /**
+   * Fase C7 — período fechado mostra o snapshot oficial, nunca recalcula silenciosamente. Só
+   * tenta o snapshot quando a janela vista é exatamente um mês calendário inteiro (a competência
+   * de um fechamento é sempre "YYYY-MM" completo) e o usuário não pediu explicitamente o cálculo
+   * ao vivo via `?live=1`. Se o período está "fechado" mas nenhum snapshot existe (estado
+   * inconsistente de um fechamento legado, anterior a esta missão), cai para o comportamento ao
+   * vivo em vez de travar a página.
+   */
+  const competenceMonth = from.slice(0, 7);
+  const isExactMonthWindow = from === `${competenceMonth}-01` && to === lastDayOfMonth(competenceMonth);
+  const wantsLive = params.live === "1";
+  const accountingPeriod = isExactMonthWindow ? await getFinanceRepository().getAccountingPeriod(competenceMonth) : null;
+  const officialSnapshot = accountingPeriod?.status === "fechado" && !wantsLive ? await getOfficialClosedDre(competenceMonth) : null;
+
+  const displayedReport = officialSnapshot?.reportPayload ?? comparison.current;
+  const coverage = computeDreCoverage(displayedReport);
+  const alerts = computeAccountingAlerts(displayedReport, comparison.previous, byCostCenter, coverage, officialSnapshot ? false : isPartialPeriod);
 
   return (
     <div className="space-y-6">
@@ -86,8 +107,31 @@ export default async function DrePage({ searchParams }: { searchParams: Promise<
         actions={<StorageModeBadge mode={storageMode} />}
       />
 
+      {officialSnapshot ? (
+        <div className="rounded-lg border border-emerald-600/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+          <p className="font-medium">
+            Fechamento oficial — versão {officialSnapshot.version} de {competenceMonth}
+          </p>
+          <p className="mt-1 text-emerald-800/80 dark:text-emerald-300/80">
+            Fechado em {new Date(officialSnapshot.closedAt).toLocaleString("pt-BR")} por {officialSnapshot.closedBy}. Estes números estão congelados e não mudam mesmo que fontes como
+            JumpPark/Stone sincronizem dados novos para este período depois do fechamento.{" "}
+            <a className="underline" href={`/financeiro/dre?regime=${regime}&from=${from}&to=${to}&costCenterGroup=${costCenterGroup}&live=1`}>
+              Ver dados atuais recalculados
+            </a>
+            .
+          </p>
+        </div>
+      ) : accountingPeriod?.status === "fechado" ? (
+        <div className="rounded-lg border border-amber-600/30 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          Esta competência está marcada como fechada, mas não existe um fechamento oficial (snapshot) registrado para ela — provavelmente um fechamento anterior à Fase C7. Mostrando dados em
+          tempo real.
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">Dados em tempo real — esta competência ainda não foi fechada.</div>
+      )}
+
       <DreView
-        report={comparison.current}
+        report={displayedReport}
         previous={comparison.previous}
         byCostCenter={byCostCenter}
         alerts={alerts}

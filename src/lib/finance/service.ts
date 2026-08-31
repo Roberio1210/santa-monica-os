@@ -1092,7 +1092,8 @@ export async function fetchDreComparison(
   };
 }
 
-function lastDayOfMonth(month: string): string {
+/** "YYYY-MM" → último dia real do mês ("YYYY-MM-DD") — exportado para reuso em `dreSnapshot.ts` (Fase C7), nunca duplicado. */
+export function lastDayOfMonth(month: string): string {
   const [year, monthNumber] = month.split("-").map(Number);
   return new Date(year, monthNumber, 0).toISOString().slice(0, 10);
 }

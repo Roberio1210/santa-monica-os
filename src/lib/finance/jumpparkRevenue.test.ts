@@ -21,10 +21,11 @@ function itemsMap(entries: [string, RawJumpParkOrderItemRow[]][]): Map<string, R
 }
 
 /**
- * Missão Financeiro V3.1, ampliada na V4.2 — parte pura da derivação de receita JumpPark: exclui a
- * receita já reconhecida via o fechamento consolidado de parceiro corporativo (accounts_receivable)
- * e desconto, sempre travando em zero. Duas fontes de exclusão: vínculo formal (`partnerId`, ordem
- * inteira) e fallback textual legado ("iesa", só item a item, só para ordens sem vínculo ainda).
+ * Missão Financeiro V3.1, ampliada na V4.2 e na V7/Fase C3 — parte pura da derivação de receita
+ * JumpPark: exclui a receita já reconhecida via o fechamento consolidado de parceiro corporativo
+ * (accounts_receivable) e desconto, sempre travando em zero. Duas fontes de exclusão, ambas sempre
+ * pela ORDEM INTEIRA (nunca só o item que bateu): vínculo formal (`partnerId`) e fallback textual
+ * legado ("iesa" no client_name OU em qualquer item, só para ordens sem vínculo ainda).
  */
 describe("mapOrdersToRevenueCandidates", () => {
   it("mapeia parkingAmount/servicesAmount sem alteração quando não há parceiro nem desconto", () => {
@@ -54,14 +55,21 @@ describe("mapOrdersToRevenueCandidates", () => {
     expect(candidate.servicesAmount).toBe(0);
   });
 
-  it("fallback textual legado: ordem mista (parte iesa + parte não-iesa) só abate a parte iesa, mantendo o resto como receita real — comportamento histórico preservado", () => {
+  it("fallback textual legado: ordem mista (parte iesa + parte não-iesa) exclui a ordem INTEIRA, não só o item que bateu — Missão V7/Fase C3, mesma regra já aplicada a partnerId (achado real de agosto/2026: item 'Polimento Peça - Nissan' na mesma ordem de uma 'Lavação Parceria IESA' ficava de fora)", () => {
     const order = makeOrder({ id: "order-mista", servicesAmount: "150" });
     const items = itemsMap([["order-mista", [{ serviceOrderId: "order-mista", description: "Lavação Parceria IESA - Nissan", amount: "70" }]]]);
     const [candidate] = mapOrdersToRevenueCandidates([order], items);
-    expect(candidate.servicesAmount).toBe(80);
+    expect(candidate.servicesAmount).toBe(0);
   });
 
-  it("fallback textual legado NUNCA enxerga item 'Polimento Peça - Nissan' (não contém 'iesa') — é exatamente o gap que o vínculo formal corrige", () => {
+  it("fallback textual legado reconhece a ordem pelo clientName mesmo quando NENHUM item contém 'iesa' — Missão V7/Fase C3 (achado real de agosto/2026: client_name 'grupo Iesa', único item 'Polimento Peça - Nissan')", () => {
+    const order = makeOrder({ id: "order-cliente-iesa", servicesAmount: "100", clientName: "grupo Iesa" });
+    const items = itemsMap([["order-cliente-iesa", [{ serviceOrderId: "order-cliente-iesa", description: "Polimento Peça - Nissan", amount: "100" }]]]);
+    const [candidate] = mapOrdersToRevenueCandidates([order], items);
+    expect(candidate.servicesAmount).toBe(0);
+  });
+
+  it("fallback textual legado NUNCA enxerga 'Polimento Peça - Nissan' sozinho quando nem o item nem o clientName contêm 'iesa' — é exatamente o gap que o vínculo formal (partnerId) corrige", () => {
     const order = makeOrder({ id: "order-polimento-nissan", servicesAmount: "100" });
     const items = itemsMap([["order-polimento-nissan", [{ serviceOrderId: "order-polimento-nissan", description: "Polimento Peça - Nissan", amount: "100" }]]]);
     const [candidate] = mapOrdersToRevenueCandidates([order], items);

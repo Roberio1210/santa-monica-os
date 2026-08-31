@@ -17,16 +17,36 @@ describe("resolveOrderCorporateExclusionAmount", () => {
     expect(amount).toBe(0);
   });
 
-  it("ordem sem vínculo cai no fallback textual legado ('iesa'), item a item", () => {
+  it("ordem sem vínculo cai no fallback textual legado ('iesa') e exclui a ordem INTEIRA, não só o item que bateu — mesma regra do vínculo formal (achado real: auditoria de agosto/2026 encontrou uma ordem IESA com item 'Polimento Peça - Nissan' + item 'Lavação Parceria IESA', e o item do polimento ficava de fora)", () => {
     const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 150, discountAmount: null, partnerId: null }, [
       { description: "Lavação Parceria IESA - Nissan", amount: 70 },
-      { description: "Lavação Silver - SUV", amount: 80 },
+      { description: "Polimento Peça - Nissan", amount: 80 },
     ]);
+    expect(amount).toBe(150);
+  });
+
+  it("fallback legado reconhece a ordem pelo client_name mesmo quando NENHUM item contém 'iesa' (achado real: ordem de agosto/2026, client_name 'grupo Iesa', único item 'Polimento Peça - Nissan')", () => {
+    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 100, discountAmount: null, partnerId: null, clientName: "grupo Iesa" }, [{ description: "Polimento Peça - Nissan", amount: 100 }]);
+    expect(amount).toBe(100);
+  });
+
+  it("fallback legado NUNCA casa 'nissan' sozinho — nem no item nem no client_name — só 'iesa' (nunca ampliado, preserva histórico)", () => {
+    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 100, discountAmount: null, partnerId: null, clientName: "João Nissan Ltda" }, [{ description: "Polimento Peça - Nissan", amount: 100 }]);
+    expect(amount).toBe(0);
+  });
+
+  it("fallback legado é indiferente a caixa e espaços extras no client_name", () => {
+    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 70, discountAmount: null, partnerId: null, clientName: "  IESA  " }, []);
     expect(amount).toBe(70);
   });
 
-  it("fallback legado NUNCA casa 'nissan' sozinho — só 'iesa' (nunca ampliado, preserva histórico)", () => {
-    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 100, discountAmount: null, partnerId: null }, [{ description: "Polimento Peça - Nissan", amount: 100 }]);
+  it("ordem já vinculada por partnerId nunca soma duas vezes mesmo quando client_name/itens TAMBÉM bateriam no fallback textual — o vínculo formal decide sozinho", () => {
+    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 70, discountAmount: null, partnerId: "partner-iesa", clientName: "Grupo Iesa" }, [{ description: "Lavação Parceria IESA - Nissan", amount: 70 }]);
+    expect(amount).toBe(70); // não 140 — uma única exclusão, nunca dobrada
+  });
+
+  it("ordem sem client_name (null/ausente) e sem item batendo continua sem exclusão", () => {
+    const amount = resolveOrderCorporateExclusionAmount({ servicesAmount: 100, discountAmount: null, partnerId: null }, [{ description: null, amount: 100 }]);
     expect(amount).toBe(0);
   });
 });

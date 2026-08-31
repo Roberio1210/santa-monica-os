@@ -9,10 +9,18 @@
  * seus itens pertencem à receita daquele parceiro, independente do nome de cada serviço — o texto
  * do item nunca decide a classificação sozinho depois que o vínculo existe.
  *
- * Compatibilidade histórica: ordens sem vínculo formal (a imensa maioria de antes de julho/2026,
- * quando `client_name` quase nunca vinha preenchido) continuam reconhecidas pelo mecanismo textual
- * antigo — `LEGACY_IESA_FALLBACK_KEYWORD` reproduz EXATAMENTE o comportamento anterior a esta
- * missão (nunca ampliado para não alterar meses já fechados/auditados como março-junho/2026).
+ * Compatibilidade histórica: ordens sem vínculo formal continuam reconhecidas pelo mecanismo
+ * textual antigo, através da mesma palavra-chave única (`LEGACY_IESA_FALLBACK_KEYWORD`, nunca
+ * ampliada com outra palavra) — mas a partir da Missão V7/Fase C3 (auditoria forense de
+ * agosto/2026) esse fallback foi corrigido para não repetir, silenciosamente, o mesmo defeito que a
+ * V4.2 já tinha corrigido no vínculo formal: agora ele também olha `client_name` (não só o texto de
+ * um item) e, uma vez que a ordem bate, exclui a ordem INTEIRA (não só o item que bateu) — ver
+ * `legacyKeywordMatches`. Como é a MESMA regra e a MESMA palavra-chave já usadas para estabelecer o
+ * vínculo formal (`orderMatchesPartnerKeywords`), isto não é uma ampliação da regra de negócio, é a
+ * correção de uma implementação que a aplicava parcialmente. Efeito colateral conhecido: qualquer
+ * mês anterior a agosto/2026 que ainda dependa deste fallback (nunca recebeu `refreshJumpParkPartnerLinks`)
+ * pode ter sua receita de Estética recalculada por esta correção — nenhum mês já fechado foi
+ * reprocessado/persistido por esta missão; só o cálculo ao vivo da DRE muda.
  */
 
 function round2(value: number): number {
@@ -26,6 +34,8 @@ export interface CorporatePartnerOrderInput {
   servicesAmount: number;
   discountAmount: number | null;
   partnerId: string | null;
+  /** Missão Financeiro V7 (Fase C3) — necessário para o fallback textual legado também reconhecer o parceiro pelo nome do cliente, não só pelo texto de um item (ver `legacyKeywordMatches`). Opcional para não quebrar chamadores que nunca dependeram disso (ex.: `resolveOrderPartnerAmount`). */
+  clientName?: string | null;
 }
 
 export interface CorporatePartnerOrderItemInput {
@@ -43,6 +53,29 @@ function legacyKeywordAmount(items: CorporatePartnerOrderItemInput[], legacyFall
 }
 
 /**
+ * Missão Financeiro V7 (Fase C3, auditoria forense de agosto/2026) — causa raiz real do "bug de
+ * exclusão IESA": a auditoria encontrou 8 ordens de agosto genuinamente da parceria IESA, mas o
+ * fallback textual antigo só reconhecia 7. As duas falhas concretas:
+ * 1) Uma ordem tinha DOIS itens ("Polimento Peça - Nissan" + "Lavação Parceria IESA - Nissan") — o
+ *    texto antigo só via o item cujo nome batia "iesa", deixando o polimento como receita genérica
+ *    (o MESMO defeito que a Missão V4.2 já tinha corrigido para ordens com `partner_id`, mas nunca
+ *    propagado ao fallback usado quando a ordem ainda não tem vínculo formal).
+ * 2) Uma ordem tinha `client_name = "grupo Iesa"` mas seu único item era "Polimento Peça - Nissan"
+ *    (sem a palavra "iesa" em lugar nenhum do texto do item) — invisível a um filtro que só olha
+ *    itens, mesmo havendo um sinal claro e determinístico no nome do cliente.
+ * Esta função usa exatamente o mesmo sinal que `orderMatchesPartnerKeywords` já usa para ESTABELECER
+ * o vínculo formal (`client_name` OU a descrição de QUALQUER item) — nunca uma palavra-chave nova,
+ * nunca o valor da ordem, nunca um cliente específico hardcoded. Uma vez que o sinal aparece em
+ * qualquer lugar da ordem, a ordem INTEIRA é tratada como do parceiro (mesma regra já aplicada a
+ * `partnerId`), não apenas o item cujo texto bateu.
+ */
+function legacyKeywordMatches(order: CorporatePartnerOrderInput, items: CorporatePartnerOrderItemInput[], legacyFallbackKeyword: string): boolean {
+  const keyword = legacyFallbackKeyword.toLowerCase();
+  if (order.clientName?.toLowerCase().includes(keyword)) return true;
+  return items.some((it) => it.description?.toLowerCase().includes(keyword));
+}
+
+/**
  * Quanto desta ordem deve ser EXCLUÍDO da receita genérica (Estética Automotiva/Estacionamento)
  * porque pertence a algum parceiro corporativo — usado por `jumpparkRevenue.ts` para nunca contar
  * duas vezes o que já é reconhecido via o fechamento consolidado (`accounts_receivable`) do
@@ -50,7 +83,8 @@ function legacyKeywordAmount(items: CorporatePartnerOrderItemInput[], legacyFall
  */
 export function resolveOrderCorporateExclusionAmount(order: CorporatePartnerOrderInput, items: CorporatePartnerOrderItemInput[]): number {
   if (order.partnerId !== null) return netServicesAmount(order);
-  return legacyKeywordAmount(items, LEGACY_IESA_FALLBACK_KEYWORD);
+  if (legacyKeywordMatches(order, items, LEGACY_IESA_FALLBACK_KEYWORD)) return netServicesAmount(order);
+  return 0;
 }
 
 /**

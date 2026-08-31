@@ -19,6 +19,7 @@ import type {
   CreateContractInput,
   CreatePartnerInput,
   CreateRecurringBillTemplateInput,
+  DreSnapshot,
   FinancialAccountBalance,
   FinancialCategory,
   FinancialCategoryType,
@@ -26,7 +27,9 @@ import type {
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
+  PersistDreSnapshotInput,
   ReceivableSettlement,
+  ReduceCashMovementAmountInput,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
@@ -36,6 +39,7 @@ import type {
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
+  UpdateCashMovementCompetenceInput,
 } from "@/lib/finance/types";
 
 /**
@@ -89,6 +93,10 @@ export interface FinanceRepository {
   // --- Fluxo de Caixa ---
   /** Lançamento manual (entrada/saída/ajuste/estorno/taxa/tarifa/juros) — gera balanceBefore/After. */
   createCashMovement(input: CreateCashMovementInput): Promise<CashMovement>;
+  /** Fechamento C8 — corrige a competência de um cash_movement já existente. Nunca altera valor/tipo/descrição. */
+  updateCashMovementCompetence(input: UpdateCashMovementCompetenceInput): Promise<CashMovement>;
+  /** Fechamento C8 — reduz o valor de um cash_movement já existente (decomposição de um Pix com duas naturezas). */
+  reduceCashMovementAmount(input: ReduceCashMovementAmountInput): Promise<CashMovement>;
   /**
    * Vincula um `cash_movement` JÁ EXISTENTE a uma `accounts_receivable` — para regularizar um
    * recebimento real que foi lançado antes de sua conta a receber existir (ex.: Missão Financeiro
@@ -140,5 +148,16 @@ export interface FinanceRepository {
   listAccountingPeriods(): Promise<AccountingPeriod[]>;
   getAccountingPeriod(competenceMonth: string): Promise<AccountingPeriod | null>;
   closeAccountingPeriod(input: CloseAccountingPeriodInput): Promise<AccountingPeriod>;
+  /** Reabrir também desmarca (nunca apaga) a versão oficial vigente de `dre_snapshots` daquela competência, se existir. */
   reopenAccountingPeriod(input: ReopenAccountingPeriodInput): Promise<AccountingPeriod>;
+  /** Todas as versões (histórico completo) de uma competência, mais recente primeiro. */
+  listDreSnapshots(competenceMonth: string): Promise<DreSnapshot[]>;
+  /** A versão vigente (`isOfficial=true`) de uma competência, ou null se nunca foi fechada. */
+  getOfficialDreSnapshot(competenceMonth: string): Promise<DreSnapshot | null>;
+  /**
+   * Fase C7 — escreve a nova versão do snapshot, desmarca a anterior e fecha/atualiza o
+   * accounting_period numa ÚNICA transação (rollback total se qualquer parte falhar). Nunca
+   * calcula o DreReport sozinho — recebe o payload já calculado e validado por `dreSnapshot.ts`.
+   */
+  persistDreSnapshotAndClosePeriod(input: PersistDreSnapshotInput): Promise<{ accountingPeriod: AccountingPeriod; snapshot: DreSnapshot }>;
 }

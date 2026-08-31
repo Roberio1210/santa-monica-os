@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb, type DbOrTx } from "@/db/client";
 import {
   accountingPeriods as accountingPeriodsTable,
@@ -17,6 +17,7 @@ import {
   contractValuePeriods as contractValuePeriodsTable,
   contracts as contractsTable,
   customers as customersTable,
+  dreSnapshots as dreSnapshotsTable,
   financialClassifications as financialClassificationsTable,
   financialAccounts as financialAccountsTable,
   partners as partnersTable,
@@ -59,6 +60,9 @@ import type {
   CreatePartnerInput,
   CreateRecurringBillTemplateInput,
   DreLine,
+  DreRegime,
+  DreReport,
+  DreSnapshot,
   FinancePaymentMethod,
   FinancialAccountBalance,
   FinancialAccountType,
@@ -69,7 +73,9 @@ import type {
   InformAccountBalanceInput,
   Partner,
   PayableSettlement,
+  PersistDreSnapshotInput,
   ReceivableSettlement,
+  ReduceCashMovementAmountInput,
   RecordAccountTransferInput,
   RecordPaymentInput,
   RecordPayablePaymentInput,
@@ -79,6 +85,7 @@ import type {
   Supplier,
   UpdateAccountsPayableInput,
   UpdateAccountsReceivableInput,
+  UpdateCashMovementCompetenceInput,
 } from "@/lib/finance/types";
 import {
   computeAccountBalance,
@@ -1081,6 +1088,78 @@ export class PostgresFinanceRepository implements FinanceRepository {
     });
   }
 
+  /**
+   * Fechamento C8 (agosto/2026) — corrige a competência de um `cash_movement` já existente quando a
+   * auditoria confirma que a data do Pix diverge da competência econômica real (ex.: comissão de
+   * julho paga em agosto). Lacuna real do repositório: não havia nenhum mecanismo de update para
+   * cash_movements antes desta correção — só create. Nunca altera valor/tipo/descrição, só
+   * competenceDate, e sempre grava audit_log com o estado antes/depois.
+   */
+  async updateCashMovementCompetence(input: UpdateCashMovementCompetenceInput): Promise<CashMovement> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(cashMovementsTable).where(eq(cashMovementsTable.id, input.id)).limit(1);
+      if (!existing) throw new Error(`Movimento de caixa não encontrado: ${input.id}`);
+
+      const [row] = await tx
+        .update(cashMovementsTable)
+        .set({ competenceDate: input.competenceDate, updatedAt: new Date() })
+        .where(eq(cashMovementsTable.id, input.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "update_competence",
+        entityType: "cash_movement",
+        entityId: row.id,
+        beforeState: existing,
+        afterState: row,
+        source: "manual",
+        notes: input.reason,
+      });
+
+      return this.toCashMovement(row, tx);
+    });
+  }
+
+  /**
+   * Fechamento C8 — reduz o valor de um `cash_movement` já existente quando a auditoria confirma
+   * que um único Pix real continha duas naturezas econômicas diferentes (ex.: R$1.000,00 = R$700,00
+   * semanal + R$300,00 meta) e a parte excedente precisa virar um lançamento próprio, com sua
+   * própria competência. NUNCA usado para alterar um valor por engano — só para decompor um valor já
+   * comprovado, sempre com audit_log completo do valor antes/depois.
+   */
+  async reduceCashMovementAmount(input: ReduceCashMovementAmountInput): Promise<CashMovement> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(cashMovementsTable).where(eq(cashMovementsTable.id, input.id)).limit(1);
+      if (!existing) throw new Error(`Movimento de caixa não encontrado: ${input.id}`);
+      if (input.newAmount <= 0 || input.newAmount >= Number(existing.amount)) {
+        throw new Error(`Novo valor (${input.newAmount}) precisa ser positivo e menor que o valor atual (${existing.amount}).`);
+      }
+
+      const oldAmount = Number(existing.amount);
+      const balanceAfter = Math.round((Number(existing.balanceBefore) + (existing.type === "entrada" ? input.newAmount : -input.newAmount)) * 100) / 100;
+
+      const [row] = await tx
+        .update(cashMovementsTable)
+        .set({ amount: String(input.newAmount), balanceAfter: String(balanceAfter), updatedAt: new Date() })
+        .where(eq(cashMovementsTable.id, input.id))
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "reduce_amount",
+        entityType: "cash_movement",
+        entityId: row.id,
+        beforeState: existing,
+        afterState: row,
+        source: "manual",
+        notes: `${input.reason} — valor original R$${oldAmount.toFixed(2)}, reduzido para R$${input.newAmount.toFixed(2)}.`,
+      });
+
+      return this.toCashMovement(row, tx);
+    });
+  }
+
   async linkCashMovementToReceivable(cashMovementId: string, accountsReceivableId: string): Promise<CashMovement> {
     const db = this.db();
     return db.transaction(async (tx) => {
@@ -1992,7 +2071,150 @@ export class PostgresFinanceRepository implements FinanceRepository {
         source: "manual",
       });
 
+      // Fase C7 — reabrir NUNCA apaga/edita o snapshot: só desmarca a versão vigente como não-oficial.
+      // O reportPayload/hash da versão antiga continuam exatamente como foram fechados.
+      const [officialSnapshot] = await tx
+        .select()
+        .from(dreSnapshotsTable)
+        .where(and(eq(dreSnapshotsTable.competenceMonth, input.competenceMonth), eq(dreSnapshotsTable.isOfficial, true)))
+        .limit(1);
+      if (officialSnapshot) {
+        const supersededSnapshot = await tx
+          .update(dreSnapshotsTable)
+          .set({ isOfficial: false, supersededAt: new Date(), updatedAt: new Date() })
+          .where(eq(dreSnapshotsTable.id, officialSnapshot.id))
+          .returning();
+        await tx.insert(auditLogsTable).values({
+          action: "reopen",
+          entityType: "dre_snapshot",
+          entityId: officialSnapshot.id,
+          beforeState: officialSnapshot,
+          afterState: supersededSnapshot[0],
+          source: "manual",
+        });
+      }
+
       return this.toAccountingPeriod(row);
+    });
+  }
+
+  private toDreSnapshot(row: typeof dreSnapshotsTable.$inferSelect): DreSnapshot {
+    return {
+      id: row.id,
+      competenceMonth: row.competenceMonth,
+      version: row.version,
+      isOfficial: row.isOfficial,
+      regime: row.regime as DreRegime,
+      computedAt: row.computedAt.toISOString(),
+      computedBy: row.computedBy,
+      closedAt: row.closedAt.toISOString(),
+      closedBy: row.closedBy,
+      supersededAt: row.supersededAt ? row.supersededAt.toISOString() : null,
+      supersededByVersionId: row.supersededByVersionId,
+      methodologyVersion: row.methodologyVersion,
+      reportPayload: row.reportPayload as DreReport,
+      payloadHash: row.payloadHash,
+      hashAlgorithm: row.hashAlgorithm,
+      pendingCount: row.pendingCount,
+      lineItemCount: row.lineItemCount,
+      accountingPeriodId: row.accountingPeriodId,
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async listDreSnapshots(competenceMonth: string): Promise<DreSnapshot[]> {
+    const rows = await this.db().select().from(dreSnapshotsTable).where(eq(dreSnapshotsTable.competenceMonth, competenceMonth)).orderBy(desc(dreSnapshotsTable.version));
+    return rows.map((r) => this.toDreSnapshot(r));
+  }
+
+  async getOfficialDreSnapshot(competenceMonth: string): Promise<DreSnapshot | null> {
+    const rows = await this.db()
+      .select()
+      .from(dreSnapshotsTable)
+      .where(and(eq(dreSnapshotsTable.competenceMonth, competenceMonth), eq(dreSnapshotsTable.isOfficial, true)))
+      .limit(1);
+    return rows[0] ? this.toDreSnapshot(rows[0]) : null;
+  }
+
+  /**
+   * Fase C7 — único ponto de escrita real do fechamento. Tudo numa transação: se qualquer etapa
+   * falhar (inclusive a constraint única parcial `dre_snapshots_official_per_competence_idx`,
+   * segunda linha de defesa contra duas versões oficiais simultâneas), nada é persistido — nem o
+   * snapshot novo, nem a mudança em `accounting_periods`. A ordem importa: desmarcar a versão
+   * anterior ANTES de inserir a nova evita colidir com o índice único parcial (que permite no
+   * máximo uma linha `is_official=true` por competência).
+   */
+  async persistDreSnapshotAndClosePeriod(input: PersistDreSnapshotInput): Promise<{ accountingPeriod: AccountingPeriod; snapshot: DreSnapshot }> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      if (input.previousOfficialSnapshotId) {
+        await tx
+          .update(dreSnapshotsTable)
+          .set({ isOfficial: false, supersededAt: new Date(), updatedAt: new Date() })
+          .where(eq(dreSnapshotsTable.id, input.previousOfficialSnapshotId));
+      }
+
+      const [existingPeriod] = await tx
+        .select()
+        .from(accountingPeriodsTable)
+        .where(eq(accountingPeriodsTable.competenceMonth, input.closeAccountingPeriodInput.competenceMonth))
+        .limit(1);
+
+      const periodValues = {
+        competenceMonth: input.closeAccountingPeriodInput.competenceMonth,
+        status: "fechado" as const,
+        closedBy: input.closeAccountingPeriodInput.closedBy,
+        closedAt: new Date(),
+        source: "manual",
+        notes: input.closeAccountingPeriodInput.notes ?? null,
+        updatedAt: new Date(),
+      };
+      const periodRow = existingPeriod
+        ? (await tx.update(accountingPeriodsTable).set(periodValues).where(eq(accountingPeriodsTable.id, existingPeriod.id)).returning())[0]
+        : (await tx.insert(accountingPeriodsTable).values(periodValues).returning())[0];
+
+      const [snapshotRow] = await tx
+        .insert(dreSnapshotsTable)
+        .values({
+          competenceMonth: input.competenceMonth,
+          version: input.version,
+          isOfficial: true,
+          regime: input.regime,
+          computedAt: new Date(input.computedAt),
+          computedBy: input.computedBy,
+          closedAt: new Date(),
+          closedBy: input.closeAccountingPeriodInput.closedBy,
+          methodologyVersion: input.methodologyVersion,
+          reportPayload: input.reportPayload,
+          payloadHash: input.payloadHash,
+          hashAlgorithm: input.hashAlgorithm,
+          pendingCount: input.pendingCount,
+          lineItemCount: input.lineItemCount,
+          accountingPeriodId: periodRow.id,
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      await tx.insert(auditLogsTable).values({
+        action: "close",
+        entityType: "accounting_period",
+        entityId: periodRow.id,
+        beforeState: existingPeriod ?? null,
+        afterState: periodRow,
+        source: "manual",
+      });
+      await tx.insert(auditLogsTable).values({
+        action: "create",
+        entityType: "dre_snapshot",
+        entityId: snapshotRow.id,
+        beforeState: null,
+        afterState: snapshotRow,
+        source: "manual",
+      });
+
+      return { accountingPeriod: this.toAccountingPeriod(periodRow), snapshot: this.toDreSnapshot(snapshotRow) };
     });
   }
 }
