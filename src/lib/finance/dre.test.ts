@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDreReport, computeDreVariationPercent, resolveClassification, resolveTransferClassification } from "@/lib/finance/dre";
-import type { JumpParkRevenueCandidateInput, StoneFeeCandidateInput } from "@/lib/finance/dre";
+import type { HistoricalRevenueCandidateInput, JumpParkRevenueCandidateInput, StoneFeeCandidateInput } from "@/lib/finance/dre";
 import type { AccountsPayable, AccountsReceivable, CashMovement, ClassificationRule, FinancialClassification, Partner } from "@/lib/finance/types";
 
 function makeAR(overrides: Partial<AccountsReceivable>): AccountsReceivable {
@@ -1077,6 +1077,162 @@ describe("Receita JumpPark no regime gerencial — Missão V3.1", () => {
       rules: emptyRules,
       jumpParkOrders: [order],
     });
+    expect(caixa.receitaBruta).toBeNull();
+  });
+});
+
+function makeHistoricalRevenue(overrides: Partial<HistoricalRevenueCandidateInput>): HistoricalRevenueCandidateInput {
+  return { externalId: "hist-1", date: "2026-01-10", description: "Lavação (planilha histórica)", category: "Lavação", amount: 100, ...overrides };
+}
+
+type GerencialOverrides = Pick<Parameters<typeof computeDreReport>[0], "competenceFrom" | "competenceTo"> & Partial<Parameters<typeof computeDreReport>[0]>;
+
+function baseGerencialInput(overrides: GerencialOverrides): Parameters<typeof computeDreReport>[0] {
+  return {
+    regime: "gerencial" as const,
+    costCenterGroup: "consolidado" as const,
+    accountsPayable: [],
+    accountsReceivable: [],
+    cashMovements: [],
+    classifications: emptyClassifications,
+    rules: emptyRules,
+    ...overrides,
+  };
+}
+
+describe("Receita histórica (planilha pré-JumpPark) — Missão UX/Navegação 2", () => {
+  it("1) janeiro/2026 usa fonte histórica — receita reconhecida a partir da planilha, nunca R$0/null", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-01-01",
+        competenceTo: "2026-01-31",
+        historicalRevenueRecords: [
+          makeHistoricalRevenue({ externalId: "hist-lav-jan", date: "2026-01-10", category: "Lavação", amount: 150 }),
+          makeHistoricalRevenue({ externalId: "hist-est-jan", date: "2026-01-15", category: "Estacionamento", amount: 300 }),
+        ],
+      }),
+    );
+    expect(report.receitaBruta).toBe(450);
+    expect(report.receitaBrutaEstetica.amount).toBe(150);
+    expect(report.receitaBrutaEstacionamento.amount).toBe(300);
+    expect(report.naoClassificados).toHaveLength(0);
+  });
+
+  it("2) fevereiro/2026 usa fonte histórica", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-02-01",
+        competenceTo: "2026-02-28",
+        historicalRevenueRecords: [makeHistoricalRevenue({ externalId: "hist-fev", date: "2026-02-14", category: "Lavação", amount: 220 })],
+      }),
+    );
+    expect(report.receitaBruta).toBe(220);
+  });
+
+  it("3) março/2026 usa fonte histórica — E uma ordem JumpPark real dessa mesma competência (uso paralelo/teste antes do go-live) é IGNORADA, nunca somada", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-03-01",
+        competenceTo: "2026-03-31",
+        historicalRevenueRecords: [makeHistoricalRevenue({ externalId: "hist-mar", date: "2026-03-05", category: "Lavação", amount: 500 })],
+        // ordem JumpPark real de março — existe fisicamente no banco (uso paralelo/teste), mas março NÃO é o período oficial do JumpPark
+        jumpParkOrders: [makeJumpParkOrder({ externalId: "jp-mar-parallel", orderDate: "2026-03-20", servicesAmount: 9999 })],
+      }),
+    );
+    expect(report.receitaBruta).toBe(500); // nunca 10499 — a ordem JumpPark de março é descartada
+  });
+
+  it("4) abril/2026 usa fonte histórica", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-04-01",
+        competenceTo: "2026-04-30",
+        historicalRevenueRecords: [makeHistoricalRevenue({ externalId: "hist-abr", date: "2026-04-28", category: "Estacionamento", amount: 380 })],
+      }),
+    );
+    expect(report.receitaBruta).toBe(380);
+  });
+
+  it("5) período posterior (maio/2026, a partir de DATA_CORTE_JUMPPARK) usa o fluxo normal (JumpPark) — um registro histórico da mesma data é IGNORADO", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-05-01",
+        competenceTo: "2026-05-31",
+        jumpParkOrders: [makeJumpParkOrder({ externalId: "jp-mai", orderDate: "2026-05-01", servicesAmount: 700 })],
+        // registro histórico "vazado" para maio — não deveria existir na prática (fetchHistoricalRevenueCandidates já filtra), mas mesmo que existisse, é descartado aqui
+        historicalRevenueRecords: [makeHistoricalRevenue({ externalId: "hist-mai-vazado", date: "2026-05-01", category: "Lavação", amount: 12345 })],
+      }),
+    );
+    expect(report.receitaBruta).toBe(700); // nunca 13045
+  });
+
+  it("7) prevenção de dupla contagem — a mesma data (04/2026, histórica) nunca soma as duas fontes quando ambas trazem dado para ela", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-04-01",
+        competenceTo: "2026-04-30",
+        historicalRevenueRecords: [makeHistoricalRevenue({ externalId: "hist-dup", date: "2026-04-10", category: "Lavação", amount: 200 })],
+        jumpParkOrders: [makeJumpParkOrder({ externalId: "jp-dup", orderDate: "2026-04-10", servicesAmount: 200 })],
+      }),
+    );
+    expect(report.receitaBruta).toBe(200); // só a fonte histórica conta em abril — o JumpPark da mesma data é descartado, nunca 400
+  });
+
+  it("8) ausência de fonte — competência sem nenhum registro em nenhuma fonte permanece null, nunca R$0", () => {
+    const report = computeDreReport(baseGerencialInput({ competenceFrom: "2026-01-01", competenceTo: "2026-01-31" }));
+    expect(report.receitaBruta).toBeNull();
+    expect(report.receitaBrutaIndisponivelMotivo).not.toBeNull();
+  });
+
+  it("10) intervalo cruzando fontes diferentes (15/04 a 15/05) soma histórica (até 30/04) + JumpPark (a partir de 01/05), sem lacuna nem duplicidade", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-04-15",
+        competenceTo: "2026-05-15",
+        historicalRevenueRecords: [
+          makeHistoricalRevenue({ externalId: "hist-cross-1", date: "2026-04-20", category: "Lavação", amount: 100 }), // dentro do intervalo
+          makeHistoricalRevenue({ externalId: "hist-cross-2", date: "2026-04-10", category: "Lavação", amount: 999 }), // fora do intervalo (antes de 15/04)
+        ],
+        jumpParkOrders: [
+          makeJumpParkOrder({ externalId: "jp-cross-1", orderDate: "2026-05-05", servicesAmount: 50 }), // dentro do intervalo
+          makeJumpParkOrder({ externalId: "jp-cross-2", orderDate: "2026-05-20", servicesAmount: 999 }), // fora do intervalo (depois de 15/05)
+        ],
+      }),
+    );
+    expect(report.receitaBruta).toBe(150); // 100 (histórico, dentro) + 50 (JumpPark, dentro) — nunca inclui os dois "999" fora do intervalo
+  });
+
+  it("11) fonte histórica tem granularidade real por registro (não mensal) — uma consulta parcial de janeiro (10/01→20/01) traz só os registros daquela janela, sem ratear nem incluir o mês inteiro", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-01-10",
+        competenceTo: "2026-01-20",
+        historicalRevenueRecords: [
+          makeHistoricalRevenue({ externalId: "hist-dentro", date: "2026-01-15", category: "Lavação", amount: 80 }),
+          makeHistoricalRevenue({ externalId: "hist-antes", date: "2026-01-05", category: "Lavação", amount: 500 }),
+          makeHistoricalRevenue({ externalId: "hist-depois", date: "2026-01-25", category: "Lavação", amount: 500 }),
+        ],
+      }),
+    );
+    expect(report.receitaBruta).toBe(80); // só o registro dentro da janela pedida — nunca o mês inteiro nem um valor rateado
+  });
+
+  it("receita histórica é sempre determinística — nunca cai em pendente/não classificado", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-01-01",
+        competenceTo: "2026-01-31",
+        historicalRevenueRecords: [makeHistoricalRevenue({})],
+      }),
+    );
+    expect(report.naoClassificados).toHaveLength(0);
+  });
+
+  it("regime de competência/caixa puros nunca leem historicalRevenueRecords — só o regime gerencial usa essa fonte (mesmo padrão do JumpPark/Stone)", () => {
+    const record = makeHistoricalRevenue({ amount: 999 });
+    const competencia = computeDreReport({ ...baseGerencialInput({ competenceFrom: "2026-01-01", competenceTo: "2026-01-31" }), regime: "competencia", historicalRevenueRecords: [record] });
+    expect(competencia.receitaBruta).toBeNull();
+    const caixa = computeDreReport({ ...baseGerencialInput({ competenceFrom: "2026-01-01", competenceTo: "2026-01-31" }), regime: "caixa", historicalRevenueRecords: [record] });
     expect(caixa.receitaBruta).toBeNull();
   });
 });

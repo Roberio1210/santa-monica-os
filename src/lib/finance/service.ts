@@ -4,7 +4,8 @@ import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/s
 import { computeDreReport, resolveClassification, resolveCashMovementClassification, resolveTransferClassification } from "@/lib/finance/dre";
 import { fetchJumpParkRevenueCandidates } from "@/lib/finance/jumpparkRevenue";
 import { fetchStoneFeeCandidatesForDre } from "@/lib/finance/stoneFeeCandidates";
-import type { JumpParkRevenueCandidateInput, ResolvedClassification, StoneFeeCandidateInput } from "@/lib/finance/dre";
+import { fetchHistoricalRevenueCandidates } from "@/lib/finance/historicalRevenue";
+import type { HistoricalRevenueCandidateInput, JumpParkRevenueCandidateInput, ResolvedClassification, StoneFeeCandidateInput } from "@/lib/finance/dre";
 import type {
   AccountingPeriod,
   AccountsPayableView,
@@ -1021,6 +1022,7 @@ export interface DreSourceData {
   partners: Partner[];
   jumpParkOrders: JumpParkRevenueCandidateInput[];
   stoneFeeDays: StoneFeeCandidateInput[];
+  historicalRevenueRecords: HistoricalRevenueCandidateInput[];
 }
 
 /**
@@ -1032,10 +1034,15 @@ export interface DreSourceData {
  *
  * Missão V3.1: inclui `jumpParkOrders`, a receita operacional real do JumpPark — ver
  * `fetchJumpParkRevenueCandidates` para a regra de exclusão de itens IESA/desconto/situação.
+ *
+ * Missão UX/Navegação 2: inclui `historicalRevenueRecords`, a receita real da planilha histórica
+ * pré-JumpPark (`fetchHistoricalRevenueCandidates`) — sem esta fonte, competências anteriores a
+ * `DATA_CORTE_JUMPPARK` (01/01–30/04/2026) nunca tinham receita reconhecida pela DRE, mesmo
+ * havendo receita real registrada.
  */
 export async function fetchDreSourceData(): Promise<DreSourceData> {
   const repo = getFinanceRepository();
-  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays] = await Promise.all([
+  const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays, historicalRevenueRecords] = await Promise.all([
     repo.listAccountsPayable(),
     repo.listAccountsReceivable(),
     repo.listCashMovements(),
@@ -1044,8 +1051,9 @@ export async function fetchDreSourceData(): Promise<DreSourceData> {
     repo.listPartners(),
     fetchJumpParkRevenueCandidates(),
     fetchStoneFeeCandidatesForDre(),
+    fetchHistoricalRevenueCandidates(),
   ]);
-  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays };
+  return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays, historicalRevenueRecords };
 }
 
 export async function fetchDreReport(

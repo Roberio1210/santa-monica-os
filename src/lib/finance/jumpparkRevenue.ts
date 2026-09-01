@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { jumpParkServiceOrders, jumpParkServiceOrderItems } from "@/db/schema/jumppark";
 import type { JumpParkRevenueCandidateInput } from "@/lib/finance/dre";
 import { LEGACY_IESA_FALLBACK_KEYWORD, resolveOrderCorporateExclusionAmount } from "@/lib/finance/corporatePartnerRevenue";
+import { DATA_CORTE_JUMPPARK } from "@/lib/config/historical-source-precedence";
 
 /** Único valor de `situation` observado nos dados reais (ver docs/jumppark-data-map.md) — qualquer outro valor futuro (ex.: cancelamento) fica de fora por padrão, nunca inventamos o que significaria. */
 const RECOGNIZED_SITUATION = "Pago";
@@ -76,10 +77,15 @@ export function mapOrdersToRevenueCandidates(orders: RawJumpParkOrderRow[], item
  *    próprio para estacionamento na fonte);
  * 3) ordens cujo `situation` não seja exatamente "Pago" (único valor confirmado nos dados reais).
  *
- * Busca TODAS as ordens (sem filtro de data) — mesmo padrão de `fetchDreSourceData` para
- * accounts_payable/receivable/cash_movements: o filtro de período acontece dentro de
- * `computeDreReport`, para permitir reaproveitar a mesma busca entre múltiplos relatórios
- * (comparação, por centro de custo, série mensal) sem repetir a consulta a cada período.
+ * Busca TODAS as ordens a partir de `DATA_CORTE_JUMPPARK` (sem filtro de data superior) — mesmo
+ * padrão de `fetchDreSourceData` para accounts_payable/receivable/cash_movements: o filtro de
+ * período dentro do intervalo consultado acontece em `computeDreReport`, para permitir reaproveitar
+ * a mesma busca entre múltiplos relatórios (comparação, por centro de custo, série mensal) sem
+ * repetir a consulta a cada período. Missão UX/Navegação 2 — o filtro inferior (`>= DATA_CORTE_
+ * JUMPPARK`) é NOVO: antes desta missão a busca trazia TODAS as ordens, inclusive de março/abril
+ * (uso paralelo/teste real antes do go-live), que a DRE reconhecia como receita mesmo o JumpPark
+ * não sendo a fonte oficial nesse período — corrigido aqui na origem, e reforçado de novo, de forma
+ * pura, em `buildJumpParkCandidates` (`dre.ts`), que nunca confia cegamente nesta busca.
  *
  * Nunca grava nada — recalculada a cada chamada, então uma ordem nova sincronizada pelo cron diário
  * do JumpPark aparece automaticamente na próxima consulta da DRE.
@@ -101,7 +107,7 @@ export async function fetchJumpParkRevenueCandidates(): Promise<JumpParkRevenueC
       partnerId: jumpParkServiceOrders.partnerId,
     })
     .from(jumpParkServiceOrders)
-    .where(eq(jumpParkServiceOrders.situation, RECOGNIZED_SITUATION));
+    .where(and(eq(jumpParkServiceOrders.situation, RECOGNIZED_SITUATION), gte(jumpParkServiceOrders.orderDate, DATA_CORTE_JUMPPARK)));
 
   if (orders.length === 0) return [];
 

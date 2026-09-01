@@ -717,11 +717,57 @@ export type ClassificationOrigin = "regra_automatica" | "herdada_categoria" | "h
  * Missão Financeiro V3.1 — "jumppark_service_order" identifica receita derivada diretamente de
  * `jumppark_service_orders` (nunca persistida em accounts_receivable), para o gestor distinguir na
  * DRE o que veio da operação real (JumpPark) do que veio de conciliação bancária/AR manual.
+ *
+ * Missão UX/Navegação 2 — "historical_spreadsheet_revenue" identifica receita derivada de
+ * `historical_spreadsheet_wash_records`/`historical_spreadsheet_parking_records` (planilha
+ * histórica pré-JumpPark, fonte oficial exclusiva antes de `DATA_CORTE_JUMPPARK` — ver
+ * `src/lib/config/historical-source-precedence.ts`). Mesmo tratamento de
+ * `jumppark_service_order`: determinística, nunca passa por classificação manual, porque não é um
+ * lançamento editável — é derivada 1:1 da planilha a cada cálculo.
  */
-export type ClassificationSourceKind = "accounts_payable" | "accounts_receivable" | "cash_movement" | "account_transfer" | "jumppark_service_order" | "stone_fee";
+export type ClassificationSourceKind =
+  | "accounts_payable"
+  | "accounts_receivable"
+  | "cash_movement"
+  | "account_transfer"
+  | "jumppark_service_order"
+  | "stone_fee"
+  | "historical_spreadsheet_revenue";
 
-/** Subconjunto de `ClassificationSourceKind` que pode ser classificado manualmente via `classifyEntity` — receita JumpPark é sempre determinística (ver `dre.ts`), nunca reclassificável manualmente. */
-export type ManuallyClassifiableSourceKind = Exclude<ClassificationSourceKind, "jumppark_service_order" | "stone_fee">;
+/** Subconjunto de `ClassificationSourceKind` que pode ser classificado manualmente via `classifyEntity` — receita JumpPark/planilha histórica é sempre determinística (ver `dre.ts`), nunca reclassificável manualmente. */
+export type ManuallyClassifiableSourceKind = Exclude<ClassificationSourceKind, "jumppark_service_order" | "stone_fee" | "historical_spreadsheet_revenue">;
+
+/**
+ * Missão UX/Navegação 2 — status de confiabilidade/origem de um período financeiro consultado,
+ * nunca confundido com `AccountingPeriod["status"]` (esse é o workflow de fechamento
+ * aberto/em_revisao/fechado/reaberto; este é sobre DE ONDE o número vem e o quão completo ele é):
+ * - "fechado_oficial": existe um `DreSnapshot` oficial cobrindo EXATAMENTE o mês consultado —
+ *   os números vêm do snapshot congelado, nunca recalculados.
+ * - "fonte_historica": todo o intervalo consultado é anterior a `DATA_CORTE_JUMPPARK` — receita vem
+ *   da planilha histórica (`historical_spreadsheet_*`), nunca do JumpPark.
+ * - "calculado": todo (ou parte) o intervalo é a partir de `DATA_CORTE_JUMPPARK` — fluxo normal
+ *   (JumpPark/cash_movements/contas a pagar/receber).
+ * - "parcial": não há receita reconhecível em nenhuma fonte para o intervalo — ausência de dado,
+ *   nunca tratada como resultado zero (mesmo princípio já usado em `DreReport.receitaBruta`).
+ */
+export type FinancialPeriodSourceStatus = "fechado_oficial" | "calculado" | "fonte_historica" | "parcial";
+
+export interface FinancialPeriodSourceInfo {
+  status: FinancialPeriodSourceStatus;
+  /** Rótulo pronto para exibição na UI (ex.: "Fechado oficialmente", "Histórico disponível (planilha)"). */
+  label: string;
+  /** true quando o intervalo consultado cruza `DATA_CORTE_JUMPPARK` — combina fonte histórica e fonte ao vivo no mesmo relatório, sem dupla contagem (cada candidato só é elegível numa das duas fontes, nunca nas duas). */
+  crossesHistoricalCutoff: boolean;
+  /** Versão do `DreSnapshot` oficial usado, só quando `status === "fechado_oficial"`. */
+  officialSnapshotVersion: number | null;
+  /**
+   * Meses inteiros dentro do intervalo consultado que possuem fechamento oficial próprio, mesmo
+   * quando o intervalo consultado é um recorte parcial (não seria elegível a "fechado_oficial"
+   * sozinho). Informativo para a UI alertar "este recorte é cálculo ao vivo, não o fechamento
+   * oficial de agosto" sem esconder que agosto tem uma versão oficial.
+   */
+  officialSnapshotMonthsInRange: string[];
+}
 
 export interface FinancialClassification {
   id: string;

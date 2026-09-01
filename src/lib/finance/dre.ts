@@ -1,3 +1,4 @@
+import { isJumpParkOfficialPeriod, isSpreadsheetOfficialPeriod } from "@/lib/config/historical-source-precedence";
 import type {
   AccountsPayable,
   AccountsReceivable,
@@ -111,6 +112,20 @@ const JUMPPARK_REVENUE_CLASSIFICATION: ResolvedClassification = {
 const STONE_FEE_CLASSIFICATION: ResolvedClassification = {
   dreLine: "resultado_financeiro",
   nature: "resultado_financeiro",
+  includeInDre: true,
+  origin: "regra_automatica",
+  reviewNeeded: false,
+};
+
+/**
+ * Missão UX/Navegação 2 — receita da planilha histórica pré-JumpPark, mesmo tratamento
+ * determinístico de `JUMPPARK_REVENUE_CLASSIFICATION`: nunca passa por `resolveClassification`,
+ * porque não é um lançamento manual editável — é derivada 1:1 de `historical_spreadsheet_*` a cada
+ * cálculo. Nunca usada para uma data `>= DATA_CORTE_JUMPPARK` (ver `buildHistoricalRevenueCandidates`).
+ */
+const HISTORICAL_SPREADSHEET_REVENUE_CLASSIFICATION: ResolvedClassification = {
+  dreLine: "receita_bruta",
+  nature: "receita_operacional",
   includeInDre: true,
   origin: "regra_automatica",
   reviewNeeded: false,
@@ -278,6 +293,20 @@ export interface StoneFeeCandidateInput {
   advanceRowsCount: number;
 }
 
+/**
+ * Missão UX/Navegação 2 — receita reconstruída da planilha histórica pré-JumpPark (uma linha por
+ * registro real: cada lavação ou cada dia de estacionamento, nunca um agregado mensal inventado —
+ * a fonte já tem granularidade diária/por-lançamento, então um intervalo personalizado que corta um
+ * mês no meio é filtrado com a mesma precisão de qualquer outra fonte, nunca rateado).
+ */
+export interface HistoricalRevenueCandidateInput {
+  externalId: string;
+  date: string;
+  description: string;
+  category: "Lavação" | "Estacionamento";
+  amount: number;
+}
+
 export interface DreComputationInput {
   regime: DreRegime;
   competenceFrom: string;
@@ -290,10 +319,25 @@ export interface DreComputationInput {
   rules: ClassificationRule[];
   /** Opcional — só usado no regime "gerencial" para segmentar receita de Clientes/Parcerias Corporativas por `partners.type`. Omitir equivale a `[]` (nenhuma linha cai na segmentação de parceria). */
   partners?: Partner[];
-  /** Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhuma receita JumpPark reconhecida — retrocompatível). */
+  /**
+   * Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhuma receita JumpPark
+   * reconhecida — retrocompatível). Missão UX/Navegação 2 — filtrado aqui dentro (nunca confia
+   * cegamente no chamador) para NUNCA reconhecer uma ordem com `orderDate < DATA_CORTE_JUMPPARK`:
+   * nesse período o JumpPark não é a fonte oficial (ver `historical-source-precedence.ts`), mesmo
+   * que a ordem exista fisicamente no banco (uso paralelo/teste antes do go-live real).
+   */
   jumpParkOrders?: JumpParkRevenueCandidateInput[];
   /** Opcional — só usado no regime "gerencial". Omitir equivale a `[]` (nenhum custo Stone reconhecido — retrocompatível, nunca altera relatórios já auditados antes desta missão). */
   stoneFeeDays?: StoneFeeCandidateInput[];
+  /**
+   * Missão UX/Navegação 2 — opcional, só usado no regime "gerencial". Omitir equivale a `[]`
+   * (nenhuma receita histórica reconhecida — retrocompatível, nunca altera nenhum relatório já
+   * auditado/fechado antes desta missão, já que agosto nunca teve registro nesta fonte). Filtrado
+   * aqui dentro para NUNCA reconhecer um registro com `date >= DATA_CORTE_JUMPPARK` — a partir
+   * dessa data a planilha deixa de ser a fonte oficial, mesmo que ainda existisse fisicamente no
+   * banco (proteção contra dupla contagem com `jumpParkOrders`, nunca as duas fontes na mesma data).
+   */
+  historicalRevenueRecords?: HistoricalRevenueCandidateInput[];
 }
 
 /**
@@ -340,9 +384,11 @@ export function computeDreReport(input: DreComputationInput): DreReport {
         ? JUMPPARK_REVENUE_CLASSIFICATION
         : candidate.sourceKind === "stone_fee"
           ? STONE_FEE_CLASSIFICATION
-          : candidate.cashMovementNature && !explicit
-            ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
-            : resolveClassification(candidate, explicit, input.rules);
+          : candidate.sourceKind === "historical_spreadsheet_revenue"
+            ? HISTORICAL_SPREADSHEET_REVENUE_CLASSIFICATION
+            : candidate.cashMovementNature && !explicit
+              ? resolveCashMovementNatureClassification(candidate.cashMovementNature)
+              : resolveClassification(candidate, explicit, input.rules);
 
     const item: DreLineItem = {
       sourceKind: candidate.sourceKind,
@@ -601,7 +647,7 @@ function buildManagerialCandidates(input: DreComputationInput): DreCandidate[] {
       cashMovementNature: m.nature,
     }));
 
-  return [...obligationCandidates, ...cashCandidates, ...buildJumpParkCandidates(input), ...buildStoneFeeCandidates(input)];
+  return [...obligationCandidates, ...cashCandidates, ...buildJumpParkCandidates(input), ...buildStoneFeeCandidates(input), ...buildHistoricalRevenueCandidates(input)];
 }
 
 /**
@@ -615,6 +661,11 @@ function buildManagerialCandidates(input: DreComputationInput): DreCandidate[] {
 function buildJumpParkCandidates(input: DreComputationInput): DreCandidate[] {
   const candidates: DreCandidate[] = [];
   for (const order of input.jumpParkOrders ?? []) {
+    // Missão UX/Navegação 2 — nunca reconhece uma ordem anterior a DATA_CORTE_JUMPPARK: nesse
+    // período a planilha histórica é a fonte oficial, mesmo que a ordem exista fisicamente no
+    // banco (uso paralelo/teste antes do go-live real). Filtro aqui, na função pura, não só na
+    // busca (`fetchJumpParkRevenueCandidates`) — nunca confia cegamente no chamador.
+    if (!isJumpParkOfficialPeriod(order.orderDate)) continue;
     const label = order.plateMasked ? `JumpPark — ${order.plateMasked}` : `JumpPark — ordem ${order.externalId}`;
     if (order.parkingAmount > 0) {
       candidates.push({
@@ -695,6 +746,35 @@ function buildStoneFeeCandidates(input: DreComputationInput): DreCandidate[] {
         cashMovementNature: null,
       });
     }
+  }
+  return candidates;
+}
+
+/**
+ * Missão UX/Navegação 2 — receita operacional real anterior ao JumpPark, direto da planilha
+ * histórica (`historical_spreadsheet_wash_records`/`historical_spreadsheet_parking_records`, via
+ * `fetchHistoricalRevenueCandidates`). Nunca reconhece um registro `date >= DATA_CORTE_JUMPPARK`
+ * (mesma proteção de `buildJumpParkCandidates`, na direção oposta) — garante por construção que
+ * nenhuma data pode cair nas duas fontes ao mesmo tempo, mesmo que o chamador (`fetchDreSourceData`)
+ * um dia buscasse as duas sem filtro de data.
+ */
+function buildHistoricalRevenueCandidates(input: DreComputationInput): DreCandidate[] {
+  const candidates: DreCandidate[] = [];
+  for (const record of input.historicalRevenueRecords ?? []) {
+    if (!isSpreadsheetOfficialPeriod(record.date)) continue;
+    candidates.push({
+      sourceKind: "historical_spreadsheet_revenue",
+      sourceId: record.externalId,
+      date: record.date,
+      description: record.description,
+      partyName: null,
+      categoryName: record.category,
+      costCenterName: record.category === "Lavação" ? "Estética Automotiva" : "Estacionamento",
+      supplierId: null,
+      partnerId: null,
+      absAmount: record.amount,
+      cashMovementNature: null,
+    });
   }
   return candidates;
 }

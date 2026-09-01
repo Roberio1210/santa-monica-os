@@ -31,6 +31,7 @@ const sourceKindLabels: Record<ClassificationSourceKind, string> = {
   account_transfer: "Transferência entre Contas",
   jumppark_service_order: "JumpPark",
   stone_fee: "Stone (custo real)",
+  historical_spreadsheet_revenue: "Planilha histórica",
 };
 
 const regimeLabels: Record<DreRegime, string> = {

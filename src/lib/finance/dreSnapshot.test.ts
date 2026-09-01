@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { closeAccountingPeriodWithSnapshot, DRE_METHODOLOGY_VERSION, getOfficialClosedDre, verifyDreSnapshotIntegrityById } from "@/lib/finance/dreSnapshot";
+import {
+  closeAccountingPeriodWithSnapshot,
+  DRE_METHODOLOGY_VERSION,
+  fetchFinancialPeriodOverview,
+  getOfficialClosedDre,
+  resolveFinancialPeriodSourceStatus,
+  verifyDreSnapshotIntegrityById,
+} from "@/lib/finance/dreSnapshot";
 import { computeDreSnapshotHash, verifyDreSnapshotIntegrity } from "@/lib/finance/dreSnapshotHash";
 import { fetchDreReport } from "@/lib/finance/service";
 import { getFinanceRepository, resetFinanceRepositoryForTests } from "@/lib/finance/repository-factory";
@@ -296,5 +303,126 @@ describe("closeAccountingPeriodWithSnapshot — Fase C7", () => {
     const period = await getFinanceRepository().getAccountingPeriod("2026-09");
     expect(period?.status).toBe("fechado");
     expect(await getOfficialClosedDre("2026-09")).toBeNull(); // estado inconsistente detectável, nunca mascarado
+  });
+});
+
+describe("resolveFinancialPeriodSourceStatus — parte pura, Missão UX/Navegação 2", () => {
+  it("snapshot oficial sempre tem precedência sobre qualquer outro sinal, mesmo com receita disponível por outra via", () => {
+    const info = resolveFinancialPeriodSourceStatus({
+      competenceFrom: "2026-08-01",
+      competenceTo: "2026-08-31",
+      officialSnapshot: { version: 3 },
+      hasRevenueData: true,
+      officialSnapshotMonthsInRange: ["2026-08"],
+    });
+    expect(info.status).toBe("fechado_oficial");
+    expect(info.officialSnapshotVersion).toBe(3);
+  });
+
+  it("sem snapshot, sem receita → parcial (nunca zero silencioso)", () => {
+    const info = resolveFinancialPeriodSourceStatus({
+      competenceFrom: "2026-01-01",
+      competenceTo: "2026-01-31",
+      officialSnapshot: null,
+      hasRevenueData: false,
+      officialSnapshotMonthsInRange: [],
+    });
+    expect(info.status).toBe("parcial");
+  });
+
+  it("intervalo inteiramente anterior a DATA_CORTE_JUMPPARK, com receita → fonte_historica", () => {
+    const info = resolveFinancialPeriodSourceStatus({
+      competenceFrom: "2026-02-01",
+      competenceTo: "2026-02-28",
+      officialSnapshot: null,
+      hasRevenueData: true,
+      officialSnapshotMonthsInRange: [],
+    });
+    expect(info.status).toBe("fonte_historica");
+    expect(info.crossesHistoricalCutoff).toBe(false);
+  });
+
+  it("intervalo inteiramente a partir de DATA_CORTE_JUMPPARK, com receita → calculado", () => {
+    const info = resolveFinancialPeriodSourceStatus({
+      competenceFrom: "2026-06-01",
+      competenceTo: "2026-06-30",
+      officialSnapshot: null,
+      hasRevenueData: true,
+      officialSnapshotMonthsInRange: [],
+    });
+    expect(info.status).toBe("calculado");
+    expect(info.crossesHistoricalCutoff).toBe(false);
+  });
+
+  it("intervalo que cruza DATA_CORTE_JUMPPARK é sinalizado com crossesHistoricalCutoff, mas ainda classificado (calculado quando há receita)", () => {
+    const info = resolveFinancialPeriodSourceStatus({
+      competenceFrom: "2026-04-15",
+      competenceTo: "2026-05-15",
+      officialSnapshot: null,
+      hasRevenueData: true,
+      officialSnapshotMonthsInRange: [],
+    });
+    expect(info.status).toBe("calculado");
+    expect(info.crossesHistoricalCutoff).toBe(true);
+  });
+});
+
+describe("fetchFinancialPeriodOverview — Missão UX/Navegação 2 (integração, repositório em memória)", () => {
+  beforeEach(() => {
+    resetFinanceRepositoryForTests();
+    custoDespesaSeeded = new Set<string>();
+  });
+
+  it("6) mês com fechamento oficial: status fechado_oficial, número vem do snapshot congelado (agosto continua íntegro depois de fechado)", async () => {
+    await seedReceita("2026-10", 1000);
+    const { snapshot } = await closeAccountingPeriodWithSnapshot({ competenceMonth: "2026-10", closedBy: RESPONSIBLE });
+
+    const overview = await fetchFinancialPeriodOverview("2026-10-01", "2026-10-31");
+    expect(overview.status.status).toBe("fechado_oficial");
+    expect(overview.status.officialSnapshotVersion).toBe(snapshot.version);
+    expect(overview.report.receitaBruta).toBe(1000);
+  });
+
+  it("12) snapshot oficial tem precedência mesmo com lançamento novo depois do fechamento — número nunca muda (prova de imutabilidade)", async () => {
+    await seedReceita("2026-10", 1000);
+    await closeAccountingPeriodWithSnapshot({ competenceMonth: "2026-10", closedBy: RESPONSIBLE });
+    await seedReceita("2026-10", 500, "20"); // lançamento posterior ao fechamento
+
+    const overview = await fetchFinancialPeriodOverview("2026-10-01", "2026-10-31");
+    expect(overview.status.status).toBe("fechado_oficial");
+    expect(overview.report.receitaBruta).toBe(1000); // nunca 1500 — snapshot congelado, nunca recalculado
+  });
+
+  it("9) período sem nenhuma receita reconhecível é status parcial, nunca zero silencioso", async () => {
+    const overview = await fetchFinancialPeriodOverview("2026-01-01", "2026-01-31");
+    expect(overview.status.status).toBe("parcial");
+    expect(overview.report.receitaBruta).toBeNull();
+  });
+
+  it("mês inteiro com dado real mas sem fechamento é calculado ao vivo, nunca finge ser oficial", async () => {
+    await seedReceita("2026-11", 400);
+    const overview = await fetchFinancialPeriodOverview("2026-11-01", "2026-11-30");
+    expect(overview.status.status).toBe("calculado");
+    expect(overview.status.officialSnapshotVersion).toBeNull();
+    expect(overview.report.receitaBruta).toBe(400);
+  });
+
+  it("intervalo personalizado que é só um RECORTE de um mês oficialmente fechado nunca herda o status oficial — é sempre calculado ao vivo, mas o mês fechado é listado em metadata", async () => {
+    await seedReceita("2026-10", 1000);
+    await closeAccountingPeriodWithSnapshot({ competenceMonth: "2026-10", closedBy: RESPONSIBLE });
+
+    const overview = await fetchFinancialPeriodOverview("2026-10-01", "2026-10-15");
+    expect(overview.status.status).not.toBe("fechado_oficial");
+    expect(overview.status.officialSnapshotMonthsInRange).toEqual([]); // 01→15 não contém o mês INTEIRO
+  });
+
+  it("intervalo personalizado que CONTÉM por completo um mês fechado sinaliza esse mês em officialSnapshotMonthsInRange, mesmo sem ser elegível a fechado_oficial sozinho", async () => {
+    await seedReceita("2026-10", 1000);
+    await closeAccountingPeriodWithSnapshot({ competenceMonth: "2026-10", closedBy: RESPONSIBLE });
+    await seedReceita("2026-11", 200);
+
+    const overview = await fetchFinancialPeriodOverview("2026-09-01", "2026-11-30");
+    expect(overview.status.status).not.toBe("fechado_oficial");
+    expect(overview.status.officialSnapshotMonthsInRange).toEqual(["2026-10"]);
   });
 });
