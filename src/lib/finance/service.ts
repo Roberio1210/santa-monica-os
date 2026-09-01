@@ -967,7 +967,7 @@ export function computeCashFlowAlerts(
 /**
  * Missão V4.1 — `periodFrom`/`periodTo` (Fase 2) são opcionais e, quando omitidos, caem em
  * `asOfDate` (equivalente ao preset "Hoje"), preservando exatamente o comportamento anterior para
- * quem já chama esta função sem eles (Central de Operações, `today-panel`, etc.).
+ * quem já chama esta função sem eles (Central de Operações, `agora-panel`, etc.).
  */
 export async function fetchCashFlowOverview(
   asOfDate: string = new Date().toISOString().slice(0, 10),

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle, Boxes, ClipboardList, PackageMinus, PackagePlus, ShieldCheck, Split, Trash2, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { APP_MODULES } from "@/components/navigation/app-modules";
+import { ModuleShortcuts } from "@/components/navigation/module-shortcuts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,8 @@ export default async function EstoquePage({ searchParams }: { searchParams: Prom
           </>
         }
       />
+
+      <ModuleShortcuts shortcuts={APP_MODULES.find((m) => m.id === "estoque")!.shortcuts} />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <PeriodSelector period={period} />

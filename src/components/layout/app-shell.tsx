@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import type { UserRole } from "@/lib/auth/roles";
+import type { SituationLevel } from "@/lib/operations/situation";
 
 export interface CurrentUserSummary {
   name: string;
@@ -28,7 +29,15 @@ function isMobileFirstRoute(pathname: string | null): boolean {
  * comportamento anterior a esta missão (menu completo, saudação genérica) — nada muda até a
  * sessão individual estar realmente ativa.
  */
-export function AppShell({ children, currentUser }: { children: ReactNode; currentUser: CurrentUserSummary | null }) {
+export function AppShell({
+  children,
+  currentUser,
+  situation,
+}: {
+  children: ReactNode;
+  currentUser: CurrentUserSummary | null;
+  situation: SituationLevel | null;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -40,7 +49,7 @@ export function AppShell({ children, currentUser }: { children: ReactNode; curre
     <div className="flex min-h-screen w-full">
       <Sidebar mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} role={currentUser?.role ?? null} />
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <Header onOpenMobileMenu={() => setMobileOpen(true)} currentUser={currentUser} />
+        <Header onOpenMobileMenu={() => setMobileOpen(true)} currentUser={currentUser} situation={situation} />
         <main className="flex-1 space-y-6 p-4 lg:p-6">{children}</main>
       </div>
     </div>

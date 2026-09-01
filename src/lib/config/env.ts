@@ -46,6 +46,17 @@ export function isJumpParkConfigured(): boolean {
   return getJumpParkEnv() !== null;
 }
 
+/**
+ * Missão UX/Navegação 4B — mesmo padrão já usado em `src/lib/admin/diagnostics.ts`
+ * (`process.env.VERCEL_ENV ?? "development"`), nunca reimplementado com lógica própria. Usado
+ * para distinguir "integração genuinamente não configurada em produção" de "ambiente local/preview
+ * sem as credenciais ao vivo" — a mensagem exibida ao gestor precisa dizer coisas diferentes nos
+ * dois casos (ver `central-header.tsx`), nunca a mesma frase.
+ */
+export function isProductionEnvironment(): boolean {
+  return (process.env.VERCEL_ENV ?? "development") === "production";
+}
+
 export interface WeatherEnv {
   apiKey: string;
   /** Cidade/UF/país no formato aceito pela API (ex.: "Florianópolis,SC,BR") ou "lat,lon". */

@@ -4,9 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ChevronsLeft, ChevronsRight, Sparkles, X } from "lucide-react";
-import { navItems } from "@/components/navigation/nav-items";
+import { APP_MODULES, resolveActiveModuleId, resolveModuleLinkHref } from "@/components/navigation/app-modules";
 import { cn } from "@/lib/utils/cn";
-import { isPathAllowedForRole } from "@/lib/auth/permissions";
 import type { UserRole } from "@/lib/auth/roles";
 
 interface SidebarProps {
@@ -16,10 +15,19 @@ interface SidebarProps {
   role: UserRole | null;
 }
 
+/**
+ * Missão UX/Navegação 3 — navegação principal reduzida a ~9 módulos (`APP_MODULES`), no lugar dos
+ * 48 itens antigos (`nav-items.ts`, mantido só como referência histórica). Nenhuma rota antiga foi
+ * apagada: as que antes tinham item próprio na lateral agora são atalhos dentro da página de cada
+ * módulo (`ModuleShortcuts`) — ver `app-modules.ts` para a tabela completa rota antiga → módulo.
+ */
 export function Sidebar({ mobileOpen, onCloseMobile, role }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const visibleItems = role === null ? navItems : navItems.filter((item) => isPathAllowedForRole(role, item.href));
+  const activeModuleId = resolveActiveModuleId(pathname);
+  const visibleItems = APP_MODULES.map((module) => ({ module, href: resolveModuleLinkHref(module, role) })).filter(
+    (entry): entry is { module: (typeof APP_MODULES)[number]; href: string } => entry.href !== null,
+  );
 
   return (
     <>
@@ -58,13 +66,13 @@ export function Sidebar({ mobileOpen, onCloseMobile, role }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-          {visibleItems.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-            const Icon = item.icon;
+          {visibleItems.map(({ module, href }) => {
+            const active = module.id === activeModuleId;
+            const Icon = module.icon;
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={module.id}
+                href={href}
                 onClick={onCloseMobile}
                 aria-current={active ? "page" : undefined}
                 className={cn(
@@ -73,10 +81,10 @@ export function Sidebar({ mobileOpen, onCloseMobile, role }: SidebarProps) {
                     ? "bg-accent/10 text-accent border border-accent/20"
                     : "text-foreground-muted hover:bg-background-elevated hover:text-foreground border border-transparent",
                 )}
-                title={collapsed ? item.label : undefined}
+                title={collapsed ? module.label : undefined}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed ? <span className="truncate">{item.label}</span> : null}
+                {!collapsed ? <span className="truncate">{module.label}</span> : null}
               </Link>
             );
           })}

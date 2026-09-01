@@ -2,6 +2,8 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, CreditCard, DollarSign, FileClock, Handshake, PiggyBank, TrendingDown, TrendingUp, Wallet, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Unavailable } from "@/components/shared/unavailable";
+import { APP_MODULES } from "@/components/navigation/app-modules";
+import { ModuleShortcuts } from "@/components/navigation/module-shortcuts";
 import { StatCard } from "@/components/cards/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +80,8 @@ export default async function FinanceiroPage() {
           ) : undefined
         }
       />
+
+      <ModuleShortcuts shortcuts={APP_MODULES.find((m) => m.id === "financeiro")!.shortcuts} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
+import { APP_MODULES } from "@/components/navigation/app-modules";
+import { ModuleShortcuts } from "@/components/navigation/module-shortcuts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +46,8 @@ export default async function ConfiguracoesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Configurações" description="Perfil da empresa, integrações, agentes e segurança." />
+
+      <ModuleShortcuts shortcuts={APP_MODULES.find((m) => m.id === "configuracoes")!.shortcuts} />
 
       <Card>
         <CardHeader>

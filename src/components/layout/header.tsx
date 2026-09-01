@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { logoutAction } from "@/app/login/actions";
 import { userRoleLabels } from "@/lib/auth/roles";
+import { situationMeta, type SituationLevel } from "@/lib/operations/situation";
 import type { CurrentUserSummary } from "@/components/layout/app-shell";
 
 function getGreeting(hour: number): string {
@@ -25,10 +26,20 @@ const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
-export function Header({ onOpenMobileMenu, currentUser }: { onOpenMobileMenu: () => void; currentUser: CurrentUserSummary | null }) {
+export function Header({
+  onOpenMobileMenu,
+  currentUser,
+  situation,
+}: {
+  onOpenMobileMenu: () => void;
+  currentUser: CurrentUserSummary | null;
+  /** Missão UX/Navegação 4B — calculado uma vez no layout raiz (`computeSituation`, mesma fonte da Central de Operações), nunca mais um texto fixo. `null` só se o cálculo falhar (ex.: banco fora do ar) — nesse caso o badge simplesmente não aparece, nunca mostra "normal" sem ter certeza. */
+  situation: SituationLevel | null;
+}) {
   const [now, setNow] = useState<Date | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const SituationIcon = situation ? situationMeta[situation].icon : null;
 
   useEffect(() => {
     // Client-only initialization to avoid SSR/client hydration mismatch on time-based values.
@@ -73,11 +84,13 @@ export function Header({ onOpenMobileMenu, currentUser }: { onOpenMobileMenu: ()
           <Badge variant="outline" className="hidden sm:inline-flex">
             {userRoleLabels[currentUser.role]}
           </Badge>
-        ) : (
-          <Badge variant="positive" className="hidden sm:inline-flex">
-            Situação geral: normal
+        ) : null}
+        {situation && SituationIcon ? (
+          <Badge variant={situationMeta[situation].variant} className="hidden sm:inline-flex">
+            <SituationIcon className="h-3 w-3" />
+            {situationMeta[situation].label}
           </Badge>
-        )}
+        ) : null}
         <span className="hidden text-xs text-foreground-subtle sm:inline">
           {lastUpdated ? `Atualizado às ${timeFormatter.format(lastUpdated)}` : ""}
         </span>

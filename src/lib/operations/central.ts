@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { isJumpParkConfigured } from "@/lib/config/env";
 import { classifyJumpParkError, fetchDailyFinancial, fetchTodayOperations, JumpParkNotConfiguredError, type JumpParkDiagnosticsCause, type OperationOrder } from "@/lib/integrations/jumppark";
 import {
@@ -17,6 +18,9 @@ import { fetchInventoryOverview, type InventorySummary } from "@/lib/inventory/s
 import { fetchDataQualitySummary, type DataQualitySummary } from "@/lib/inventory/data-quality";
 import { fetchOrdersConsumptionIndicators, type OrdersConsumptionIndicators } from "@/lib/jumppark-orders/central-indicators";
 import type { AccountsPayableView, AccountsReceivableView, CashFlowAlert, CashFlowProjectionPoint, FinancialAccountBalance } from "@/lib/finance/types";
+import type { SituationLevel } from "@/lib/operations/situation";
+
+export type { SituationLevel } from "@/lib/operations/situation";
 
 /**
  * Resultado por seção — nunca deixa uma falha de uma fonte (ex.: JumpPark fora do ar) derrubar
@@ -121,8 +125,14 @@ async function settleJumpParkToday(asOfDate: string): Promise<JumpParkSectionRes
  * Agregador de leitura da Central de Operações — só leitura, nunca grava nada. Cada fonte é
  * buscada em paralelo e isolada com try/catch próprio (settle), então uma falha pontual (ex.:
  * JumpPark fora do ar) nunca derruba as outras seções.
+ *
+ * Missão UX/Navegação 4B — envolvida em `React.cache()`: tanto `src/app/layout.tsx` (para o badge
+ * real do cabeçalho global) quanto `src/app/dashboard/page.tsx` chamam esta função com o mesmo
+ * `asOfDate` dentro da mesma requisição — sem o cache, o mesmo conjunto de ~8 consultas rodaria
+ * DUAS vezes por acesso à Central. Deduplicação só dura o request atual (nunca entre requisições
+ * diferentes), então o dado nunca fica desatualizado.
  */
-export async function fetchCentralOverview(asOfDate: string): Promise<CentralOverview> {
+export const fetchCentralOverview = cache(async function fetchCentralOverview(asOfDate: string): Promise<CentralOverview> {
   const jumpparkConfigured = isJumpParkConfigured();
 
   const jumpparkPromise: Promise<JumpParkSectionResult> = jumpparkConfigured ? settleJumpParkToday(asOfDate) : settleJumpPark(Promise.reject(new JumpParkNotConfiguredError()));
@@ -168,9 +178,7 @@ export async function fetchCentralOverview(asOfDate: string): Promise<CentralOve
     inventoryQuality,
     ordersConsumption,
   };
-}
-
-export type SituationLevel = "normal" | "atencao" | "critica";
+});
 
 /**
  * Situação geral da empresa — reflete a MAIOR severidade entre os alertas já consolidados
