@@ -1,15 +1,19 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { inventoryItems, inventoryMovements } from "@/db/schema";
+import { inventoryItems, inventoryMovements, inventorySnapshots } from "@/db/schema";
 import type { InventoryRepository } from "@/lib/inventory/repository";
 import type {
   InventoryCategory,
   InventoryCondition,
   InventoryItem,
+  InventoryPositionOrigin,
+  InventorySnapshot,
+  InventorySnapshotPayload,
   InventoryUnit,
   ItemClassification,
   MovementType,
+  PersistInventorySnapshotInput,
   QuantityStatus,
   StockMovement,
 } from "@/lib/inventory/types";
@@ -60,6 +64,7 @@ function toMovement(row: typeof inventoryMovements.$inferSelect): StockMovement 
     externalId: row.externalId,
     previousBalance: row.previousBalance !== null ? Number(row.previousBalance) : null,
     newBalance: row.newBalance !== null ? Number(row.newBalance) : null,
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -233,5 +238,95 @@ export class PostgresInventoryRepository implements InventoryRepository {
   async setItemActive(id: string, active: boolean): Promise<void> {
     const [row] = await this.db().update(inventoryItems).set({ active, updatedAt: new Date() }).where(eq(inventoryItems.id, id)).returning();
     if (!row) throw new Error(`Item de estoque não encontrado: ${id}`);
+  }
+
+  private toSnapshot(row: typeof inventorySnapshots.$inferSelect): InventorySnapshot {
+    return {
+      id: row.id,
+      competenceMonth: row.competenceMonth,
+      version: row.version,
+      isOfficial: row.isOfficial,
+      cutoffAt: row.cutoffAt,
+      lastPhysicalCountAt: row.lastPhysicalCountAt,
+      methodology: row.methodology as InventoryPositionOrigin,
+      caveat: row.caveat,
+      payload: row.payload as InventorySnapshotPayload,
+      payloadHash: row.payloadHash,
+      hashAlgorithm: row.hashAlgorithm,
+      totalProducts: row.totalProducts,
+      productsWithCost: row.productsWithCost,
+      isPartialValue: row.isPartialValue,
+      supersededAt: row.supersededAt ? row.supersededAt.toISOString() : null,
+      supersededByVersionId: row.supersededByVersionId,
+      createdBy: row.createdBy,
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async listInventorySnapshots(competenceMonth: string): Promise<InventorySnapshot[]> {
+    const rows = await this.db().select().from(inventorySnapshots).where(eq(inventorySnapshots.competenceMonth, competenceMonth)).orderBy(desc(inventorySnapshots.version));
+    return rows.map((r) => this.toSnapshot(r));
+  }
+
+  async getOfficialInventorySnapshot(competenceMonth: string): Promise<InventorySnapshot | null> {
+    const rows = await this.db()
+      .select()
+      .from(inventorySnapshots)
+      .where(and(eq(inventorySnapshots.competenceMonth, competenceMonth), eq(inventorySnapshots.isOfficial, true)))
+      .limit(1);
+    return rows[0] ? this.toSnapshot(rows[0]) : null;
+  }
+
+  /**
+   * Fechamento atômico: desmarca a versão oficial anterior (se houver) ANTES de inserir a nova —
+   * evita colidir com o índice único parcial (`inventory_snapshots_official_per_competence_idx`,
+   * que permite no máximo uma linha `is_official=true` por competência) — mesma ordem/raciocínio
+   * já usado em `persistDreSnapshotAndClosePeriod` (Missão Financeiro V7/Fase C7), sem importar
+   * nada daquele módulo.
+   */
+  async persistInventorySnapshot(input: PersistInventorySnapshotInput): Promise<InventorySnapshot> {
+    const db = this.db();
+    return db.transaction(async (tx) => {
+      // Desmarca a versão oficial anterior ANTES de inserir a nova — o índice único parcial
+      // (`is_official=true` por competência) rejeitaria a inserção se as duas coexistissem, mesmo
+      // que só por um instante dentro da mesma transação. `supersededByVersionId` ainda não é
+      // conhecido aqui (a nova linha não existe ainda) — é preenchido no UPDATE final, depois do
+      // INSERT (Missão Estoque E6.2: antes esse FK nunca era preenchido).
+      if (input.previousOfficialSnapshotId) {
+        await tx
+          .update(inventorySnapshots)
+          .set({ isOfficial: false, supersededAt: new Date(), updatedAt: new Date() })
+          .where(eq(inventorySnapshots.id, input.previousOfficialSnapshotId));
+      }
+
+      const [row] = await tx
+        .insert(inventorySnapshots)
+        .values({
+          competenceMonth: input.competenceMonth,
+          version: input.version,
+          isOfficial: true,
+          cutoffAt: input.cutoffAt,
+          lastPhysicalCountAt: input.lastPhysicalCountAt,
+          methodology: input.methodology,
+          caveat: input.caveat,
+          payload: input.payload,
+          payloadHash: input.payloadHash,
+          hashAlgorithm: input.hashAlgorithm,
+          totalProducts: input.totalProducts,
+          productsWithCost: input.productsWithCost,
+          isPartialValue: input.isPartialValue,
+          createdBy: input.createdBy,
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      if (input.previousOfficialSnapshotId) {
+        await tx.update(inventorySnapshots).set({ supersededByVersionId: row.id, updatedAt: new Date() }).where(eq(inventorySnapshots.id, input.previousOfficialSnapshotId));
+      }
+
+      return this.toSnapshot(row);
+    });
   }
 }

@@ -1,4 +1,4 @@
-import type { InventoryItem, StockMovement } from "@/lib/inventory/types";
+import type { InventoryItem, InventorySnapshot, PersistInventorySnapshotInput, StockMovement } from "@/lib/inventory/types";
 
 /**
  * Contrato de acesso a dados de estoque, desacoplado da implementação. Uma futura
@@ -71,4 +71,17 @@ export interface InventoryRepository {
    * (ver `listInactiveItems`).
    */
   setItemActive(id: string, active: boolean): Promise<void>;
+
+  // --- Fechamento/Snapshot de Estoque (Missão Estoque E4) ---
+  /** Todas as versões (histórico completo) de uma competência, mais recente primeiro. */
+  listInventorySnapshots(competenceMonth: string): Promise<InventorySnapshot[]>;
+  /** A versão vigente (`isOfficial=true`) de uma competência, ou null se nunca foi fechada. */
+  getOfficialInventorySnapshot(competenceMonth: string): Promise<InventorySnapshot | null>;
+  /**
+   * Escreve a nova versão do snapshot e desmarca a anterior (se houver) numa única operação
+   * atômica (transação na implementação real) — nunca duas versões oficiais simultâneas da mesma
+   * competência. Nunca calcula o payload sozinho: recebe o payload já computado e validado por
+   * `computeInventorySnapshotPayload` (`inventorySnapshot.ts`).
+   */
+  persistInventorySnapshot(input: PersistInventorySnapshotInput): Promise<InventorySnapshot>;
 }

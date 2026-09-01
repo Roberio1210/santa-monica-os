@@ -335,4 +335,118 @@ export interface StockMovement {
   previousBalance: number | null;
   /** Saldo do item imediatamente após esta movimentação. */
   newBalance: number | null;
+  /**
+   * Missão Estoque E5.1 — momento real de inserção no sistema (ISO), distinto de `date` (a data
+   * ECONÔMICA declarada, que pode ser retroativa). Sempre preenchido por ambas as implementações
+   * do repositório na criação; opcional aqui só para não quebrar `Omit<StockMovement, "id" |
+   * "previousBalance" | "newBalance">` em todo chamador existente de `recordMovement`/
+   * `recordPhysicalCount` — nenhum precisa informar, o repositório sempre define. Usado como
+   * desempate determinístico no replay cronológico (`inventorySnapshot.ts`) quando duas
+   * movimentações do mesmo item têm a mesma `date`.
+   */
+  createdAt?: string;
+}
+
+// --- Fechamento/Snapshot de Estoque (Missão Estoque E4) ---
+
+/**
+ * "PHYSICAL_CONFIRMED" só quando a última movimentação do produto até a data de corte é ela
+ * própria uma contagem física (`contagem_fisica_inicial`/`correcao_inventario`/`ajuste_inventario`)
+ * datada exatamente na data de corte. Qualquer outro caso é "SYSTEM_THEORETICAL" — saldo projetado
+ * a partir do último marco físico conhecido mais as movimentações registradas depois dele, nunca
+ * uma nova contagem. Nunca inferida de um resumo — sempre calculada produto a produto.
+ */
+export type InventoryPositionOrigin = "PHYSICAL_CONFIRMED" | "SYSTEM_THEORETICAL";
+
+/** Um produto dentro do payload congelado de um `InventorySnapshot` — granularidade sempre por item, nunca só um agregado. */
+export interface InventorySnapshotProductEntry {
+  itemId: string;
+  name: string;
+  category: InventoryCategory;
+  unit: InventoryUnit;
+  /** Saldo na data de corte — reconstruído a partir do histórico real de movimentações até essa data, nunca lido cegamente de `currentQuantity` (que pode ter avançado desde o fechamento). */
+  systemicQuantity: number;
+  positionOrigin: InventoryPositionOrigin;
+  lastPhysicalCountDate: string;
+  /**
+   * Missão Estoque E6.2 — true somente quando `lastPhysicalCountDate` vem de uma movimentação
+   * REAL de contagem física (ajuste_inventario/contagem_fisica_inicial/correcao_inventario) no
+   * histórico do item. false quando não existe nenhuma dessas movimentações e `lastPhysicalCountDate`
+   * caiu no fallback `item.lastCountDate` (data de cadastro do produto, nunca uma contagem real).
+   * Existe para que o resumo de nível de snapshot (`lastPhysicalCountAt` em `closeInventorySnapshot`)
+   * NUNCA agregue data de cadastro de produto como se fosse contagem física.
+   */
+  hasRealPhysicalCount: boolean;
+  lastPhysicalCountQuantity: number;
+  /** Soma de movimentações que aumentam estoque (entrada/compra/ajuste_positivo/devolucao) entre a última contagem física e a data de corte. */
+  entriesAfterLastCount: number;
+  /** Soma de movimentações que reduzem estoque (saida/perda/consumo_interno/ajuste_negativo/avaria/vencimento/transferencia/consumo_teste_calibracao/descarte/outros) no mesmo intervalo — hoje sempre 0 neste sistema (nenhuma jamais existiu), mas o campo é real, não decorativo. */
+  trackedConsumptionAfterLastCount: number;
+  /**
+   * Diferença (novo saldo − saldo anterior) registrada na PRÓPRIA movimentação de contagem física
+   * mais recente — só preenchida quando `positionOrigin === "PHYSICAL_CONFIRMED"`. Nunca calculada
+   * contra uma contagem que não existe (ver a regra "não inventar diferença física").
+   */
+  physicalVsTheoreticalDifference: number | null;
+  /** Null = custo desconhecido — nunca tratado como 0. */
+  unitCost: number | null;
+  /** `systemicQuantity * unitCost`, só quando `unitCost` é conhecido — null caso contrário. */
+  estimatedValue: number | null;
+}
+
+export interface InventorySnapshotPayload {
+  competenceMonth: string;
+  cutoffAt: string;
+  methodology: InventoryPositionOrigin;
+  caveat: string;
+  products: InventorySnapshotProductEntry[];
+  totalProducts: number;
+  productsWithCost: number;
+  productsWithoutCost: number;
+  /** Soma de `estimatedValue` só sobre os produtos com custo conhecido — null quando nenhum produto tem custo. SEMPRE parcial quando `productsWithoutCost > 0` (ver `isPartialValue`). */
+  partialInventoryValue: number | null;
+  isPartialValue: boolean;
+}
+
+/** Espelha `src/db/schema/inventoryClosing.ts` (inventorySnapshots). */
+export interface InventorySnapshot {
+  id: string;
+  competenceMonth: string;
+  version: number;
+  isOfficial: boolean;
+  cutoffAt: string;
+  lastPhysicalCountAt: string | null;
+  methodology: InventoryPositionOrigin;
+  caveat: string;
+  payload: InventorySnapshotPayload;
+  payloadHash: string;
+  hashAlgorithm: string;
+  totalProducts: number;
+  productsWithCost: number;
+  isPartialValue: boolean;
+  supersededAt: string | null;
+  supersededByVersionId: string | null;
+  createdBy: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersistInventorySnapshotInput {
+  competenceMonth: string;
+  version: number;
+  cutoffAt: string;
+  lastPhysicalCountAt: string | null;
+  methodology: InventoryPositionOrigin;
+  caveat: string;
+  payload: InventorySnapshotPayload;
+  payloadHash: string;
+  hashAlgorithm: string;
+  totalProducts: number;
+  productsWithCost: number;
+  isPartialValue: boolean;
+  createdBy: string;
+  notes?: string | null;
+  /** id da versão oficial anterior desta competência, a desmarcar na mesma operação, se existir. */
+  previousOfficialSnapshotId?: string | null;
 }

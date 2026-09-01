@@ -3,6 +3,7 @@ export * from "./hr";
 export * from "./crm";
 export * from "./inventory";
 export * from "./inventoryAudit";
+export * from "./inventoryClosing";
 export * from "./jumppark";
 export * from "./finance";
 export * from "./bankStatement";

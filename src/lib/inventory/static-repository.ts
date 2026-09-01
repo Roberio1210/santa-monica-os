@@ -1,6 +1,6 @@
 import "server-only";
 import type { InventoryRepository } from "@/lib/inventory/repository";
-import type { InventoryItem, StockMovement } from "@/lib/inventory/types";
+import type { InventoryItem, InventorySnapshot, PersistInventorySnapshotInput, StockMovement } from "@/lib/inventory/types";
 import { initialCount20260710 } from "@/lib/inventory/data/initial-count-2026-07-10";
 import { applyMovementDelta } from "@/lib/inventory/movement-math";
 
@@ -32,6 +32,18 @@ export class StaticInventoryRepository implements InventoryRepository {
   }));
   private movements: StockMovement[] = [];
   private nextMovementId = 1;
+  private snapshots: InventorySnapshot[] = [];
+  private nextSnapshotId = 1;
+  /**
+   * Missão Estoque E5.1 — contador monotônico usado só para gerar `createdAt` determinístico
+   * (não depende do relógio real, nunca colide mesmo em testes rápidos) — o valor em si não tem
+   * significado além de ordenar corretamente "o que foi inserido depois".
+   */
+  private movementSequence = 0;
+  private nextCreatedAt(): string {
+    this.movementSequence += 1;
+    return new Date(this.movementSequence).toISOString();
+  }
 
   async listItems(): Promise<InventoryItem[]> {
     return this.items.filter((item) => item.active !== false).map((item) => ({ ...item }));
@@ -64,7 +76,7 @@ export class StaticInventoryRepository implements InventoryRepository {
     const newBalance = applyMovementDelta(previousBalance, movement.type, movement.quantity);
     item.currentQuantity = newBalance;
 
-    const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++), previousBalance, newBalance };
+    const recorded: StockMovement = { ...movement, id: String(this.nextMovementId++), previousBalance, newBalance, createdAt: this.nextCreatedAt() };
     this.movements.push(recorded);
     return { ...recorded };
   }
@@ -92,6 +104,7 @@ export class StaticInventoryRepository implements InventoryRepository {
       externalId: null,
       previousBalance,
       newBalance,
+      createdAt: this.nextCreatedAt(),
     };
     this.movements.push(recorded);
 
@@ -135,5 +148,55 @@ export class StaticInventoryRepository implements InventoryRepository {
     const item = this.items.find((i) => i.id === id);
     if (!item) throw new Error(`Item de estoque não encontrado: ${id}`);
     item.active = active;
+  }
+
+  async listInventorySnapshots(competenceMonth: string): Promise<InventorySnapshot[]> {
+    return this.snapshots
+      .filter((s) => s.competenceMonth === competenceMonth)
+      .sort((a, b) => b.version - a.version)
+      .map((s) => ({ ...s, payload: JSON.parse(JSON.stringify(s.payload)) }));
+  }
+
+  async getOfficialInventorySnapshot(competenceMonth: string): Promise<InventorySnapshot | null> {
+    const snapshot = this.snapshots.find((s) => s.competenceMonth === competenceMonth && s.isOfficial);
+    return snapshot ? { ...snapshot, payload: JSON.parse(JSON.stringify(snapshot.payload)) } : null;
+  }
+
+  async persistInventorySnapshot(input: PersistInventorySnapshotInput): Promise<InventorySnapshot> {
+    const now = new Date().toISOString();
+    const newId = `snapshot-${this.nextSnapshotId++}`;
+
+    if (input.previousOfficialSnapshotId) {
+      this.snapshots = this.snapshots.map((s) =>
+        s.id === input.previousOfficialSnapshotId
+          ? { ...s, isOfficial: false, supersededAt: now, supersededByVersionId: newId, updatedAt: now }
+          : s,
+      );
+    }
+
+    const snapshot: InventorySnapshot = {
+      id: newId,
+      competenceMonth: input.competenceMonth,
+      version: input.version,
+      isOfficial: true,
+      cutoffAt: input.cutoffAt,
+      lastPhysicalCountAt: input.lastPhysicalCountAt,
+      methodology: input.methodology,
+      caveat: input.caveat,
+      payload: input.payload,
+      payloadHash: input.payloadHash,
+      hashAlgorithm: input.hashAlgorithm,
+      totalProducts: input.totalProducts,
+      productsWithCost: input.productsWithCost,
+      isPartialValue: input.isPartialValue,
+      supersededAt: null,
+      supersededByVersionId: null,
+      createdBy: input.createdBy,
+      notes: input.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.snapshots.push(snapshot);
+    return { ...snapshot, payload: JSON.parse(JSON.stringify(snapshot.payload)) };
   }
 }
