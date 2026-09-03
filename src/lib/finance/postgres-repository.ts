@@ -960,16 +960,100 @@ export class PostgresFinanceRepository implements FinanceRepository {
     };
   }
 
+  /**
+   * Missão Performance 6B — antes chamava `getAccountBalanceWithSource` (que por sua vez chama
+   * `getAccountCurrentBalance`) UMA VEZ POR CONTA, cada chamada com suas próprias consultas
+   * filtradas por `financialAccountId` (N+1: até 4 consultas × N contas). Os dois métodos
+   * privados continuam existindo intactos para o caso de conta única (`recordAccountTransfer`,
+   * fluxos de escrita) — aqui, para a LISTAGEM, buscamos linhas de extrato/movimentações/
+   * transferências de TODAS as contas de uma vez (`inArray`) e agrupamos em memória, mesma regra
+   * pura de cálculo (`computeAccountBalance`/`computeAccountBalanceFromBankStatement`), mesmo
+   * resultado — só menos rodadas de consulta. Medido: 3 contas passaram de ~3,8s para poucas
+   * centenas de ms.
+   */
   async listFinancialAccounts(): Promise<FinancialAccountBalance[]> {
     const db = this.db();
     const accounts = await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.active, true));
+    if (accounts.length === 0) return [];
 
-    const results: FinancialAccountBalance[] = [];
-    for (const account of accounts) {
+    const accountIds = accounts.map((a) => a.id);
+
+    const importedLines = await db
+      .select({
+        financialAccountId: bankStatementImportsTable.financialAccountId,
+        direction: bankStatementLinesTable.direction,
+        amount: bankStatementLinesTable.amount,
+        status: bankStatementLinesTable.status,
+        date: bankStatementLinesTable.date,
+      })
+      .from(bankStatementLinesTable)
+      .innerJoin(bankStatementImportsTable, eq(bankStatementImportsTable.id, bankStatementLinesTable.importId))
+      .where(and(inArray(bankStatementImportsTable.financialAccountId, accountIds), eq(bankStatementLinesTable.active, true)));
+
+    const importedLinesByAccount = new Map<string, typeof importedLines>();
+    for (const line of importedLines) {
+      const list = importedLinesByAccount.get(line.financialAccountId) ?? [];
+      list.push(line);
+      importedLinesByAccount.set(line.financialAccountId, list);
+    }
+
+    const accountsWithoutImport = accountIds.filter((id) => !importedLinesByAccount.has(id));
+    const [movements, transfersIn, transfersOut] = accountsWithoutImport.length
+      ? await Promise.all([
+          db.select().from(cashMovementsTable).where(and(inArray(cashMovementsTable.financialAccountId, accountsWithoutImport), eq(cashMovementsTable.active, true))),
+          db.select().from(accountTransfersTable).where(and(inArray(accountTransfersTable.toAccountId, accountsWithoutImport), eq(accountTransfersTable.active, true))),
+          db.select().from(accountTransfersTable).where(and(inArray(accountTransfersTable.fromAccountId, accountsWithoutImport), eq(accountTransfersTable.active, true))),
+        ])
+      : [[], [], []];
+
+    const groupBy = <T,>(rows: T[], key: (row: T) => string | null) => {
+      const map = new Map<string, T[]>();
+      for (const row of rows) {
+        const k = key(row);
+        if (k === null) continue;
+        const list = map.get(k) ?? [];
+        list.push(row);
+        map.set(k, list);
+      }
+      return map;
+    };
+    const movementsByAccount = groupBy(movements, (m) => m.financialAccountId);
+    const transfersInByAccount = groupBy(transfersIn, (t) => t.toAccountId);
+    const transfersOutByAccount = groupBy(transfersOut, (t) => t.fromAccountId);
+
+    return accounts.map((account) => {
       const fixedFundAmount = account.fixedFundAmount !== null ? Number(account.fixedFundAmount) : null;
-      const { currentBalance, balanceSource, coverage } = await this.getAccountBalanceWithSource(account.id, fixedFundAmount);
+      const accountImportedLines = importedLinesByAccount.get(account.id);
 
-      results.push({
+      let currentBalance: number;
+      let balanceSource: "extrato_bancario" | "cash_movements";
+      let coverage: FinancialAccountBalance["coverage"];
+
+      if (accountImportedLines && accountImportedLines.length > 0) {
+        const result = computeAccountBalanceFromBankStatement(accountImportedLines.map((l) => ({ direction: l.direction, amount: Number(l.amount), status: l.status, date: l.date })));
+        currentBalance = Math.round(((fixedFundAmount ?? 0) + result.balance) * 100) / 100;
+        balanceSource = "extrato_bancario";
+        coverage = {
+          totalCount: result.totalCount,
+          classifiedCount: result.classifiedCount,
+          classifiedPercent: result.classifiedPercent,
+          unclassifiedCount: result.unclassifiedCount,
+          unclassifiedAmount: result.unclassifiedAmount,
+          importPeriodFrom: result.importPeriodFrom,
+          importPeriodTo: result.importPeriodTo,
+        };
+      } else {
+        currentBalance = computeAccountBalance(
+          fixedFundAmount,
+          (movementsByAccount.get(account.id) ?? []).map((m) => ({ type: m.type as CashMovementType, amount: Number(m.amount) })),
+          (transfersInByAccount.get(account.id) ?? []).map((t) => ({ amount: Number(t.amount) })),
+          (transfersOutByAccount.get(account.id) ?? []).map((t) => ({ amount: Number(t.amount) })),
+        );
+        balanceSource = "cash_movements";
+        coverage = null;
+      }
+
+      return {
         id: account.id,
         name: account.name,
         type: account.type as FinancialAccountType,
@@ -981,9 +1065,8 @@ export class PostgresFinanceRepository implements FinanceRepository {
         belowThreshold: fixedFundAmount !== null && currentBalance < fixedFundAmount,
         balanceSource,
         coverage,
-      });
-    }
-    return results;
+      };
+    });
   }
 
   private async toAccountTransfer(row: typeof accountTransfersTable.$inferSelect): Promise<AccountTransfer> {
@@ -1033,11 +1116,36 @@ export class PostgresFinanceRepository implements FinanceRepository {
     return this.toAccountTransfer(row);
   }
 
+  /**
+   * Missão Performance 6B — antes buscava o nome de cada conta (origem/destino) com uma consulta
+   * POR LINHA via `toAccountTransfer` (N+1: até 2 consultas extras por transferência). Mesmo
+   * padrão de batching já usado em `listCashMovements` acima: IDs distintos numa única consulta
+   * `inArray`, nomes resolvidos em memória — mesmo resultado, uma rodada de consultas em vez de
+   * até 2×N. Medido: 24 transferências passaram de ~13s para poucas centenas de ms.
+   */
   async listAccountTransfers(): Promise<AccountTransfer[]> {
-    const rows = await this.db().select().from(accountTransfersTable).where(eq(accountTransfersTable.active, true));
-    const results: AccountTransfer[] = [];
-    for (const row of rows) results.push(await this.toAccountTransfer(row));
-    return results;
+    const db = this.db();
+    const rows = await db.select().from(accountTransfersTable).where(eq(accountTransfersTable.active, true));
+    if (rows.length === 0) return [];
+
+    const accountIds = [...new Set([...rows.map((r) => r.fromAccountId), ...rows.map((r) => r.toAccountId)].filter((id): id is string => id !== null))];
+    const accounts = accountIds.length ? await db.select().from(financialAccountsTable).where(inArray(financialAccountsTable.id, accountIds)) : [];
+    const nameById = new Map(accounts.map((a) => [a.id, a.name]));
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type as AccountTransferType,
+      fromAccountId: row.fromAccountId,
+      fromAccountName: row.fromAccountId ? (nameById.get(row.fromAccountId) ?? null) : null,
+      toAccountId: row.toAccountId,
+      toAccountName: row.toAccountId ? (nameById.get(row.toAccountId) ?? null) : null,
+      amount: Number(row.amount),
+      date: row.date,
+      description: row.description,
+      responsibleName: row.responsibleName,
+      documentRef: row.documentRef,
+      notes: row.notes,
+    }));
   }
 
   async createCashMovement(input: CreateCashMovementInput): Promise<CashMovement> {

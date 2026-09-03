@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView, toAccountsReceivableView } from "@/lib/finance/status";
 import { computeDreReport, resolveClassification, resolveCashMovementClassification, resolveTransferClassification } from "@/lib/finance/dre";
@@ -88,15 +89,37 @@ export function computeAccountsReceivableSummary(
   return { totalOpen, totalReceivedThisMonth, totalOverdue, upcomingCount, count: active.length };
 }
 
-export async function fetchAccountsReceivableOverview(
+/**
+ * Missão Performance 6G — mesmo motivo dos wrappers de `fetchCashFlowOverview` (Missão 6C):
+ * `repo.listAccountsPayable()`/`repo.listAccountsReceivable()` eram chamados diretamente (sem
+ * `React.cache()`) tanto aqui (via `fetchAccountsPayableOverview`/`fetchAccountsReceivableOverview`,
+ * usadas pelo cabeçalho global) quanto dentro de `fetchDreSourceData` (usada por
+ * `OperationPanel`/abas Lavação e Estacionamento) — duas leituras completas e idênticas da mesma
+ * tabela na mesma requisição, sempre que as duas partes coexistem (ex.: qualquer página, já que o
+ * cabeçalho roda em toda navegação). Embrulhados aqui, os dois caminhos compartilham a mesma
+ * leitura dentro da mesma requisição — nenhuma mudança de resultado, só menos uma consulta.
+ */
+export const fetchAllAccountsPayableRaw = cache(() => getFinanceRepository().listAccountsPayable());
+export const fetchAllAccountsReceivableRaw = cache(() => getFinanceRepository().listAccountsReceivable());
+
+/**
+ * Missão Performance 6A — embrulhada em `React.cache()`: várias partes da mesma página (o
+ * cabeçalho global, a Central Financeira, seus painéis) pedem a visão de contas a receber para a
+ * mesma `asOfDate` dentro da MESMA requisição. Sem isso, cada chamada refazia a consulta completa
+ * do zero — com o pool de conexão único do Postgres (`max: 1`, `src/db/client.ts`), cada busca
+ * repetida serializa atrás da anterior. Escopo do cache é só a requisição atual (nunca entre
+ * usuários/requisições diferentes) — mesmo padrão já usado em `fetchCentralOverview`
+ * (`src/lib/operations/central.ts`).
+ */
+export const fetchAccountsReceivableOverview = cache(async function fetchAccountsReceivableOverview(
   asOfDate: string = new Date().toISOString().slice(0, 10),
 ): Promise<{ items: AccountsReceivableView[]; summary: AccountsReceivableSummary }> {
-  const items = await getFinanceRepository().listAccountsReceivable();
+  const items = await fetchAllAccountsReceivableRaw();
   const views = items
     .map((item) => toAccountsReceivableView(item, asOfDate))
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   return { items: views, summary: computeAccountsReceivableSummary(views, asOfDate) };
-}
+});
 
 export async function fetchCashMovements(): Promise<CashMovement[]> {
   return getFinanceRepository().listCashMovements();
@@ -324,13 +347,14 @@ export function computeAccountsPayableSummary(items: AccountsPayableView[], asOf
   return { totalPending, totalOverdue, totalPaidThisMonth, upcoming7Count, upcoming30Count, count: active.length };
 }
 
-export async function fetchAccountsPayableOverview(
+/** Missão Performance 6A — mesma razão de `fetchAccountsReceivableOverview` acima: `React.cache()` por requisição. */
+export const fetchAccountsPayableOverview = cache(async function fetchAccountsPayableOverview(
   asOfDate: string = new Date().toISOString().slice(0, 10),
 ): Promise<{ items: AccountsPayableView[]; summary: AccountsPayableSummary }> {
-  const items = await getFinanceRepository().listAccountsPayable();
+  const items = await fetchAllAccountsPayableRaw();
   const views = items.map((item) => toAccountsPayableView(item, asOfDate)).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   return { items: views, summary: computeAccountsPayableSummary(views, asOfDate) };
-}
+});
 
 export type PayableAlertLevel = "7_dias" | "3_dias" | "1_dia" | "no_dia" | "vencida";
 
@@ -965,14 +989,42 @@ export function computeCashFlowAlerts(
 }
 
 /**
+ * Missão Performance 6C — os 3 métodos do repositório abaixo (contas financeiras, movimentações,
+ * transferências) eram chamados diretamente dentro de `fetchCashFlowOverview` — métodos de classe
+ * não são "vistos" pelo `React.cache()` como uma função única para dedupe (cada chamador que
+ * importasse `getFinanceRepository().listX()` diretamente refaria a consulta). Embrulhados aqui
+ * em exports de nível de módulo com `React.cache()`, tanto `fetchCashFlowOverview` (versão
+ * completa) quanto qualquer versão mais enxuta (ver `skipLedger` abaixo) compartilham a MESMA
+ * leitura de banco dentro da mesma requisição, não importa qual delas é chamada primeiro.
+ */
+export const fetchAllFinancialAccountsForCashFlow = cache(() => getFinanceRepository().listFinancialAccounts());
+export const fetchAllCashMovementsForCashFlow = cache(() => getFinanceRepository().listCashMovements());
+export const fetchAllAccountTransfersForCashFlow = cache(() => getFinanceRepository().listAccountTransfers());
+
+/**
  * Missão V4.1 — `periodFrom`/`periodTo` (Fase 2) são opcionais e, quando omitidos, caem em
  * `asOfDate` (equivalente ao preset "Hoje"), preservando exatamente o comportamento anterior para
  * quem já chama esta função sem eles (Central de Operações, `agora-panel`, etc.).
+ *
+ * Missão Performance 6A — embrulhada em `React.cache()`: é a função mais cara da leitura global
+ * (medida em ~20s isolada) e é chamada com os MESMOS argumentos por mais de um lugar na mesma
+ * requisição (cabeçalho global via `fetchCentralOverview` + Central Financeira via
+ * `VisaoGeralPanel`) — sem o cache, cada chamada repetia a mesma rodada de consultas do zero.
+ *
+ * Missão Performance 6C — `skipLedger` (novo, default `false` — comportamento anterior 100%
+ * preservado para todo chamador existente): quando `true`, pula a busca de
+ * `listFinancialClassifications`/`listClassificationRules` (usadas SOMENTE para montar `ledger`,
+ * nunca lidas por `alerts`/`dashboard`/`projection`/`aging` — prova: `computeCashLedger` é a
+ * ÚNICA função que recebe `classifications`/`rules`) e retorna `ledger: []`. Usado por
+ * `fetchGlobalSituation` (cabeçalho global), que nunca exibe o extrato/ledger — só o nível de
+ * severidade dos alertas. Nenhum chamador existente passa esse parâmetro, então nada muda para
+ * eles.
  */
-export async function fetchCashFlowOverview(
+export const fetchCashFlowOverview = cache(async function fetchCashFlowOverview(
   asOfDate: string = new Date().toISOString().slice(0, 10),
   periodFrom: string = asOfDate,
   periodTo: string = asOfDate,
+  options: { skipLedger?: boolean } = {},
 ): Promise<{
   dashboard: CashFlowDashboard;
   projection: CashFlowProjectionPoint[];
@@ -982,15 +1034,15 @@ export async function fetchCashFlowOverview(
   receivablesAging: AgingBucketSummary[];
   payablesAging: AgingBucketSummary[];
 }> {
-  const repo = getFinanceRepository();
+  const skipLedger = options.skipLedger ?? false;
   const [accounts, movements, transfers, arOverview, apOverview, classifications, rules] = await Promise.all([
-    repo.listFinancialAccounts(),
-    repo.listCashMovements(),
-    repo.listAccountTransfers(),
+    fetchAllFinancialAccountsForCashFlow(),
+    fetchAllCashMovementsForCashFlow(),
+    fetchAllAccountTransfersForCashFlow(),
     fetchAccountsReceivableOverview(asOfDate),
     fetchAccountsPayableOverview(asOfDate),
-    repo.listFinancialClassifications(),
-    repo.listClassificationRules(),
+    skipLedger ? Promise.resolve([]) : getFinanceRepository().listFinancialClassifications(),
+    skipLedger ? Promise.resolve([]) : getFinanceRepository().listClassificationRules(),
   ]);
 
   const dashboard = computeCashFlowDashboard(accounts, movements, arOverview.items, apOverview.items, asOfDate, periodFrom, periodTo);
@@ -1002,12 +1054,14 @@ export async function fetchCashFlowOverview(
     periodFrom,
     periodTo,
   });
-  const ledger = computeCashLedger(movements, transfers, classifications, rules);
+  // skipLedger: nunca chama computeCashLedger com classifications/rules vazias por artifício (isso
+  // produziria um ledger real mas mal-classificado, não um "ledger vazio" honesto) — só retorna [].
+  const ledger = skipLedger ? [] : computeCashLedger(movements, transfers, classifications, rules);
   const receivablesAging = computeReceivableAging(arOverview.items, asOfDate);
   const payablesAging = computePayableAging(apOverview.items, asOfDate);
 
   return { dashboard, projection, alerts, ledger, accounts, receivablesAging, payablesAging };
-}
+});
 
 // --- Contabilidade Gerencial / DRE ---
 // DRE gerencial para apoio à administração. Não substitui escrituração contábil, demonstrações
@@ -1040,12 +1094,19 @@ export interface DreSourceData {
  * `DATA_CORTE_JUMPPARK` (01/01–30/04/2026) nunca tinham receita reconhecida pela DRE, mesmo
  * havendo receita real registrada.
  */
-export async function fetchDreSourceData(): Promise<DreSourceData> {
+/**
+ * Missão Performance 6A — embrulhada em `React.cache()` como rede de segurança: o comentário
+ * acima já pede que os chamadores busquem uma vez e reaproveitem via `preFetchedData`, mas isso
+ * depende de cada chamador lembrar de fazer isso manualmente. O cache por requisição garante que,
+ * mesmo que dois pontos futuros esqueçam de passar `preFetchedData`, a segunda chamada nunca
+ * repete a busca no banco — sem alterar nenhum resultado (mesmos dados, mesma requisição).
+ */
+export const fetchDreSourceData = cache(async function fetchDreSourceData(): Promise<DreSourceData> {
   const repo = getFinanceRepository();
   const [accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays, historicalRevenueRecords] = await Promise.all([
-    repo.listAccountsPayable(),
-    repo.listAccountsReceivable(),
-    repo.listCashMovements(),
+    fetchAllAccountsPayableRaw(),
+    fetchAllAccountsReceivableRaw(),
+    fetchAllCashMovementsForCashFlow(),
     repo.listFinancialClassifications(),
     repo.listClassificationRules(),
     repo.listPartners(),
@@ -1054,7 +1115,7 @@ export async function fetchDreSourceData(): Promise<DreSourceData> {
     fetchHistoricalRevenueCandidates(),
   ]);
   return { accountsPayable, accountsReceivable, cashMovements, classifications, rules, partners, jumpParkOrders, stoneFeeDays, historicalRevenueRecords };
-}
+});
 
 export async function fetchDreReport(
   regime: DreRegime,
@@ -1215,8 +1276,11 @@ export async function fetchDrePendencyOverview(report: DreReport): Promise<DrePe
  * Fila de pendências do módulo de classificação — lançamentos sem classificação, com revisão
  * necessária, despesas compartilhadas (Administrativo/Geral) sem rateio configurado, fornecedor/
  * cliente sem regra. Calculada sob demanda a partir dos lançamentos reais, nunca persistida.
+ *
+ * Missão Performance 6A — `React.cache()` por requisição (mesmo motivo de `fetchDreSourceData`,
+ * que ela já reaproveita internamente).
  */
-export async function fetchClassificationQueue(): Promise<ClassificationQueueItem[]> {
+export const fetchClassificationQueue = cache(async function fetchClassificationQueue(): Promise<ClassificationQueueItem[]> {
   const [data, allocationRules] = await Promise.all([fetchDreSourceData(), getFinanceRepository().listAllocationRules()]);
   const hasAllocation = allocationRules.length > 0;
 
@@ -1258,7 +1322,7 @@ export async function fetchClassificationQueue(): Promise<ClassificationQueueIte
   }
 
   return items.sort((a, b) => b.date.localeCompare(a.date));
-}
+});
 
 export async function fetchClassificationRules(): Promise<ClassificationRule[]> {
   return getFinanceRepository().listClassificationRules();

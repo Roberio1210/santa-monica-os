@@ -171,4 +171,55 @@ describe("parsePeriodParams", () => {
     const r = parsePeriodParams({ period: "custom", from: "2026-07-01", to: "2026-07-05" });
     expect(r).toMatchObject({ key: "custom", from: "2026-07-01", to: "2026-07-05" });
   });
+
+  it("resolve specific_month com month/year", () => {
+    const r = parsePeriodParams({ period: "specific_month", month: "4", year: "2026" });
+    expect(r).toMatchObject({ key: "specific_month", from: "2026-04-01", to: "2026-04-30" });
+  });
+
+  it("resolve specific_year com year", () => {
+    const r = parsePeriodParams({ period: "specific_year", year: "2026" });
+    expect(r.key).toBe("specific_year");
+    expect(r.from).toBe("2026-01-01");
+  });
+});
+
+describe("resolvePeriod — specific_month/specific_year — Missão Financeiro 5C", () => {
+  const reference = new Date("2026-09-02T15:00:00.000Z"); // "hoje" = 2026-09-02 em SP
+
+  it("specific_month de um mês passado cobre o mês inteiro (01 ao último dia)", () => {
+    const r = resolvePeriod("specific_month", undefined, reference, { month: 4, year: 2026 });
+    expect(r.from).toBe("2026-04-01");
+    expect(r.to).toBe("2026-04-30");
+    expect(r.label).toContain("Abril");
+  });
+
+  it("specific_month do mês CORRENTE nunca pede dado do futuro — vai só até hoje", () => {
+    const r = resolvePeriod("specific_month", undefined, reference, { month: 9, year: 2026 });
+    expect(r.from).toBe("2026-09-01");
+    expect(r.to).toBe("2026-09-02"); // hoje, nunca 2026-09-30
+  });
+
+  it("specific_month sem mês/ano informado cai no mês corrente", () => {
+    const r = resolvePeriod("specific_month", undefined, reference);
+    expect(r.from).toBe("2026-09-01");
+  });
+
+  it("specific_year de um ano passado cobre o ano inteiro", () => {
+    const referenceIn2027 = new Date("2027-03-01T15:00:00.000Z");
+    const r = resolvePeriod("specific_year", undefined, referenceIn2027, { year: 2026 });
+    expect(r.from).toBe("2026-01-01");
+    expect(r.to).toBe("2026-12-31");
+  });
+
+  it("specific_year do ano CORRENTE nunca pede dado do futuro — vai só até hoje", () => {
+    const r = resolvePeriod("specific_year", undefined, reference, { year: 2026 });
+    expect(r.from).toBe("2026-01-01");
+    expect(r.to).toBe("2026-09-02");
+  });
+
+  it("mês/ano fora do intervalo válido (13, 0, negativo) caem no fallback do mês/ano corrente", () => {
+    const r = resolvePeriod("specific_month", undefined, reference, { month: 13, year: -1 });
+    expect(r.from).toBe("2026-09-01"); // mês corrente, ano corrente — nunca um mês 13 inventado
+  });
 });

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { toItemView } from "@/lib/inventory/status";
 import type { InventoryItemView } from "@/lib/inventory/types";
@@ -34,8 +35,9 @@ export function computeInventorySummary(items: InventoryItemView[]): InventorySu
   };
 }
 
-export async function fetchInventoryOverview(): Promise<{ items: InventoryItemView[]; summary: InventorySummary }> {
+/** Missão Performance 6B — `React.cache()` por requisição: chamada tanto pelo cabeçalho global (`fetchGlobalSituation`) quanto pela Central de Operações (`fetchCentralOverview`) na mesma requisição. */
+export const fetchInventoryOverview = cache(async function fetchInventoryOverview(): Promise<{ items: InventoryItemView[]; summary: InventorySummary }> {
   const items = await getInventoryRepository().listItems();
   const views = items.map(toItemView).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   return { items: views, summary: computeInventorySummary(views) };
-}
+});

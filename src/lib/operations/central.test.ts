@@ -489,3 +489,28 @@ describe("Fase C: alertas de estoque/receitas — severidade correta, nunca crí
     expect(alerts.some((a) => a.title.startsWith("Ordens") || a.title.startsWith("Prévias") || a.title.startsWith("Consumos"))).toBe(false);
   });
 });
+
+describe("Missão Performance 6B — equivalência entre fetchCentralOverview e fetchGlobalSituation", () => {
+  it("classificationPendingCount SOZINHO (qualquer quantidade) nunca muda a Situação — prova de que fetchGlobalSituation pode fixá-lo em {data: 0, error: null} com segurança", () => {
+    const semPendencia = baseOverview({ classificationPendingCount: { data: 0, error: null } });
+    const comMuitaPendencia = baseOverview({ classificationPendingCount: { data: 500, error: null } });
+
+    expect(computeSituation(computeConsolidatedAlerts(semPendencia))).toBe("normal");
+    expect(computeSituation(computeConsolidatedAlerts(comMuitaPendencia))).toBe("normal");
+    expect(computeSituation(computeConsolidatedAlerts(semPendencia))).toBe(computeSituation(computeConsolidatedAlerts(comMuitaPendencia)));
+  });
+
+  it("classificationPendingCount > 0 produz um alerta, mas sempre 'informativo' — nunca eleva a severidade mesmo quando tudo o mais também está crítico", () => {
+    const overrides: Partial<CentralOverview> = { accountsPayable: { data: { items: [makeAP({ dueDate: "2026-06-01", status: "pendente" })], summary: { totalPending: 100, totalOverdue: 100, totalPaidThisMonth: 0, upcoming7Count: 0, upcoming30Count: 0, count: 1 }, alerts: [] }, error: null } };
+
+    const semPendencia = baseOverview({ ...overrides, classificationPendingCount: { data: 0, error: null } });
+    const comPendencia = baseOverview({ ...overrides, classificationPendingCount: { data: 12, error: null } });
+
+    const alertsComPendencia = computeConsolidatedAlerts(comPendencia);
+    const classificacaoAlert = alertsComPendencia.find((a) => a.title === "Lançamentos sem classificação");
+    expect(classificacaoAlert?.severity).toBe("informativo");
+
+    // a situação final (crítica, pela conta a pagar vencida) é idêntica com ou sem o alerta informativo de classificação
+    expect(computeSituation(computeConsolidatedAlerts(semPendencia))).toBe(computeSituation(alertsComPendencia));
+  });
+});

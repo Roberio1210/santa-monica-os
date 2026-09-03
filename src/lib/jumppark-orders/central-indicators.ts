@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { fetchEligibleOrders } from "@/lib/jumppark-orders/eligible-orders";
 import { fetchOrderPreview } from "@/lib/jumppark-orders/preview-service";
 import { listConsumptionConfirmations } from "@/lib/jumppark-orders/consumption-history";
@@ -25,7 +26,8 @@ function isoDate(offsetDays: number): string {
  * Indicadores reais para a Central de Operações (Fase D, seção 13) — recalculados a cada
  * acesso, nunca persistidos. Janela de 30 dias, igual ao padrão de /estoque/ordens.
  */
-export async function fetchOrdersConsumptionIndicators(): Promise<OrdersConsumptionIndicators | null> {
+/** Missão Performance 6B — `React.cache()` por requisição: chamada tanto pelo cabeçalho global (`fetchGlobalSituation`) quanto pela Central de Operações (`fetchCentralOverview`) na mesma requisição. */
+export const fetchOrdersConsumptionIndicators = cache(async function fetchOrdersConsumptionIndicators(): Promise<OrdersConsumptionIndicators | null> {
   if (!isJumpParkConfigured()) return null;
 
   const startDate = isoDate(30);
@@ -65,4 +67,4 @@ export async function fetchOrdersConsumptionIndicators(): Promise<OrdersConsumpt
     divergentConfirmations,
     reversedConsumptions,
   };
-}
+});

@@ -1,307 +1,146 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, CreditCard, DollarSign, FileClock, Handshake, PiggyBank, TrendingDown, TrendingUp, Wallet, Wifi } from "lucide-react";
+import { ArrowRight, FileMinus, Landmark, Receipt, Tags, Wallet } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { Unavailable } from "@/components/shared/unavailable";
 import { APP_MODULES } from "@/components/navigation/app-modules";
-import { ModuleShortcuts } from "@/components/navigation/module-shortcuts";
-import { StatCard } from "@/components/cards/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { formatCurrency } from "@/lib/utils/format";
-import { isJumpParkConfigured } from "@/lib/config/env";
-import { fetchOverviewMetrics } from "@/lib/integrations/jumppark";
-import { fetchAccountsPayableOverview, fetchAccountsReceivableOverview, fetchCashMovements, fetchContracts, fetchFinancialAccounts } from "@/lib/finance/service";
-import { resolveContractValue } from "@/lib/finance/status";
-import { fetchIesaMonthlyClosings } from "@/lib/finance/iesaClosing";
-import { IesaClosingCard } from "@/components/finance/iesa-closing-card";
-import { buildFinancialScheduleForToday } from "@/lib/integrations/stone/financialScheduleService";
+import { Tabs } from "@/components/ui/tabs";
+import { Card, CardTitle } from "@/components/ui/card";
+import { VisaoGeralPanel } from "@/components/finance/visao-geral-panel";
+import { OperationPanel } from "@/components/finance/operation-panel";
+import { FinancePeriodSelector } from "@/components/finance/finance-period-selector";
+import { FINANCE_TABS, financeTabHref, resolveFinanceTab, type FinanceTab } from "@/lib/finance/financeTabs";
+import { resolveFinancePeriod, type FinancePeriodParams } from "@/lib/finance/financePeriod";
+import DrePage from "@/app/financeiro/dre/page";
+import FluxoDeCaixaPage from "@/app/financeiro/fluxo-de-caixa/page";
+import DespesasGerencialPage from "@/app/financeiro/despesas/page";
+import FechamentoPage from "@/app/financeiro/fechamento/page";
 
-// Evita que dados do JumpPark e das contas a receber fiquem congelados no HTML estático.
+// Consulta dados reais a cada acesso — a Central Financeira nunca deve servir HTML estático desatualizado.
 export const dynamic = "force-dynamic";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+function HubLink({ href, icon: Icon, title, description }: { href: string; icon: typeof Wallet; title: string; description: string }) {
+  return (
+    <Link href={href} className="block rounded-xl">
+      <Card className="p-4 transition-colors hover:border-accent/50 hover:bg-background-elevated">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Icon className="h-4 w-4 text-foreground-subtle" aria-hidden="true" />
+            <CardTitle className="text-sm">{title}</CardTitle>
+          </div>
+          <ArrowRight className="h-4 w-4 text-foreground-subtle" aria-hidden="true" />
+        </div>
+        <p className="mt-2 text-xs text-foreground-muted">{description}</p>
+      </Card>
+    </Link>
+  );
 }
 
-async function getJumpParkOverview() {
-  if (!isJumpParkConfigured()) return null;
-  try {
-    return await fetchOverviewMetrics();
-  } catch {
-    return null;
-  }
-}
+type FinanceSearchParams = { tab?: string } & FinancePeriodParams;
 
-export default async function FinanceiroPage() {
-  const asOfDate = todayIso();
-  const jumpPark = await getJumpParkOverview();
-  const { summary: receivableSummary } = await fetchAccountsReceivableOverview(asOfDate);
-  const { summary: payableSummary } = await fetchAccountsPayableOverview(asOfDate);
-  const cashMovements = await fetchCashMovements();
-  const contracts = await fetchContracts();
-  const iesaClosings = await fetchIesaMonthlyClosings();
-  const financialAccounts = await fetchFinancialAccounts();
-  const stoneSchedule = await buildFinancialScheduleForToday(asOfDate);
-
-  const currentMonth = asOfDate.slice(0, 7);
-
-  const todaysCashIn = cashMovements
-    .filter((m) => m.type === "entrada" && m.date === asOfDate)
-    .reduce((sum, m) => sum + m.amount, 0);
-
-  const monthPayments = cashMovements
-    .filter((m) => m.type === "saida" && m.date.slice(0, 7) === currentMonth)
-    .reduce((sum, m) => sum + m.amount, 0);
-
-  const totalBalanceAllAccounts = financialAccounts.reduce((sum, a) => sum + a.currentBalance, 0);
-
-  const caixaFisico = financialAccounts.find((a) => a.name.toLowerCase().includes("caixa"));
-  const stoneMonthCurve = stoneSchedule.status === "ok" ? (stoneSchedule.schedule?.curves.find((c) => c.label === "mes_atual") ?? null) : null;
-  const iesaReceivableOpen = iesaClosings
-    .filter((c) => c.outstandingAmount !== null && c.billingStatus !== "paid" && c.billingStatus !== "cancelled")
-    .reduce((sum, c) => sum + (c.outstandingAmount ?? 0), 0);
-
-  const recentEntries = cashMovements
-    .filter((m) => m.type === "entrada")
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 10);
+/**
+ * Missão Financeiro 5B (Fase 1) — shell da Central Financeira. Cada aba REAPROVEITA a página
+ * especializada já existente (importada e renderizada diretamente) — nenhum motor de cálculo
+ * duplicado, nenhuma lógica financeira reescrita. As rotas especializadas (`/financeiro/dre`,
+ * `/financeiro/fluxo-de-caixa`, etc.) continuam existindo e funcionando de forma independente.
+ *
+ * Missão Financeiro 5C (Fase 2) — o período global (`resolveFinancePeriod`) é resolvido uma vez
+ * aqui e repassado para as abas que já sabem recebê-lo SEM duplicar motor: DRE e Despesas recebem
+ * `from`/`to` nos mesmos nomes de sempre; Fluxo de Caixa recebe via seu próprio preset
+ * "personalizado" (`periodo=personalizado&de=...&ate=...`) — nunca migramos seus query params
+ * (decisão da Missão 5B, ainda vale). Contas, Stone e Fechamento continuam com semântica própria
+ * (due date / competência única / hub de navegação) — o filtro global nunca força uma composição
+ * artificial nelas (ver checkpoint, item "abas").
+ */
+export default async function FinanceiroPage({ searchParams }: { searchParams: Promise<FinanceSearchParams> }) {
+  const params = await searchParams;
+  const activeTab = resolveFinanceTab(params.tab);
+  const period = resolveFinancePeriod(params);
+  const tabHref = (tab: FinanceTab | string) => financeTabHref(tab, period);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Financeiro"
-        description="Faturamento operacional, caixa e contas a receber — sempre mostrados separadamente, nunca somados automaticamente."
-        actions={
-          jumpPark ? (
-            <Badge variant="positive">
-              <Wifi className="h-3 w-3" />
-              JumpPark
-            </Badge>
-          ) : undefined
-        }
-      />
+      <PageHeader title="Central Financeira" description="Visão financeira, fluxo de caixa, contas, despesas e resultados da operação." />
 
-      <ModuleShortcuts shortcuts={APP_MODULES.find((m) => m.id === "financeiro")!.shortcuts} />
+      <FinancePeriodSelector period={period} tab={activeTab} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label="Faturamento operacional hoje"
-          value={jumpPark ? formatCurrency(jumpPark.dailyRevenue) : "Informação indisponível"}
-          icon={DollarSign}
-          hint="JumpPark — serviços prestados hoje"
-        />
-        <StatCard
-          label="Entradas de caixa hoje"
-          value={formatCurrency(todaysCashIn)}
-          icon={Wallet}
-          hint="dinheiro que entrou hoje, qualquer competência"
-        />
-        <StatCard
-          label="Contas a receber em aberto"
-          value={formatCurrency(receivableSummary.totalOpen)}
-          icon={FileClock}
-          hint={`${receivableSummary.count} conta(s)`}
-        />
-        <StatCard
-          label="Valores vencidos"
-          value={formatCurrency(receivableSummary.totalOverdue)}
-          icon={AlertTriangle}
-        />
-      </div>
+      <Tabs items={FINANCE_TABS} active={activeTab} hrefFor={tabHref} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label="Posição do caixa físico"
-          value={caixaFisico ? formatCurrency(caixaFisico.currentBalance) : "Dados insuficientes"}
-          icon={PiggyBank}
-          hint={caixaFisico?.informedBalanceAt ? `conferido em ${caixaFisico.informedBalanceAt.slice(0, 10)}` : "saldo calculado, nunca conferido ainda"}
-        />
-        <StatCard
-          label="Valor líquido Stone (mês)"
-          value={stoneMonthCurve ? formatCurrency(stoneMonthCurve.netAmountExpected) : "Dados insuficientes"}
-          icon={CreditCard}
-          hint={stoneMonthCurve ? `bruto ${formatCurrency(stoneMonthCurve.grossAmountExpected)}` : "Stone não configurado ou sem dado no período"}
-        />
-        <StatCard
-          label="Taxas Stone (mês)"
-          value={stoneMonthCurve ? formatCurrency(stoneMonthCurve.feesExpected) : "Dados insuficientes"}
-          icon={CreditCard}
-        />
-        <StatCard
-          label="IESA a receber"
-          value={formatCurrency(iesaReceivableOpen)}
-          icon={Handshake}
-          hint={`${iesaClosings.filter((c) => c.billingStatus !== "paid" && c.billingStatus !== "cancelled").length} competência(s) em aberto`}
-        />
-      </div>
+      {activeTab === "visao-geral" ? <VisaoGeralPanel period={period} /> : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Pagamentos do mês" value={formatCurrency(monthPayments)} icon={TrendingDown} hint="saídas de caixa efetivas no mês, qualquer competência" />
-        <StatCard label="Contas a pagar pendentes" value={formatCurrency(payableSummary.totalPending)} icon={FileClock} hint={`${payableSummary.count} conta(s)`} />
-        <StatCard label="Saldo total (todas as contas)" value={formatCurrency(totalBalanceAllAccounts)} icon={Wallet} hint="Stone + Ailos + Caixa físico" />
-      </div>
+      {activeTab === "lavacao" ? <OperationPanel group="estetica_automotiva" period={period} /> : null}
 
-      <Card>
-        <CardContent className="pt-4 text-xs text-foreground-subtle">
-          <p>
-            <strong className="text-foreground-muted">Faturamento operacional</strong> é o serviço prestado no dia
-            (fonte: JumpPark). <strong className="text-foreground-muted">Entrada de caixa</strong> é dinheiro que
-            efetivamente entrou naquela data, podendo se referir a uma competência diferente (ex.: o recebimento de
-            R$ 900,00 da IESA/Nissan em 10/07/2026 é uma entrada de caixa desse dia e a baixa de uma conta a receber
-            de competência junho/2026 — nunca um serviço prestado em 10/07/2026). Os dois números acima nunca são
-            somados entre si. <strong className="text-foreground-muted">Transferências entre contas e aportes de sócios</strong>{" "}
-            nunca entram em nenhum dos números acima (nem receita, nem despesa, nem faturamento) — ficam só no saldo
-            de cada conta. Ver <Link href="/financeiro/conta-stone" className="text-accent hover:underline">Conta Stone</Link> para o extrato
-            bancário reconciliado.
+      {activeTab === "estacionamento" ? <OperationPanel group="estacionamento" period={period} /> : null}
+
+      {activeTab === "dre" ? <DrePage searchParams={Promise.resolve({ from: period.from, to: period.to })} /> : null}
+
+      {activeTab === "fluxo" ? <FluxoDeCaixaPage searchParams={Promise.resolve({ periodo: "personalizado", de: period.from, ate: period.to })} /> : null}
+
+      {activeTab === "contas" ? (
+        <div className="space-y-4">
+          <p className="text-sm text-foreground-muted">
+            As páginas completas de Contas a Receber e Contas a Pagar continuam com CRUD, filtros e alertas próprios (por vencimento, não pelo período global acima) — os atalhos abaixo levam
+            direto a cada uma.
           </p>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Origem da receita</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            <div className="flex items-center justify-between border-b border-border-subtle py-2">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-foreground-subtle" />
-                <p className="text-sm text-foreground-muted">Receita JumpPark (mês)</p>
-              </div>
-              <p className="text-sm font-medium text-foreground">
-                {jumpPark ? formatCurrency(jumpPark.monthlyRevenue) : <Unavailable label="Indisponível" />}
-              </p>
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <div className="flex items-center gap-2">
-                <Handshake className="h-4 w-4 text-foreground-subtle" />
-                <p className="text-sm text-foreground-muted">Receita de contratos recebida (mês)</p>
-              </div>
-              <p className="text-sm font-medium text-foreground">{formatCurrency(receivableSummary.totalReceivedThisMonth)}</p>
-            </div>
-            <p className="pt-1 text-xs text-foreground-subtle">
-              As duas linhas acima têm fontes diferentes (API JumpPark x contas a receber de contratos) e não se
-              sobrepõem — somá-las manualmente também é seguro, mas o sistema não faz essa soma automaticamente para
-              não mascarar a origem de cada valor.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Contas a Receber</CardTitle>
-            <Link href="/financeiro/contas-a-receber" className="flex items-center gap-1 text-xs text-accent hover:underline">
-              Ver todas <ArrowRight className="h-3 w-3" />
-            </Link>
-          </CardHeader>
-          <CardContent className="pt-0 text-sm text-foreground-muted">
-            <p>{receivableSummary.count} conta(s) cadastrada(s) · {receivableSummary.upcomingCount} vencendo nos próximos 7 dias.</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Contas a Pagar</CardTitle>
-            <Link href="/financeiro/contas-a-pagar" className="flex items-center gap-1 text-xs text-accent hover:underline">
-              Ver todas <ArrowRight className="h-3 w-3" />
-            </Link>
-          </CardHeader>
-          <CardContent className="pt-0 text-sm text-foreground-muted">
-            <p>{payableSummary.count} conta(s) cadastrada(s) · {formatCurrency(payableSummary.totalPending)} pendente.</p>
-            {payableSummary.totalOverdue > 0 ? (
-              <p className="mt-1 text-xs text-critical">{formatCurrency(payableSummary.totalOverdue)} vencido(s).</p>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Contratos recorrentes</CardTitle>
-          <Link href="/financeiro/contratos/novo" className="flex items-center gap-1 text-xs text-accent hover:underline">
-            Novo contrato <ArrowRight className="h-3 w-3" />
-          </Link>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
-                  <th className="pb-2 pr-3 font-medium">Parceiro</th>
-                  <th className="pb-2 pr-3 font-medium">Contrato</th>
-                  <th className="pb-2 pr-3 font-medium">Vencimento</th>
-                  <th className="pb-2 pr-3 font-medium">Valor vigente hoje</th>
-                  <th className="pb-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((contract) => {
-                  const currentValue =
-                    contract.baseValue ?? (contract.valuePeriods.length > 0 ? resolveContractValue(contract.valuePeriods, asOfDate) : null);
-                  return (
-                    <tr key={contract.id} className="border-b border-border-subtle last:border-0">
-                      <td className="py-2 pr-3 font-medium text-foreground">{contract.partnerName}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{contract.title}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{contract.dueDay ? `dia ${contract.dueDay}` : "Não informado"}</td>
-                      <td className="py-2 pr-3 text-foreground">
-                        {currentValue !== null ? formatCurrency(currentValue) : <Unavailable label="Variável / sem vigência aplicável hoje" />}
-                      </td>
-                      <td className="py-2">
-                        <Badge variant={contract.status === "ativo" ? "positive" : "outline"}>{contract.status}</Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <HubLink href="/financeiro/contas-a-receber" icon={Receipt} title="Contas a Receber" description="Lista completa, baixas, vencimentos e alertas de recebíveis." />
+            <HubLink href="/financeiro/contas-a-pagar" icon={FileMinus} title="Contas a Pagar" description="Lista completa, baixas, vencimentos e alertas de obrigações." />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      ) : null}
 
-      <IesaClosingCard closings={iesaClosings} />
+      {activeTab === "despesas" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/financeiro/classificacao"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-background-elevated px-3 py-1.5 text-xs font-medium text-foreground-muted transition-colors hover:border-accent/40 hover:text-foreground"
+            >
+              <Tags className="h-3.5 w-3.5" />
+              Classificação Financeira
+            </Link>
+            <Link
+              href="/financeiro/fornecedores"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-background-elevated px-3 py-1.5 text-xs font-medium text-foreground-muted transition-colors hover:border-accent/40 hover:text-foreground"
+            >
+              <Landmark className="h-3.5 w-3.5" />
+              Fornecedores
+            </Link>
+          </div>
+          <DespesasGerencialPage searchParams={Promise.resolve({ period: "custom", from: period.from, to: period.to })} />
+        </div>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recebimentos recentes</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          {recentEntries.length === 0 ? (
-            <Unavailable label="Nenhum recebimento registrado." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border-subtle text-left text-xs text-foreground-subtle">
-                    <th className="pb-2 pr-3 font-medium">Data</th>
-                    <th className="pb-2 pr-3 font-medium">Descrição</th>
-                    <th className="pb-2 pr-3 font-medium">Valor</th>
-                    <th className="pb-2 font-medium">Origem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentEntries.map((entry) => (
-                    <tr key={entry.id} className="border-b border-border-subtle last:border-0">
-                      <td className="py-2 pr-3 text-foreground-muted">{entry.date}</td>
-                      <td className="py-2 pr-3 text-foreground-muted">{entry.description}</td>
-                      <td className="py-2 pr-3 font-medium text-foreground">{formatCurrency(entry.amount)}</td>
-                      <td className="py-2 text-foreground-subtle">{entry.source}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {activeTab === "stone" ? (
+        <div className="space-y-4">
+          <p className="text-sm text-foreground-muted">
+            Conciliação e Extrato são fontes diferentes — conciliação é a liquidação de vendas via adquirente; extrato é a conta bancária Stone. Nunca são a mesma coisa.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <HubLink href="/financeiro/stone-conciliacao" icon={Landmark} title="Conciliação Stone" description="Vendas, taxas, antecipações e chargebacks processados via arquivo diário." />
+            <HubLink href="/financeiro/conta-stone" icon={Wallet} title="Conta Stone (extrato)" description="Extrato bancário real da conta Stone: saldo, Pix, importação e classificação." />
+          </div>
+        </div>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Histórico e formas de pagamento</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <Unavailable label="Informação indisponível — ainda não há série histórica real de receita nem volume suficiente de contas a receber (hoje só 1 registro) para uma distribuição por forma de pagamento. Nenhum número foi inventado para preencher este espaço." />
-        </CardContent>
-      </Card>
+      {activeTab === "fechamento" ? <FechamentoPage searchParams={Promise.resolve({})} /> : null}
+
+      <div className="border-t border-border-subtle pt-4">
+        <p className="mb-2 text-xs font-medium text-foreground-muted">Todos os módulos financeiros</p>
+        <div className="flex flex-wrap gap-2">
+          {APP_MODULES.find((m) => m.id === "financeiro")!.shortcuts.map((shortcut) => {
+            const Icon = shortcut.icon;
+            return (
+              <Link
+                key={shortcut.href}
+                href={shortcut.href}
+                className="inline-flex items-center gap-2 rounded-lg border border-border-subtle px-2.5 py-1 text-xs text-foreground-subtle transition-colors hover:border-accent/40 hover:text-foreground"
+              >
+                <Icon className="h-3 w-3" />
+                {shortcut.label}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

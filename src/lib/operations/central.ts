@@ -132,6 +132,30 @@ async function settleJumpParkToday(asOfDate: string): Promise<JumpParkSectionRes
  * DUAS vezes por acesso à Central. Deduplicação só dura o request atual (nunca entre requisições
  * diferentes), então o dado nunca fica desatualizado.
  */
+type ApOverviewResult = SectionResult<Awaited<ReturnType<typeof fetchAccountsPayableOverview>>>;
+type ArOverviewResult = SectionResult<Awaited<ReturnType<typeof fetchAccountsReceivableOverview>>>;
+type InventoryOverviewResult = SectionResult<Awaited<ReturnType<typeof fetchInventoryOverview>>>;
+
+/**
+ * Missão Performance 6B — glue de montagem extraída de dentro de `fetchCentralOverview` para ser
+ * reaproveitada por `fetchGlobalSituation` (abaixo) SEM duplicar a regra: a regra de negócio em
+ * si (o que vira alerta, o que é "crítico") continua 100% dentro de `computePayableAlerts`/
+ * `computeReceivableAlerts`/`computeCashFlowAlerts`/`computeConsolidatedAlerts`/`computeSituation`
+ * — funções puras, importadas, nunca copiadas. Isto aqui é só reempacotamento de shape (achatar
+ * `SectionResult` bruto em `SectionResult` com `alerts` anexado), idêntico nas duas chamadoras.
+ */
+function assembleAccountsPayable(apOverview: ApOverviewResult, asOfDate: string): CentralOverview["accountsPayable"] {
+  return apOverview.data ? { data: { ...apOverview.data, alerts: computePayableAlerts(apOverview.data.items, asOfDate) }, error: null } : { data: null, error: apOverview.error };
+}
+
+function assembleAccountsReceivable(arOverview: ArOverviewResult, asOfDate: string): CentralOverview["accountsReceivable"] {
+  return arOverview.data ? { data: { ...arOverview.data, alerts: computeReceivableAlerts(arOverview.data.items, asOfDate) }, error: null } : { data: null, error: arOverview.error };
+}
+
+function assembleNegativeStockCount(inventory: InventoryOverviewResult): SectionResult<number> {
+  return inventory.data ? { data: inventory.data.items.filter((i) => i.currentQuantity < 0).length, error: null } : { data: null, error: inventory.error };
+}
+
 export const fetchCentralOverview = cache(async function fetchCentralOverview(asOfDate: string): Promise<CentralOverview> {
   const jumpparkConfigured = isJumpParkConfigured();
 
@@ -148,21 +172,9 @@ export const fetchCentralOverview = cache(async function fetchCentralOverview(as
     settle(fetchOrdersConsumptionIndicators()),
   ]);
 
-  const accountsPayable: SectionResult<{ items: AccountsPayableView[]; summary: AccountsPayableSummary; alerts: PayableAlert[] }> = apOverview.data
-    ? { data: { ...apOverview.data, alerts: computePayableAlerts(apOverview.data.items, asOfDate) }, error: null }
-    : { data: null, error: apOverview.error };
-
-  const accountsReceivable: SectionResult<{ items: AccountsReceivableView[]; summary: AccountsReceivableSummary; alerts: ReceivableAlert[] }> = arOverview.data
-    ? { data: { ...arOverview.data, alerts: computeReceivableAlerts(arOverview.data.items, asOfDate) }, error: null }
-    : { data: null, error: arOverview.error };
-
   const classificationPendingCount: SectionResult<number> = classificationQueue.data
     ? { data: classificationQueue.data.length, error: null }
     : { data: null, error: classificationQueue.error };
-
-  const negativeStockCount: SectionResult<number> = inventory.data
-    ? { data: inventory.data.items.filter((i) => i.currentQuantity < 0).length, error: null }
-    : { data: null, error: inventory.error };
 
   return {
     asOfDate,
@@ -170,14 +182,62 @@ export const fetchCentralOverview = cache(async function fetchCentralOverview(as
     jumpparkConfigured,
     jumppark,
     cashFlow,
-    accountsPayable,
-    accountsReceivable,
+    accountsPayable: assembleAccountsPayable(apOverview, asOfDate),
+    accountsReceivable: assembleAccountsReceivable(arOverview, asOfDate),
     classificationPendingCount,
     inventory: inventory.data ? { data: inventory.data.summary, error: null } : { data: null, error: inventory.error },
-    negativeStockCount,
+    negativeStockCount: assembleNegativeStockCount(inventory),
     inventoryQuality,
     ordersConsumption,
   };
+});
+
+/**
+ * Missão Performance 6B — versão mínima para o cabeçalho global (`src/app/layout.tsx`), que só
+ * precisa do nível de "Situação" (normal/atenção/crítica), nunca da lista completa de itens de
+ * cada seção. Busca exatamente as mesmas 7 fontes de `fetchCentralOverview` MENOS
+ * `fetchClassificationQueue` — prova de que essa fonte nunca afeta o resultado: toda vez que ela
+ * gera um alerta (`computeConsolidatedAlerts`, linha "Lançamentos sem classificação"), a
+ * severidade é sempre `"informativo"`, e `computeSituation` só olha para `"critico"`/`"atencao"`
+ * (nunca `"informativo"`) — ver os dois arquivos. `classificationPendingCount` é passado como
+ * `{ data: 0, error: null }`: um valor fixo que nunca produz alerta (`overview.classificationPendingCount.data > 0`
+ * é a única condição que gera o alerta informativo), então o resultado de `computeConsolidatedAlerts`
+ * e `computeSituation` é garantidamente idêntico ao de `fetchCentralOverview` para o mesmo `asOfDate`
+ * — mesma regra, mesmas outras 7 fontes, só sem a mais cara e irrelevante para este indicador.
+ * `React.cache()` pela mesma razão de `fetchCentralOverview` (dedupe por requisição).
+ */
+export const fetchGlobalSituation = cache(async function fetchGlobalSituation(asOfDate: string): Promise<SituationLevel> {
+  const jumpparkConfigured = isJumpParkConfigured();
+  const jumpparkPromise: Promise<JumpParkSectionResult> = jumpparkConfigured ? settleJumpParkToday(asOfDate) : settleJumpPark(Promise.reject(new JumpParkNotConfiguredError()));
+
+  const [jumppark, cashFlow, apOverview, arOverview, inventory, inventoryQuality, ordersConsumption] = await Promise.all([
+    jumpparkPromise,
+    // Missão Performance 6C: skipLedger — "Situação" nunca lê `.ledger`, só `.alerts`. Pula
+    // listFinancialClassifications/listClassificationRules (usadas só para montar o ledger).
+    settle(fetchCashFlowOverview(asOfDate, asOfDate, asOfDate, { skipLedger: true })),
+    settle(fetchAccountsPayableOverview(asOfDate)),
+    settle(fetchAccountsReceivableOverview(asOfDate)),
+    settle(fetchInventoryOverview()),
+    settle(fetchDataQualitySummary()),
+    settle(fetchOrdersConsumptionIndicators()),
+  ]);
+
+  const overview: CentralOverview = {
+    asOfDate,
+    checkedAt: new Date().toISOString(),
+    jumpparkConfigured,
+    jumppark,
+    cashFlow,
+    accountsPayable: assembleAccountsPayable(apOverview, asOfDate),
+    accountsReceivable: assembleAccountsReceivable(arOverview, asOfDate),
+    classificationPendingCount: { data: 0, error: null },
+    inventory: inventory.data ? { data: inventory.data.summary, error: null } : { data: null, error: inventory.error },
+    negativeStockCount: assembleNegativeStockCount(inventory),
+    inventoryQuality,
+    ordersConsumption,
+  };
+
+  return computeSituation(computeConsolidatedAlerts(overview));
 });
 
 /**

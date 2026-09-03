@@ -1202,6 +1202,24 @@ describe("Receita histórica (planilha pré-JumpPark) — Missão UX/Navegação
     expect(report.receitaBruta).toBe(150); // 100 (histórico, dentro) + 50 (JumpPark, dentro) — nunca inclui os dois "999" fora do intervalo
   });
 
+  it("Missão Financeiro 5C, item 8/teste 8 — virada EXATA 30/04→01/05 (DATA_CORTE_JUMPPARK): 30/04 é sempre histórico, 01/05 é sempre JumpPark, nunca as duas contam a mesma data", () => {
+    const report = computeDreReport(
+      baseGerencialInput({
+        competenceFrom: "2026-04-30",
+        competenceTo: "2026-05-01",
+        historicalRevenueRecords: [
+          makeHistoricalRevenue({ externalId: "hist-30-04", date: "2026-04-30", category: "Lavação", amount: 70 }), // último dia histórico — dentro
+          makeHistoricalRevenue({ externalId: "hist-01-05-vazado", date: "2026-05-01", category: "Lavação", amount: 9999 }), // não deveria existir na prática, mas mesmo vazado é descartado
+        ],
+        jumpParkOrders: [
+          makeJumpParkOrder({ externalId: "jp-01-05", orderDate: "2026-05-01", servicesAmount: 40 }), // primeiro dia JumpPark — dentro
+          makeJumpParkOrder({ externalId: "jp-30-04-vazado", orderDate: "2026-04-30", servicesAmount: 9999 }), // ordem "de teste" antes do corte — descartada
+        ],
+      }),
+    );
+    expect(report.receitaBruta).toBe(110); // 70 (histórico, 30/04) + 40 (JumpPark, 01/05) — nunca os dois "9999"
+  });
+
   it("11) fonte histórica tem granularidade real por registro (não mensal) — uma consulta parcial de janeiro (10/01→20/01) traz só os registros daquela janela, sem ratear nem incluir o mês inteiro", () => {
     const report = computeDreReport(
       baseGerencialInput({

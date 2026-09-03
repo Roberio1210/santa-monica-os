@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
 import { listServices, type ServiceCatalogEntry } from "@/lib/inventory/services-catalog";
@@ -28,7 +29,8 @@ export interface DataQualitySummary {
  * existir no cadastro de produto na Missão 22 (Estoque Inteligente) — ver
  * `src/app/estoque/produtos/[id]/page.tsx` para a edição desses campos.
  */
-export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
+/** Missão Performance 6B — `React.cache()` por requisição: chamada tanto pelo cabeçalho global (`fetchGlobalSituation`) quanto pela Central de Operações (`fetchCentralOverview`) na mesma requisição. */
+export const fetchDataQualitySummary = cache(async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
   const [rawItems, recipes, services, suggestions, serviceCostEstimates] = await Promise.all([
     getInventoryRepository().listItems(),
     getRecipeRepository().listRecipes(),
@@ -52,4 +54,4 @@ export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
     pendingMappings: suggestions.filter((s) => s.active && !s.confirmed),
     servicesWithPartialCost: serviceCostEstimates.filter((s) => s.estimate.isPartial),
   };
-}
+});

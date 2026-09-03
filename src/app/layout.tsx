@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/layout/app-shell";
 import { getCurrentUser } from "@/lib/auth/session";
-import { computeConsolidatedAlerts, computeSituation, fetchCentralOverview } from "@/lib/operations/central";
+import { fetchGlobalSituation } from "@/lib/operations/central";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import type { SituationLevel } from "@/lib/operations/situation";
 import "./globals.css";
@@ -10,15 +10,21 @@ import "./globals.css";
 /**
  * Missão UX/Navegação 4B — mesma fonte de verdade do badge da Central de Operações
  * (`computeSituation`/`computeConsolidatedAlerts`, `src/lib/operations/central.ts`), nunca um
- * texto fixo separado. `fetchCentralOverview` é cacheada por requisição (`React.cache`), então
- * chamá-la aqui não duplica as consultas quando a página visitada também for `/dashboard`.
- * `null` só quando o cálculo falha de verdade (ex.: banco fora do ar) — nesse caso o badge do
- * cabeçalho simplesmente não aparece, nunca finge "normal" sem ter certeza.
+ * texto fixo separado.
+ *
+ * Missão Performance 6B — trocado de `fetchCentralOverview` (overview completo, ~7 fontes) para
+ * `fetchGlobalSituation` (mesma regra, mesmas fontes que afetam severidade, MENOS
+ * `fetchClassificationQueue` — a única fonte que nunca produz alerta crítico/atenção, só
+ * informativo, que `computeSituation` já ignora — ver comentário em `central.ts`). Toda função
+ * de leitura por trás das duas é `React.cache()` por requisição, então em páginas que também
+ * chamam `fetchCentralOverview` (ex.: `/dashboard`) as consultas compartilhadas continuam
+ * deduplicadas — nenhuma consulta a mais nem a menos do que antes nesse caso. `null` só quando o
+ * cálculo falha de verdade (ex.: banco fora do ar) — nesse caso o badge do cabeçalho simplesmente
+ * não aparece, nunca finge "normal" sem ter certeza.
  */
 async function computeGlobalSituation(): Promise<SituationLevel | null> {
   try {
-    const overview = await fetchCentralOverview(saoPauloDateISO());
-    return computeSituation(computeConsolidatedAlerts(overview));
+    return await fetchGlobalSituation(saoPauloDateISO());
   } catch {
     return null;
   }

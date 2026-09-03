@@ -10,8 +10,18 @@ export type Database = ReturnType<typeof drizzle<typeof schema>>;
  * Aceita tanto a conexão base quanto uma transação em andamento (`tx` recebido dentro de
  * `db.transaction(async (tx) => {...})`). Use este tipo em qualquer função auxiliar que PODE ser
  * chamada de dentro de uma transação (ex.: os conversores `toXxx()` dos repositórios). Nunca use
- * só `Database` nesses casos: com o pool em `max: 1` (ver abaixo), uma consulta extra fora do
- * `tx` trava a transação para sempre esperando uma segunda conexão que nunca é liberada.
+ * só `Database` nesses casos: uma consulta que deveria participar da transação, mas usa a conexão
+ * base (`this.db()`) em vez de `tx`, corrompe a atomicidade (a consulta extra roda fora da
+ * transação, vendo/alterando estado que a transação ainda não confirmou ou já revertido) — e,
+ * com pool pequeno, pode travar esperando uma conexão livre que só se libera quando a própria
+ * transação (que está esperando essa consulta) terminar. Esse bug real já aconteceu neste projeto
+ * (`toAccountsPayable`/`toAccountsReceivable`/`toCashMovement`, Missão de Instrumentação
+ * Gerencial, 11/08/2026) e foi corrigido introduzindo exatamente este tipo. Guarda de regressão
+ * automatizada em `src/lib/finance/postgres-repository-transaction-safety.test.ts` — auditoria
+ * completa de todas as 39 transações do repositório (Missão Performance 6E, 02/09/2026) não
+ * encontrou nenhuma instância ativa do padrão. Aumentar o `max` do pool (abaixo) NUNCA substitui
+ * essa disciplina — só reduz a chance de o erro virar um travamento óbvio; sem `tx` correto, o bug
+ * de atomicidade continua existindo, só fica mais difícil de notar.
  */
 export type DbOrTx = Database | PostgresJsTransaction<typeof schema, ExtractTablesWithRelations<typeof schema>>;
 
@@ -57,7 +67,22 @@ export function getDb(): Database | null {
     return cached;
   }
 
-  const client = postgres(url, { max: 1, prepare: false });
+  /**
+   * Missão Performance 6D/6E/6F (02/09/2026) — `max` era `1` desde a criação deste arquivo
+   * (10/07/2026), como escolha conservadora inicial, não como reação a um bug. Um bug real de
+   * atomicidade transacional apareceu depois (ver comentário de `DbOrTx` acima) e foi corrigido
+   * — não por causa do `max: 1`, mas porque o código passou a usar `tx` corretamente em todo
+   * lugar. A Missão 6D mediu experimentalmente que `max: 1` serializa toda leitura concorrente
+   * desta aplicação (cada consulta espera a anterior liberar a única conexão, mesmo quando o
+   * código já pede paralelismo via `Promise.all`) — `fetchGlobalSituation` caiu de ~15s (max=1)
+   * para ~3,5s (max=5), sem nenhum erro/timeout em nenhuma configuração testada (max=2/3/5). A
+   * Missão 6E auditou as 39 transações do repositório inteiro e não encontrou nenhum uso indevido
+   * de conexão fora de `tx` — ver `DbOrTx` acima e
+   * `src/lib/finance/postgres-repository-transaction-safety.test.ts` para a guarda automatizada.
+   * `max: 5` foi adotado por essas duas missões combinadas: ganho de performance comprovado +
+   * segurança transacional comprovada. Nunca aumentar mais sem repetir essa dupla verificação.
+   */
+  const client = postgres(url, { max: 5, prepare: false });
   cached = drizzle(client, { schema });
   return cached;
 }
