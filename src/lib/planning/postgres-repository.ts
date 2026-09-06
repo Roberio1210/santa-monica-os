@@ -1,6 +1,6 @@
 import "server-only";
 import { desc, eq, ilike, inArray, or } from "drizzle-orm";
-import { getDb } from "@/db/client";
+import { getDb, type DbOrTx } from "@/db/client";
 import { appointments, customers, operationalCapacityConfig, serviceOrderItems, serviceOrders, services, serviceVisits, vehicles } from "@/db/schema";
 import type { AppointmentRow, CompletedOrderSample, PlanningRepository } from "@/lib/planning/repository";
 import type { Appointment, AppointmentStatus, CapacityConfig, CreateAppointmentInput, SetCapacityConfigInput } from "@/lib/planning/types";
@@ -35,8 +35,8 @@ export class PostgresPlanningRepository implements PlanningRepository {
     return db;
   }
 
-  async createAppointment(input: CreateAppointmentInput): Promise<Appointment> {
-    const [row] = await this.db()
+  async createAppointment(input: CreateAppointmentInput, runner: DbOrTx = this.db()): Promise<Appointment> {
+    const [row] = await runner
       .insert(appointments)
       .values({
         customerId: input.customerId,

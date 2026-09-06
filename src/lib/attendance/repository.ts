@@ -1,3 +1,4 @@
+import type { DbOrTx } from "@/db/client";
 import type {
   AddPhotoInput,
   AddRecommendationInput,
@@ -35,10 +36,17 @@ export interface ServiceCatalogEntry {
  * desta sprint.
  */
 export interface AttendanceRepository {
-  findCustomerByPhone(phone: string): Promise<Customer | null>;
+  /**
+   * `runner` opcional (Missão de Atomicidade Planejamento) — quando fornecido, participa da
+   * transação já aberta pelo chamador (ex.: `db.transaction()` em `planning/service.ts`) em vez
+   * de abrir sua própria conexão via `getDb()`. Omitido, o comportamento é idêntico a antes desta
+   * missão. Só os métodos usados por `registerQuickCustomerAndVehicle` recebem este parâmetro —
+   * os demais nunca participam de uma transação multi-tabela hoje.
+   */
+  findCustomerByPhone(phone: string, runner?: DbOrTx): Promise<Customer | null>;
   findCustomerByCpf(cpf: string): Promise<Customer | null>;
   getCustomer(id: string): Promise<Customer | null>;
-  createCustomer(input: CreateCustomerInput): Promise<Customer>;
+  createCustomer(input: CreateCustomerInput, runner?: DbOrTx): Promise<Customer>;
   /** Busca livre por nome do cliente OU marca/modelo de veículo — usada quando a query não é telefone nem placa. Limitada a poucos resultados. */
   searchCustomersByText(query: string): Promise<Customer[]>;
   /** Todos os clientes cadastrados (Missão 25) — usada pelas visões de carteira completa (Clientes sem retorno, Fidelização), nunca paginada implicitamente para não esconder registros. */
@@ -48,16 +56,16 @@ export interface AttendanceRepository {
    * formatação salva difere da digitada agora. Usado só para AVISAR de possível duplicidade antes
    * de criar um cliente novo — nunca funde, nunca bloqueia o cadastro.
    */
-  findCustomersByNormalizedPhone(phone: string): Promise<Customer[]>;
+  findCustomersByNormalizedPhone(phone: string, runner?: DbOrTx): Promise<Customer[]>;
   /** Mesmo espírito de `findCustomersByNormalizedPhone`, mas por nome normalizado — sinal fraco (nome não é identificador único), só para aviso. */
-  findCustomersByNormalizedName(name: string): Promise<Customer[]>;
+  findCustomersByNormalizedName(name: string, runner?: DbOrTx): Promise<Customer[]>;
 
-  findVehicleByPlate(plate: string): Promise<Vehicle | null>;
+  findVehicleByPlate(plate: string, runner?: DbOrTx): Promise<Vehicle | null>;
   getVehicle(id: string): Promise<Vehicle | null>;
   listVehiclesByCustomer(customerId: string): Promise<Vehicle[]>;
-  createVehicle(input: CreateVehicleInput): Promise<Vehicle>;
+  createVehicle(input: CreateVehicleInput, runner?: DbOrTx): Promise<Vehicle>;
   /** Placa normalizada (maiúscula, sem espaço), comparada mesmo quando a formatação salva difere — só para aviso de possível duplicidade, nunca funde/bloqueia. */
-  findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]>;
+  findVehiclesByNormalizedPlate(plate: string, runner?: DbOrTx): Promise<Vehicle[]>;
   /**
    * Missão de Performance do CRM — mesma consulta de `listVehiclesByCustomer`, mas para MUITOS
    * clientes de uma vez (1 consulta em vez de N). Existe só porque `listCustomerOverviews`

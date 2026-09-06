@@ -1,6 +1,7 @@
 import "server-only";
-import { fetchCustomerSearchResult } from "@/lib/attendance/service";
-import type { CustomerHistorySummary } from "@/lib/attendance/types";
+import { getDb, type DbOrTx } from "@/db/client";
+import { fetchCustomerSearchResult, registerQuickCustomerAndVehicle, type QuickRegisterInput } from "@/lib/attendance/service";
+import type { Customer, CustomerHistorySummary, Vehicle } from "@/lib/attendance/types";
 import { checkAvailability, resolveCandidateDuration } from "@/lib/planning/availability";
 import { computeAverageDurationByServiceName, computeCapacitySummary, computeForecast, computeTomorrowPreparation } from "@/lib/planning/capacity";
 import { deriveClientSignals } from "@/lib/planning/clientSignals";
@@ -188,8 +189,83 @@ export async function searchPlanningAppointments(query: string): Promise<Appoint
   return Promise.all(rows.map(toView));
 }
 
-export async function createAppointment(input: CreateAppointmentInput): Promise<Appointment> {
-  return getPlanningRepository().createAppointment(input);
+/** `runner` opcional (Missão de Atomicidade Planejamento) — ver `registerQuickCustomerAndVehicle`. Omitido, comportamento idêntico a antes desta missão. */
+export async function createAppointment(input: CreateAppointmentInput, runner?: DbOrTx): Promise<Appointment> {
+  return getPlanningRepository().createAppointment(input, runner);
+}
+
+export interface CreateAppointmentAtomicInput {
+  register: QuickRegisterInput;
+  serviceId: string;
+  scheduledAt: string;
+  expectedDurationMinutes: number | null;
+  notes?: string | null;
+}
+
+export interface CreateAppointmentAtomicResult {
+  customer: Customer;
+  vehicle: Vehicle;
+  appointment: Appointment;
+  possibleDuplicateCustomers: Customer[];
+  possibleDuplicateVehicles: Vehicle[];
+}
+
+/** Lançado quando `checkAvailabilityForRequest` não retorna "available" — nada é escrito nesse caso (a transação nem chega a abrir). */
+export class AppointmentAvailabilityError extends Error {
+  constructor(public readonly availability: AvailabilityCheckResult) {
+    super("Horário indisponível para criar o agendamento.");
+    this.name = "AppointmentAvailabilityError";
+  }
+}
+
+/**
+ * Missão de Atomicidade Planejamento — versão atômica de "cliente novo/reaproveitado + veículo
+ * novo/reaproveitado + agendamento" numa ÚNICA transação (`db.transaction()`). Se qualquer INSERT
+ * falhar, TUDO que essa chamada escreveu é desfeito automaticamente pelo driver — nunca fica um
+ * customer ou vehicle "órfão" sem o appointment correspondente. Registros REAPROVEITADOS (cliente/
+ * veículo já existentes, encontrados por `SELECT`) nunca são afetados por rollback, porque nunca
+ * foram escritos por esta transação.
+ *
+ * Reaproveita 100% da lógica já existente e testada (`registerQuickCustomerAndVehicle` —
+ * normalização, dedupe por telefone/placa, avisos de possível duplicidade; `createAppointment`;
+ * `checkAvailabilityForRequest` — checagem de disponibilidade, semântica inalterada por esta
+ * missão) — nada foi duplicado aqui, só o `tx` passa a ser repassado explicitamente.
+ *
+ * A checagem de disponibilidade roda ANTES de abrir a transação: se o horário não estiver livre,
+ * nada é escrito (nem a transação chega a ser aberta). Isso NÃO resolve a corrida entre duas
+ * requisições verdadeiramente simultâneas (ambas podem checar "disponível" antes de qualquer uma
+ * escrever) — esse problema é tratado à parte, deliberadamente fora do escopo desta missão.
+ */
+export async function createAppointmentWithNewCustomerAtomic(input: CreateAppointmentAtomicInput): Promise<CreateAppointmentAtomicResult> {
+  const availability = await checkAvailabilityForRequest({
+    serviceId: input.serviceId,
+    scheduledAt: input.scheduledAt,
+    expectedDurationMinutes: input.expectedDurationMinutes,
+  });
+  if (availability.status !== "available") {
+    throw new AppointmentAvailabilityError(availability);
+  }
+
+  const db = getDb();
+  if (!db) {
+    throw new Error("createAppointmentWithNewCustomerAtomic exige DATABASE_URL configurada — sem transação real, não há atomicidade a garantir.");
+  }
+
+  return db.transaction(async (tx) => {
+    const { customer, vehicle, possibleDuplicateCustomers, possibleDuplicateVehicles } = await registerQuickCustomerAndVehicle(input.register, tx);
+    const appointment = await createAppointment(
+      {
+        customerId: customer.id,
+        vehicleId: vehicle.id,
+        serviceId: input.serviceId,
+        scheduledAt: input.scheduledAt,
+        expectedDurationMinutes: input.expectedDurationMinutes,
+        notes: input.notes ?? null,
+      },
+      tx,
+    );
+    return { customer, vehicle, appointment, possibleDuplicateCustomers, possibleDuplicateVehicles };
+  });
 }
 
 export async function updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<Appointment> {

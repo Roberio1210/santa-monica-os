@@ -1,6 +1,6 @@
 import "server-only";
 import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
-import { getDb } from "@/db/client";
+import { getDb, type DbOrTx } from "@/db/client";
 import { customers, diagnosticPhotos, diagnostics, serviceOrderItems, serviceOrders, serviceVisits, services, technicalRecommendations, vehicles } from "@/db/schema";
 import type { AttendanceRepository, ServiceCatalogEntry } from "@/lib/attendance/repository";
 import type {
@@ -111,10 +111,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return db;
   }
 
-  async findCustomerByPhone(phone: string): Promise<Customer | null> {
+  async findCustomerByPhone(phone: string, runner: DbOrTx = this.db()): Promise<Customer | null> {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
-    const rows = await this.db().select().from(customers).where(eq(customers.phone, phone)).limit(5);
+    const rows = await runner.select().from(customers).where(eq(customers.phone, phone)).limit(5);
     const match = rows.find((r) => normalizePhone(r.phone) === normalized);
     return match ? toCustomer(match) : null;
   }
@@ -132,8 +132,8 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return row ? toCustomer(row) : null;
   }
 
-  async createCustomer(input: CreateCustomerInput): Promise<Customer> {
-    const [row] = await this.db()
+  async createCustomer(input: CreateCustomerInput, runner: DbOrTx = this.db()): Promise<Customer> {
+    const [row] = await runner
       .insert(customers)
       .values({ name: input.name, phone: input.phone, cpf: input.cpf ?? null, source: "manual" })
       .returning();
@@ -177,10 +177,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
    * CRM V2 Fase 2 ao rodar esta classe de query contra o Postgres real). Barra dupla garante que
    * o Postgres receba o regex `\D` de verdade.
    */
-  async findCustomersByNormalizedPhone(phone: string): Promise<Customer[]> {
+  async findCustomersByNormalizedPhone(phone: string, runner: DbOrTx = this.db()): Promise<Customer[]> {
     const normalized = normalizePhone(phone);
     if (!normalized) return [];
-    const rows = await this.db()
+    const rows = await runner
       .select()
       .from(customers)
       .where(sql`regexp_replace(coalesce(${customers.phone}, ''), '\\D', '', 'g') = ${normalized}`)
@@ -189,10 +189,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
   }
 
   /** Nome normalizado (trim + espaços colapsados + minúsculo) — sinal fraco, só aviso; nome nunca funde cliente sozinho. Mesma barra dupla do método acima, mesmo motivo (`\\s`). */
-  async findCustomersByNormalizedName(name: string): Promise<Customer[]> {
+  async findCustomersByNormalizedName(name: string, runner: DbOrTx = this.db()): Promise<Customer[]> {
     const normalized = normalizeName(name);
     if (!normalized) return [];
-    const rows = await this.db()
+    const rows = await runner
       .select()
       .from(customers)
       .where(sql`lower(regexp_replace(trim(${customers.name}), '\\s+', ' ', 'g')) = ${normalized.toLowerCase()}`)
@@ -200,19 +200,19 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toCustomer);
   }
 
-  async findVehicleByPlate(plate: string): Promise<Vehicle | null> {
+  async findVehicleByPlate(plate: string, runner: DbOrTx = this.db()): Promise<Vehicle | null> {
     const normalized = normalizePlate(plate);
     if (!normalized) return null;
-    const rows = await this.db().select().from(vehicles).where(eq(vehicles.plate, plate)).limit(5);
+    const rows = await runner.select().from(vehicles).where(eq(vehicles.plate, plate)).limit(5);
     const match = rows.find((r) => normalizePlate(r.plate) === normalized);
     return match ? toVehicle(match) : null;
   }
 
   /** Placa normalizada direto no SQL — mesmo espírito de `findCustomersByNormalizedPhone`, só aviso. */
-  async findVehiclesByNormalizedPlate(plate: string): Promise<Vehicle[]> {
+  async findVehiclesByNormalizedPlate(plate: string, runner: DbOrTx = this.db()): Promise<Vehicle[]> {
     const normalized = normalizePlate(plate);
     if (!normalized) return [];
-    const rows = await this.db()
+    const rows = await runner
       .select()
       .from(vehicles)
       .where(sql`upper(replace(coalesce(${vehicles.plate}, ''), ' ', '')) = ${normalized}`)
@@ -236,8 +236,8 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toVehicle);
   }
 
-  async createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
-    const [row] = await this.db()
+  async createVehicle(input: CreateVehicleInput, runner: DbOrTx = this.db()): Promise<Vehicle> {
+    const [row] = await runner
       .insert(vehicles)
       .values({
         customerId: input.customerId,

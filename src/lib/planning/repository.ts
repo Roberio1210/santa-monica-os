@@ -1,3 +1,4 @@
+import type { DbOrTx } from "@/db/client";
 import type { Appointment, AppointmentStatus, CapacityConfig, CreateAppointmentInput, SetCapacityConfigInput } from "@/lib/planning/types";
 
 /** Linha já com os dados de exibição resolvidos (nome/telefone/veículo/placa/serviço) — nunca busca N+1 na UI. */
@@ -29,7 +30,12 @@ export interface CompletedOrderSample {
  * por `repository-factory.ts` via `getStorageMode()`.
  */
 export interface PlanningRepository {
-  createAppointment(input: CreateAppointmentInput): Promise<Appointment>;
+  /**
+   * `runner` opcional (Missão de Atomicidade Planejamento) — quando fornecido, participa da
+   * transação já aberta pelo chamador em vez de abrir conexão própria via `getDb()`. Omitido,
+   * comportamento idêntico a antes desta missão.
+   */
+  createAppointment(input: CreateAppointmentInput, runner?: DbOrTx): Promise<Appointment>;
   getAppointment(id: string): Promise<Appointment | null>;
   /** Intervalo de datas [fromIso, toIso], inclusive, comparado pelo calendário de São Paulo. */
   listAppointmentsInRange(fromIso: string, toIso: string): Promise<AppointmentRow[]>;

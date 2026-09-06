@@ -1,4 +1,5 @@
 import "server-only";
+import type { DbOrTx } from "@/db/client";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
 import type { RecentVehicleEntry, ServiceCatalogEntry } from "@/lib/attendance/repository";
 import { summarizeCustomerHistory } from "@/lib/attendance/history";
@@ -182,31 +183,41 @@ function filterVehicleCandidatesByEngine(target: { plate: string; model: string 
   return candidates.filter((v) => idsToShow.has(v.id));
 }
 
-/** Cadastro rápido — nunca duplica cliente/veículo já existente por telefone/placa; quando cria um registro novo, avisa (sem bloquear) se o motor de identidade classificar algum candidato como HIGH_CONFIDENCE/REVIEW. */
-export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput): Promise<QuickRegisterResult> {
+/**
+ * Cadastro rápido — nunca duplica cliente/veículo já existente por telefone/placa; quando cria um
+ * registro novo, avisa (sem bloquear) se o motor de identidade classificar algum candidato como
+ * HIGH_CONFIDENCE/REVIEW.
+ *
+ * `runner` opcional (Missão de Atomicidade Planejamento) — quando fornecido (o `tx` de um
+ * `db.transaction()` já aberto pelo chamador), todas as leituras/escritas participam dessa mesma
+ * transação em vez de abrir conexão própria via `getDb()`. Omitido, comportamento idêntico a
+ * antes desta missão (chamada avulsa, fora de transação) — usado hoje por todo o resto do
+ * Atendimento, que nunca precisa de atomicidade multi-tabela.
+ */
+export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput, runner?: DbOrTx): Promise<QuickRegisterResult> {
   const repo = getAttendanceRepository();
 
-  const existingCustomer = await repo.findCustomerByPhone(input.customerPhone);
+  const existingCustomer = await repo.findCustomerByPhone(input.customerPhone, runner);
   let possibleDuplicateCustomers: Customer[] = [];
   let customer: Customer;
   if (existingCustomer) {
     customer = existingCustomer;
   } else {
     const [byPhone, byName] = await Promise.all([
-      repo.findCustomersByNormalizedPhone(input.customerPhone),
-      repo.findCustomersByNormalizedName(input.customerName),
+      repo.findCustomersByNormalizedPhone(input.customerPhone, runner),
+      repo.findCustomersByNormalizedName(input.customerName, runner),
     ]);
     const seen = new Map<string, Customer>();
     for (const c of [...byPhone, ...byName]) seen.set(c.id, c);
     possibleDuplicateCustomers = filterCustomerCandidatesByEngine({ name: input.customerName, phone: input.customerPhone }, Array.from(seen.values()));
-    customer = await repo.createCustomer({ name: input.customerName, phone: input.customerPhone, cpf: input.customerCpf ?? null });
+    customer = await repo.createCustomer({ name: input.customerName, phone: input.customerPhone, cpf: input.customerCpf ?? null }, runner);
   }
 
   // Missão 3.2.3 — sem placa (agendamento futuro do Planejamento), não há chave nenhuma para
   // buscar ou deduplicar: nunca tenta casar por modelo/nome, sempre cria veículo novo com
   // plate=null. `findVehicleByPlate`/`findVehiclesByNormalizedPlate` recebem `string`, não
   // `string | null` — por isso só são chamadas quando a placa existe.
-  const existingVehicle = input.vehiclePlate ? await repo.findVehicleByPlate(input.vehiclePlate) : null;
+  const existingVehicle = input.vehiclePlate ? await repo.findVehicleByPlate(input.vehiclePlate, runner) : null;
   let possibleDuplicateVehicles: Vehicle[] = [];
   let vehicle: Vehicle;
   if (existingVehicle && existingVehicle.customerId === customer.id) {
@@ -217,7 +228,7 @@ export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput)
     possibleDuplicateVehicles = existingVehicle
       ? [existingVehicle]
       : input.vehiclePlate
-        ? filterVehicleCandidatesByEngine({ plate: input.vehiclePlate, model: input.vehicleModel ?? null }, await repo.findVehiclesByNormalizedPlate(input.vehiclePlate))
+        ? filterVehicleCandidatesByEngine({ plate: input.vehiclePlate, model: input.vehicleModel ?? null }, await repo.findVehiclesByNormalizedPlate(input.vehiclePlate, runner))
         : [];
     vehicle = await repo.createVehicle({
       customerId: customer.id,
@@ -226,7 +237,7 @@ export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput)
       model: input.vehicleModel ?? null,
       year: input.vehicleYear ?? null,
       color: input.vehicleColor ?? null,
-    });
+    }, runner);
   }
 
   return { customer, vehicle, possibleDuplicateCustomers, possibleDuplicateVehicles };
