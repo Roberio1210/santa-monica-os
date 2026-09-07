@@ -18,7 +18,7 @@ export function AppointmentCard({ appointment }: { appointment: AppointmentView 
       </div>
 
       <div className="mt-2 space-y-0.5 text-sm text-foreground-subtle">
-        <p>{appointment.vehicleLabel}{appointment.plate ? ` · ${appointment.plate}` : ""}</p>
+        <p>{appointment.vehicleLabel} · {appointment.plate ?? "Placa não informada"}</p>
         <p>{appointment.serviceName}</p>
         {appointment.expectedDurationMinutes !== null ? <p>{formatDurationMinutes(appointment.expectedDurationMinutes)}</p> : <p>Tempo previsto não informado</p>}
         {appointment.phone ? (

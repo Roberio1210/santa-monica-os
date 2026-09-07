@@ -5,6 +5,13 @@ import type { Customer, CustomerHistorySummary, Vehicle } from "@/lib/attendance
 import { checkAvailability, resolveCandidateDuration } from "@/lib/planning/availability";
 import { computeAverageDurationByServiceName, computeCapacitySummary, computeForecast, computeTomorrowPreparation } from "@/lib/planning/capacity";
 import { deriveClientSignals } from "@/lib/planning/clientSignals";
+import {
+  computeOccupiedNow,
+  computeSimultaneousOccupancyMap,
+  findNextAvailableSlot,
+  resolveExpedienteWindow,
+  type ResolvedDurationAppointment,
+} from "@/lib/planning/dayView";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
 import type { AppointmentRow } from "@/lib/planning/repository";
 import {
@@ -17,6 +24,8 @@ import {
   type CapacityConfig,
   type ClientSignal,
   type CreateAppointmentInput,
+  type DayAppointmentView,
+  type DayView,
   type NextClientCard,
   type OccupyingAppointmentForCheck,
   type PlanningBoard,
@@ -150,6 +159,59 @@ export async function fetchCapacityForDate(dateIso: string): Promise<PlanningBoa
 
   const views = await Promise.all(occupying.map(toView));
   return computeTomorrowPreparation(views, capacity, forecast);
+}
+
+/**
+ * Missão 40 (Fase 1 — Agenda Operacional Visual) — visão de UM dia para a nova tela principal de
+ * `/planejamento`. Reaproveita `fetchCapacityForDate` para a carga prevista (nenhuma fórmula
+ * paralela) e a mesma resolução de duração (própria → catálogo → indeterminada) já usada por
+ * `checkAvailabilityForRequest`, aplicada a TODOS os agendamentos do dia (não só aos que ocupam
+ * capacidade) para que o card de cada agendamento mostre o horário final real sempre que possível.
+ */
+export async function fetchDayView(dateIso: string): Promise<DayView> {
+  const repo = getPlanningRepository();
+  const todayIso = saoPauloDateISO();
+
+  const [rows, config, capacityPrep] = await Promise.all([repo.listAppointmentsInRange(dateIso, dateIso), repo.getActiveCapacityConfig(), fetchCapacityForDate(dateIso)]);
+
+  const serviceIdsNeedingFallback = new Set(rows.filter((r) => r.expectedDurationMinutes === null).map((r) => r.serviceId));
+  const durationFallbacks = serviceIdsNeedingFallback.size > 0 ? await repo.getServiceEstimatedDurations(Array.from(serviceIdsNeedingFallback)) : ({} as Record<string, number | null>);
+
+  const resolvedById = new Map<string, number | null>(rows.map((row) => [row.id, resolveCandidateDuration(row.expectedDurationMinutes, durationFallbacks[row.serviceId] ?? null)]));
+
+  const occupyingRows = rows.filter((r) => OCCUPYING_STATUSES.includes(r.status));
+  const resolvedOccupying: ResolvedDurationAppointment[] = occupyingRows.map((row) => ({ id: row.id, scheduledAt: row.scheduledAt, durationMinutes: resolvedById.get(row.id) ?? null }));
+
+  const nowMs = Date.now();
+  const occupiedNow = computeOccupiedNow(resolvedOccupying, nowMs);
+  const simultaneousById = computeSimultaneousOccupancyMap(resolvedOccupying);
+
+  const nextAvailability = config
+    ? (() => {
+        const { startMs, endMs } = resolveExpedienteWindow(dateIso, config.dailyOperatingMinutes);
+        return findNextAvailableSlot(resolvedOccupying, { boxesCount: config.boxesCount }, { nowMs, expedienteStartMs: startMs, expedienteEndMs: endMs, granularityMinutes: 15 });
+      })()
+    : ({ status: "nao_configurado" } as const);
+
+  const views = await Promise.all(rows.map(toView));
+  views.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+
+  const appointments: DayAppointmentView[] = views.map((view) => {
+    const resolvedDurationMinutes = resolvedById.get(view.id) ?? null;
+    const endAt = resolvedDurationMinutes !== null ? new Date(Date.parse(view.scheduledAt) + resolvedDurationMinutes * 60_000).toISOString() : null;
+    return { ...view, resolvedDurationMinutes, endAt, simultaneousCount: simultaneousById.get(view.id) ?? null };
+  });
+
+  return {
+    dateIso,
+    isToday: dateIso === todayIso,
+    appointments,
+    appointmentCount: rows.length,
+    occupiedNowCount: occupiedNow.occupiedCount,
+    occupiedNowIndeterminateCount: occupiedNow.indeterminateCount,
+    capacity: capacityPrep.capacity,
+    nextAvailability,
+  };
 }
 
 async function fetchTomorrowPreparation(): Promise<PlanningBoard["tomorrowPreparation"]> {

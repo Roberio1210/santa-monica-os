@@ -5,6 +5,8 @@
  * inventado.
  */
 
+import type { NextAvailabilityResult } from "@/lib/planning/dayView";
+
 export type AppointmentStatus = "agendado" | "confirmado" | "em_andamento" | "concluido" | "cancelado" | "reagendado";
 
 export const APPOINTMENT_STATUSES: AppointmentStatus[] = ["agendado", "confirmado", "em_andamento", "concluido", "cancelado", "reagendado"];
@@ -208,4 +210,29 @@ export interface PlanningBoard {
   days: PlanningDay[];
   tomorrowPreparation: TomorrowPreparation;
   nextClient: NextClientCard | null;
+}
+
+/**
+ * Missão 40 (Fase 1 — Agenda Operacional Visual) — visão de UM dia, já com duração resolvida
+ * (própria ou fallback do catálogo) e horário final calculado. `resolvedDurationMinutes: null` e
+ * `endAt: null` = duração indeterminada, nunca inventada.
+ */
+export interface DayAppointmentView extends AppointmentView {
+  resolvedDurationMinutes: number | null;
+  endAt: string | null;
+  /** Quantos agendamentos (incluindo este) ocupam capacidade ao mesmo tempo — `null` = indeterminado. */
+  simultaneousCount: number | null;
+}
+
+export interface DayView {
+  dateIso: string;
+  isToday: boolean;
+  /** Todos os agendamentos do dia (qualquer status), ordenados por horário. */
+  appointments: DayAppointmentView[];
+  appointmentCount: number;
+  occupiedNowCount: number;
+  occupiedNowIndeterminateCount: number;
+  /** Mesma fonte de `fetchCapacityForDate` — nenhuma fórmula paralela de carga. */
+  capacity: CapacitySummary;
+  nextAvailability: NextAvailabilityResult;
 }
