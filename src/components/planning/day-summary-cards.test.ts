@@ -35,12 +35,31 @@ describe("DaySummaryCards", () => {
     expect(html.toLowerCase()).not.toContain("box");
   });
 
-  it("I. o denominador de capacidade acompanha o valor real de boxesCount — 4 e 5, nunca hard-coded", () => {
-    const html4 = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ capacity: { ...baseDayView().capacity, boxesCount: 4 } as DayView["capacity"] }) }));
-    expect(html4).toContain("/ 4 posições");
+  it("I/itens 1-3/20. o denominador de capacidade acompanha o valor real de boxesCount — 2, 4, 5 e 7, nunca hard-coded", () => {
+    for (const boxesCount of [2, 4, 5, 7]) {
+      const html = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ capacity: { ...baseDayView().capacity, boxesCount } as DayView["capacity"] }) }));
+      expect(html).toContain(`/ ${boxesCount} posições`);
+    }
+  });
 
-    const html5 = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ capacity: { ...baseDayView().capacity, boxesCount: 5 } as DayView["capacity"] }) }));
-    expect(html5).toContain("/ 5 posições");
+  it("item 19. nunca renderiza texto de box individual nomeado ('Box 1', 'Box 2'...)", () => {
+    const html = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ capacity: { ...baseDayView().capacity, boxesCount: 4 } as DayView["capacity"] }) }));
+    expect(html).not.toMatch(/Box\s*\d/i);
+  });
+
+  it("item 12. data passada -> 'Dia encerrado' aparece na Próxima disponibilidade", () => {
+    const html = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ nextAvailability: { status: "dia_encerrado" } }) }));
+    expect(html).toContain("Dia encerrado");
+  });
+
+  it("item 13. hoje fora do expediente -> 'Expediente encerrado'", () => {
+    const html = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ nextAvailability: { status: "expediente_encerrado" } }) }));
+    expect(html).toContain("Expediente encerrado");
+  });
+
+  it("item 14. data futura -> horário real calculado aparece tal como veio da engine", () => {
+    const html = renderToStaticMarkup(createElement(DaySummaryCards, { dayView: baseDayView({ nextAvailability: { status: "horario", time: "08:00" } }) }));
+    expect(html).toContain("08:00");
   });
 
   it("M. sobrecarga (ocupados > capacidade) aparece como está, nunca escondida/clampada", () => {

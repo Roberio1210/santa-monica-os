@@ -161,12 +161,28 @@ describe("findNextAvailableSlot — próxima disponibilidade (S)", () => {
   });
 });
 
+describe("computeSimultaneousOccupancyMap — 2 e 4 simultâneos (itens 4/5 da Missão 43)", () => {
+  it("2 atendimentos no mesmo horário -> 2 para cada um", () => {
+    const appts = [occ("a1", `${day}T10:00:00-03:00`, 30), occ("a2", `${day}T10:00:00-03:00`, 30)];
+    const map = computeSimultaneousOccupancyMap(appts);
+    expect(map.get("a1")).toBe(2);
+    expect(map.get("a2")).toBe(2);
+  });
+
+  it("4 atendimentos simultâneos -> 4 para cada um", () => {
+    const appts = [occ("a1", `${day}T10:00:00-03:00`, 30), occ("a2", `${day}T10:00:00-03:00`, 30), occ("a3", `${day}T10:00:00-03:00`, 30), occ("a4", `${day}T10:00:00-03:00`, 30)];
+    const map = computeSimultaneousOccupancyMap(appts);
+    for (const id of ["a1", "a2", "a3", "a4"]) expect(map.get(id)).toBe(4);
+  });
+});
+
 describe("formatNextAvailability", () => {
-  it("mapeia cada status para o texto esperado", () => {
+  it("mapeia cada status para o texto esperado, incluindo 'Dia encerrado' (Missão 43, Parte F)", () => {
     expect(formatNextAvailability({ status: "agora" })).toBe("Agora");
     expect(formatNextAvailability({ status: "horario", time: "14:15" })).toBe("14:15");
     expect(formatNextAvailability({ status: "sem_disponibilidade" })).toBe("Sem disponibilidade hoje");
     expect(formatNextAvailability({ status: "expediente_encerrado" })).toBe("Expediente encerrado");
+    expect(formatNextAvailability({ status: "dia_encerrado" })).toBe("Dia encerrado");
     expect(formatNextAvailability({ status: "nao_configurado" })).toBe("Capacidade não configurada");
   });
 });
@@ -242,5 +258,20 @@ describe("fetchDayView — integração real com o repositório em memória (F/G
     const entry = view.appointments.find((a) => a.customerId === customer.id);
     expect(entry?.resolvedDurationMinutes).toBe(60);
     expect(entry?.endAt).toBe(new Date(Date.parse(`${dayIso}T23:30:00-03:00`) + 60 * 60_000).toISOString());
+  });
+
+  it("item 12. data estritamente passada -> 'dia_encerrado', nunca 'expediente_encerrado' reaproveitado", async () => {
+    await setCapacityConfig({ boxesCount: 4, dailyOperatingMinutes: 480 });
+    const pastDayIso = addDaysIso(saoPauloDateISO(), -40); // bem distante de qualquer outro teste que use offsets futuros
+    const view = await fetchDayView(pastDayIso);
+    expect(view.nextAvailability).toEqual({ status: "dia_encerrado" });
+  });
+
+  it("item 14. data futura -> próxima disponibilidade real calculada (nunca 'dia_encerrado'/'expediente_encerrado')", async () => {
+    await setCapacityConfig({ boxesCount: 4, dailyOperatingMinutes: 480 });
+    const futureDayIso = addDaysIso(saoPauloDateISO(), 35);
+    const view = await fetchDayView(futureDayIso);
+    expect(view.nextAvailability.status).toBe("horario");
+    if (view.nextAvailability.status === "horario") expect(view.nextAvailability.time).toBe("08:00");
   });
 });

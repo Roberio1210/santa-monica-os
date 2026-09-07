@@ -94,6 +94,7 @@ export function computeSimultaneousOccupancyMap(appointments: ResolvedDurationAp
 
 export type NextAvailabilityResult =
   | { status: "nao_configurado" }
+  | { status: "dia_encerrado" }
   | { status: "agora" }
   | { status: "horario"; time: string }
   | { status: "sem_disponibilidade" }
@@ -105,6 +106,13 @@ export type NextAvailabilityResult =
  * `checkAvailability`, nunca uma segunda regra). Nunca inventa serviço/duração fictícia: só
  * verifica ocupação dos agendamentos já resolvidos pelo chamador. Nunca retorna horário fora do
  * expediente — o laço nunca ultrapassa `expedienteEndMs`.
+ *
+ * Limitação conhecida (Missão 43): esta função, sozinha, não distingue "hoje, fora do expediente"
+ * de "um dia inteiramente passado" — ambos batem em `nowMs >= expedienteEndMs` e voltam
+ * `expediente_encerrado`. Para um dia estritamente anterior a hoje, o chamador (`fetchDayView`)
+ * decide ANTES de chamar esta função e retorna `dia_encerrado` diretamente — nenhuma regra nova de
+ * disponibilidade, só uma classificação mais honesta de um resultado que, para o passado, nunca
+ * teve utilidade prática.
  */
 export function findNextAvailableSlot(
   occupying: ResolvedDurationAppointment[],
@@ -149,6 +157,8 @@ export function formatNextAvailability(result: NextAvailabilityResult): string {
       return "Sem disponibilidade hoje";
     case "expediente_encerrado":
       return "Expediente encerrado";
+    case "dia_encerrado":
+      return "Dia encerrado";
     case "nao_configurado":
       return "Capacidade não configurada";
   }

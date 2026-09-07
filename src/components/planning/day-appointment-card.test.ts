@@ -2,9 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DayAppointmentCard } from "./day-appointment-card";
-import type { DayAppointmentView } from "@/lib/planning/types";
+import type { AppointmentStatus, DayAppointmentView } from "@/lib/planning/types";
 
-/** Missão 40 (item 6, R) — mesma técnica de `react-dom/server` já usada no projeto (sem jsdom). */
+/**
+ * Missão 40 (item 6, R) / Missão 43 (Parte B/H/I) — mesma técnica de `react-dom/server` já usada
+ * no projeto (sem jsdom). Cobre o redesenho compacto: mesmos dados/garantias de antes, só
+ * reorganizados visualmente.
+ */
 
 function baseAppointment(overrides: Partial<DayAppointmentView> = {}): DayAppointmentView {
   return {
@@ -61,6 +65,35 @@ describe("DayAppointmentCard", () => {
 
   it("sem capacidade configurada, não mostra o indicador de posições (nunca um denominador inventado)", () => {
     const html = renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment(), capacityBoxesCount: null }));
+    expect(html).not.toContain("posições");
+  });
+
+  it("item 20. denominador de capacidade acompanha qualquer valor real, nunca fixo em 4 (config atual de produção)", () => {
+    const html = renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment({ simultaneousCount: 6 }), capacityBoxesCount: 7 }));
+    expect(html).toContain("6/7 posições");
+  });
+
+  it("item 19. nunca renderiza texto de box individual nomeado ('Box 1', 'Box 2'...)", () => {
+    const html = renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment(), capacityBoxesCount: 4 }));
+    expect(html).not.toMatch(/Box\s*\d/i);
+  });
+
+  for (const status of ["agendado", "confirmado", "em_andamento", "concluido", "cancelado", "reagendado"] as AppointmentStatus[]) {
+    it(`itens 7-11. status '${status}' renderiza sem quebrar, via StatusBadge reaproveitado`, () => {
+      const html = renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment({ status }), capacityBoxesCount: 4 }));
+      expect(html.length).toBeGreaterThan(0);
+    });
+  }
+
+  it("item 15. sinal de 'Primeira visita' é preservado quando presente nos dados reais", () => {
+    const html = renderToStaticMarkup(
+      createElement(DayAppointmentCard, { appointment: baseAppointment({ signals: [{ id: "primeira_visita", label: "Primeira visita" }] }), capacityBoxesCount: 4 }),
+    );
+    expect(html).toContain("Primeira visita");
+  });
+
+  it("agendamento cancelado/reagendado (fora de OCCUPYING_STATUSES) nunca mostra indicador de posições — a engine já não computa simultaneousCount para eles", () => {
+    const html = renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment({ status: "cancelado", simultaneousCount: null }), capacityBoxesCount: 4 }));
     expect(html).not.toContain("posições");
   });
 });

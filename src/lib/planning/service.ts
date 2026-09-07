@@ -186,12 +186,18 @@ export async function fetchDayView(dateIso: string): Promise<DayView> {
   const occupiedNow = computeOccupiedNow(resolvedOccupying, nowMs);
   const simultaneousById = computeSimultaneousOccupancyMap(resolvedOccupying);
 
-  const nextAvailability = config
-    ? (() => {
-        const { startMs, endMs } = resolveExpedienteWindow(dateIso, config.dailyOperatingMinutes);
-        return findNextAvailableSlot(resolvedOccupying, { boxesCount: config.boxesCount }, { nowMs, expedienteStartMs: startMs, expedienteEndMs: endMs, granularityMinutes: 15 });
-      })()
-    : ({ status: "nao_configurado" } as const);
+  // Missão 43 — um dia estritamente anterior a hoje nunca tem "próxima disponibilidade" útil;
+  // decidido ANTES de chamar `findNextAvailableSlot` (que sozinha não distingue isso de "hoje,
+  // fora do expediente" — ver o comentário dela em `dayView.ts`). Nenhuma regra de disponibilidade
+  // nova: só evita reaproveitar "Expediente encerrado" para um dia que já passou por completo.
+  const nextAvailability = dateIso < todayIso
+    ? ({ status: "dia_encerrado" } as const)
+    : !config
+      ? ({ status: "nao_configurado" } as const)
+      : (() => {
+          const { startMs, endMs } = resolveExpedienteWindow(dateIso, config.dailyOperatingMinutes);
+          return findNextAvailableSlot(resolvedOccupying, { boxesCount: config.boxesCount }, { nowMs, expedienteStartMs: startMs, expedienteEndMs: endMs, granularityMinutes: 15 });
+        })();
 
   const views = await Promise.all(rows.map(toView));
   views.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
