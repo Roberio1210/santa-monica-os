@@ -2,6 +2,7 @@ import "server-only";
 import { desc, eq } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { identityReviewItems } from "@/db/schema/crm";
+import { parsePlateConflictReviewItem } from "@/lib/integrations/jumppark/plateConflictEvidence";
 
 /**
  * Missão 28 (revisão segura de identidade) — leitura da fila "Identidades para revisar"
@@ -71,7 +72,16 @@ export async function fetchIdentityReviewQueue(): Promise<IdentityReviewQueueRes
   if (!db) return { pending: [], decided: [], databaseConfigured: false };
 
   const rows = await db.select().from(identityReviewItems).where(eq(identityReviewItems.active, true)).orderBy(desc(identityReviewItems.updatedAt));
-  const items = rows.map(toItemRow);
+  /**
+   * Missão 20 — linhas reconhecidas pelo parser da Missão 18 como conflito de placa têm sua
+   * própria tela dedicada (`plateConflictReviewQueue.ts` + `PlateConflictReviewCard`), que já
+   * mostra a evidência completa e enriquecida. Excluídas aqui para nunca duplicar o mesmo item
+   * (antes desta missão, essas linhas passavam por `toItemRow` e apareciam quase vazias — achado
+   * da Missão 15 — porque o formato de evidência é outro; nada no comportamento das linhas
+   * antigas muda).
+   */
+  const legacyRows = rows.filter((row) => parsePlateConflictReviewItem(row).kind !== "plateConflict");
+  const items = legacyRows.map(toItemRow);
 
   return {
     pending: items.filter((i) => i.status === "pending"),

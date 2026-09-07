@@ -3,7 +3,9 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PlateConflictReviewCard } from "@/components/jumppark/plate-conflict-review-card";
 import { fetchIdentityReviewQueue, type IdentityReviewItemRow } from "@/lib/integrations/jumppark/identityReviewQuery";
+import { fetchPlateConflictReviewQueue } from "@/lib/integrations/jumppark/plateConflictReviewQueue";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { linkOrderToCustomerAction, keepSeparateAction, deferReviewAction, reopenReviewAction } from "./actions";
 
@@ -125,13 +127,13 @@ function ReviewItemCard({ item, decided }: { item: IdentityReviewItemRow; decide
 }
 
 export default async function IdentityReviewQueuePage() {
-  const { pending, decided, databaseConfigured } = await fetchIdentityReviewQueue();
+  const [{ pending, decided, databaseConfigured }, plateConflicts] = await Promise.all([fetchIdentityReviewQueue(), fetchPlateConflictReviewQueue()]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Identidades para revisar"
-        description="Placas mascaradas associadas a mais de um nome de cliente distinto nas ordens da JumpPark — nunca fundidas automaticamente. Decida caso a caso; nada aqui exclui ordens e toda decisão pode ser revertida."
+        description="Placas mascaradas associadas a mais de um nome de cliente distinto nas ordens da JumpPark, e conflitos de placa que impediram a criação automática de um veículo — nunca fundidos automaticamente. Decida caso a caso; nada aqui exclui ordens e toda decisão pode ser revertida."
         actions={
           <Button asChild variant="outline" size="sm">
             <Link href="/ordens/clientes">Voltar a Clientes</Link>
@@ -145,36 +147,73 @@ export default async function IdentityReviewQueuePage() {
         </Card>
       ) : (
         <>
-          <Card>
-            <CardContent className="pt-4 text-sm text-foreground-muted">
-              {pending.length} pendente(s) · {decided.length} já decidido(s). Um item aparece aqui quando a mesma placa (mascarada) aparece em ordens com nomes de clientes diferentes — pode
-              ser homônimo fundido por engano, ou duas pessoas reais que usaram o mesmo carro. Sem telefone completo nem identificador estruturado da JumpPark, não há como provar sozinho —
-              por isso a decisão fica com um humano.
-            </CardContent>
-          </Card>
-
-          {pending.length === 0 ? (
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium text-foreground-subtle">Conflitos de placa</h2>
             <Card>
-              <CardContent className="pt-6 text-sm text-foreground-muted">Nenhum item pendente no momento.</CardContent>
+              <CardContent className="pt-4 text-sm text-foreground-muted">
+                {plateConflicts.pending.length} pendente(s) · {plateConflicts.decided.length} já decidido(s). Um item aparece aqui quando o sync da JumpPark encontra uma placa que já pertence
+                a um veículo existente (cadastrado manualmente ou de outra sincronização) — o veículo novo não foi criado automaticamente para não arriscar duplicar um cliente ou um
+                agendamento real. Esta lista é somente leitura por enquanto.
+              </CardContent>
             </Card>
-          ) : (
-            <div className="space-y-4">
-              {pending.map((item) => (
-                <ReviewItemCard key={item.id} item={item} decided={false} />
-              ))}
-            </div>
-          )}
 
-          {decided.length > 0 ? (
-            <div className="space-y-3">
-              <h2 className="text-sm font-medium text-foreground-subtle">Já decididos</h2>
+            {plateConflicts.pending.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6 text-sm text-foreground-muted">Nenhum conflito de placa pendente no momento.</CardContent>
+              </Card>
+            ) : (
               <div className="space-y-4">
-                {decided.map((item) => (
-                  <ReviewItemCard key={item.id} item={item} decided={true} />
+                {plateConflicts.pending.map((item) => (
+                  <PlateConflictReviewCard key={item.reviewItemId} item={item} decided={false} />
                 ))}
               </div>
-            </div>
-          ) : null}
+            )}
+
+            {plateConflicts.decided.length > 0 ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-foreground-subtle">Já decididos</h3>
+                <div className="space-y-4">
+                  {plateConflicts.decided.map((item) => (
+                    <PlateConflictReviewCard key={item.reviewItemId} item={item} decided={true} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium text-foreground-subtle">Ambiguidade de nome de cliente</h2>
+            <Card>
+              <CardContent className="pt-4 text-sm text-foreground-muted">
+                {pending.length} pendente(s) · {decided.length} já decidido(s). Um item aparece aqui quando a mesma placa (mascarada) aparece em ordens com nomes de clientes diferentes — pode
+                ser homônimo fundido por engano, ou duas pessoas reais que usaram o mesmo carro. Sem telefone completo nem identificador estruturado da JumpPark, não há como provar sozinho —
+                por isso a decisão fica com um humano.
+              </CardContent>
+            </Card>
+
+            {pending.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6 text-sm text-foreground-muted">Nenhum item pendente no momento.</CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {pending.map((item) => (
+                  <ReviewItemCard key={item.id} item={item} decided={false} />
+                ))}
+              </div>
+            )}
+
+            {decided.length > 0 ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-foreground-subtle">Já decididos</h3>
+                <div className="space-y-4">
+                  {decided.map((item) => (
+                    <ReviewItemCard key={item.id} item={item} decided={true} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </>
       )}
     </div>
