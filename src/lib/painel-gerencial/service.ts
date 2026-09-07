@@ -4,10 +4,11 @@ import { isJumpParkConfigured } from "@/lib/config/env";
 import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView } from "@/lib/finance/status";
 import type { JumpParkOrderInput } from "@/lib/domain/operational";
-import { comparePeriodValues, previousPeriodOf, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
+import { comparePeriodValues, previousPeriodOf, resolvePeriod, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
 import { buildCustomerAggregates, buildManagementOrderRows, buildServiceAggregates, computeManagementIndicators, rankCustomersBySpend } from "@/lib/painel-gerencial/orders";
 import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod, isOperationalResultCalculable } from "@/lib/painel-gerencial/expenses";
 import { buildFindings } from "@/lib/painel-gerencial/insights";
+import { computeGoalProgress, fetchActiveGoal } from "@/lib/goals/service";
 import type { PainelGerencialResult } from "@/lib/painel-gerencial/types";
 
 /**
@@ -44,12 +45,21 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
   const previous = previousPeriodOf(period);
   const today = saoPauloDateISO();
 
-  const [currentFetch, previousFetch, payableItemsRaw] = await Promise.all([
+  // Missão 32 — a seção de meta mensal é sempre sobre o MÊS CORRENTE (mês a data), independente
+  // do período selecionado na página (que pode ser "hoje", "semana" etc.). Quando o período já
+  // selecionado É o mês corrente, reaproveita a mesma busca — nunca duas chamadas ao vivo à
+  // JumpPark para o mesmo intervalo.
+  const monthPeriod = period.key === "month" ? period : resolvePeriod("month");
+  const reuseCurrentFetchForMonth = period.key === "month";
+
+  const [currentFetch, previousFetch, payableItemsRaw, monthFetch, activeGoal] = await Promise.all([
     jumpparkConfigured ? fetchOrdersOrEmpty(period.from, period.to) : Promise.resolve({ orders: [], error: null }),
     jumpparkConfigured ? fetchOrdersOrEmpty(previous.from, previous.to) : Promise.resolve({ orders: [], error: null }),
     getFinanceRepository()
       .listAccountsPayable()
       .catch(() => []),
+    jumpparkConfigured && !reuseCurrentFetchForMonth ? fetchOrdersOrEmpty(monthPeriod.from, monthPeriod.to) : Promise.resolve(null),
+    jumpparkConfigured ? fetchActiveGoal("consolidado", today) : Promise.resolve(null),
   ]);
 
   const payableViews = payableItemsRaw.map((item) => toAccountsPayableView(item, today));
@@ -86,6 +96,14 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
   const operationalResult = Math.round((indicators.netRevenue - expensesSummary.total) * 100) / 100;
   const operationalResultCalculable = isOperationalResultCalculable(jumpparkConfigured, currentFetch.error, expensesSummary.hasData);
 
+  // Missão 32 — realizado da meta é SEMPRE `netRevenue` do mês corrente, calculado pela MESMA
+  // função (`computeManagementIndicators`) que já alimenta todos os outros cards do Painel —
+  // nunca uma segunda lógica de faturamento (nunca reaproveita a fonte do módulo Atendimento).
+  const monthFetchResolved = reuseCurrentFetchForMonth ? currentFetch : (monthFetch ?? { orders: [], error: null });
+  const monthRows = buildManagementOrderRows(monthFetchResolved.orders);
+  const monthIndicators = reuseCurrentFetchForMonth ? indicators : computeManagementIndicators(monthRows);
+  const goalProgress = activeGoal ? computeGoalProgress(activeGoal, monthIndicators.netRevenue, today) : null;
+
   return {
     period,
     previousPeriod: previous,
@@ -112,6 +130,11 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
       operationalResult: comparePeriodValues(operationalResult, previousOperationalResult),
     },
     findings,
+    goal: {
+      monthPeriod,
+      progress: goalProgress,
+      error: reuseCurrentFetchForMonth ? currentFetch.error : monthFetchResolved.error,
+    },
   };
 }
 

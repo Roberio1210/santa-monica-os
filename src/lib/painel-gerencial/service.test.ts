@@ -25,6 +25,15 @@ describe("previousPeriodOf — filtros de período e comparação", () => {
   });
 });
 
+describe("Missão 32 (item 14) — realizado da meta usa a mesma fonte de faturamento do Painel, nunca uma segunda lógica", () => {
+  it("computeGoalProgress é chamado com monthIndicators.netRevenue (mesma função computeManagementIndicators dos outros cards), nunca com dado do módulo Atendimento", () => {
+    const source = readFileSync(path.resolve(__dirname, "service.ts"), "utf-8");
+    expect(source).toContain("computeGoalProgress(activeGoal, monthIndicators.netRevenue, today)");
+    expect(source).toMatch(/monthIndicators\s*=[\s\S]*computeManagementIndicators/);
+    expect(source).not.toMatch(/attendance/i);
+  });
+});
+
 describe("segurança dos logs — nenhum módulo do Painel Gerencial registra dado sensível em log", () => {
   it("nenhum arquivo de src/lib/painel-gerencial usa console.* diretamente", () => {
     const dir = path.resolve(__dirname);

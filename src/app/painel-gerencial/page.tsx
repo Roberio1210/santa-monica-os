@@ -14,8 +14,9 @@ import { FindingsSection } from "@/components/painel-gerencial/findings-section"
 import { OrderRowsDrilldown } from "@/components/painel-gerencial/order-rows-drilldown";
 import { ExpenseRowsDrilldown } from "@/components/painel-gerencial/expense-rows-drilldown";
 import { CalculationNote } from "@/components/shared/calculation-note";
+import { GoalSection } from "@/components/painel-gerencial/goal-section";
 import { fetchPainelGerencial } from "@/lib/painel-gerencial/service";
-import { parsePeriodParams, SAO_PAULO_TZ } from "@/lib/utils/timezone";
+import { MONTH_NAMES_PT, parsePeriodParams, SAO_PAULO_TZ } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { comparisonToTrend } from "@/lib/utils/comparison";
 
@@ -35,6 +36,10 @@ export default async function PainelGerencialPage({
   const period = parsePeriodParams(params);
   const result = await fetchPainelGerencial(period);
   const { indicators, comparison, previousPeriod } = result;
+
+  const goalMonthKey = result.goal.monthPeriod.from.slice(0, 7); // "YYYY-MM", valor esperado por <input type="month">
+  const [goalMonthYear, goalMonthNum] = result.goal.monthPeriod.from.split("-").map(Number);
+  const goalMonthLabel = `${MONTH_NAMES_PT[goalMonthNum - 1]}/${goalMonthYear}`;
 
   const periodCaption = `${formatDateBR(period.from)} a ${formatDateBR(period.to)}`;
   const previousPeriodCaption = `${formatDateBR(previousPeriod.from)} a ${formatDateBR(previousPeriod.to)} (mesma duração, período imediatamente anterior)`;
@@ -77,6 +82,8 @@ export default async function PainelGerencialPage({
         <PeriodSelector period={period} />
         <p className="text-xs text-foreground-subtle">Atualizado às {formatGeneratedAt(result.generatedAt)}</p>
       </div>
+
+      {result.jumpparkConfigured ? <GoalSection monthLabel={goalMonthLabel} monthKey={goalMonthKey} progress={result.goal.progress} error={result.goal.error} /> : null}
 
       {!result.jumpparkConfigured ? (
         <Card>

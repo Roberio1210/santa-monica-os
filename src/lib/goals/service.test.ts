@@ -57,6 +57,45 @@ describe("computeGoalProgress — percentual, ritmo e projeção", () => {
   });
 });
 
+describe("computeGoalProgress — Missão 32 (progresso 0%/exato/ultrapassado, sem NaN/Infinity)", () => {
+  it("3. progresso 0% (nenhum faturamento ainda no mês) -> percentComplete 0, falta = meta inteira, sem crash", () => {
+    const goal = lavacaoGoal();
+    const progress = computeGoalProgress(goal, 0, "2026-07-10");
+    expect(progress.percentComplete).toBe(0);
+    expect(progress.remainingAmount).toBe(goal.targetAmount);
+    expect(Number.isFinite(progress.percentComplete)).toBe(true);
+  });
+
+  it("5. meta exatamente atingida (100%) -> percentComplete 100, falta = 0", () => {
+    const goal = lavacaoGoal();
+    const progress = computeGoalProgress(goal, goal.targetAmount, "2026-07-20");
+    expect(progress.percentComplete).toBe(100);
+    expect(progress.remainingAmount).toBe(0);
+  });
+
+  it("6. meta ultrapassada -> percentComplete real (>100%) exibido no texto, falta continua 0 (nunca negativa)", () => {
+    const goal = lavacaoGoal();
+    const progress = computeGoalProgress(goal, goal.targetAmount * 1.4, "2026-07-20");
+    expect(progress.percentComplete).toBeGreaterThan(100);
+    expect(progress.remainingAmount).toBe(0); // 7. falta nunca negativa
+  });
+
+  it("8. targetAmount 0 (edge case defensivo) -> nunca NaN/Infinity em percentComplete/projectedPercent", () => {
+    const goal: Goal = { ...lavacaoGoal(), targetAmount: 0 };
+    const progress = computeGoalProgress(goal, 1000, "2026-07-15");
+    expect(Number.isFinite(progress.percentComplete)).toBe(true);
+    expect(progress.projectedPercent === null || Number.isFinite(progress.projectedPercent)).toBe(true);
+    expect(progress.remainingAmount).toBe(0);
+  });
+
+  it("8b. currentAmount muito alto -> projectedAmount/projectedPercent continuam números finitos, nunca Infinity", () => {
+    const goal = lavacaoGoal();
+    const progress = computeGoalProgress(goal, 999_999_999, "2026-07-16");
+    expect(Number.isFinite(progress.projectedAmount ?? 0)).toBe(true);
+    expect(Number.isFinite(progress.projectedPercent ?? 0)).toBe(true);
+  });
+});
+
 describe("computeGoalProgress — faixas de premiação (bug real: prêmio na própria meta, não só acima dela)", () => {
   it("abaixo de R$30.000 -> próxima faixa é a meta em si (R$30.000, prêmio R$1.000)", () => {
     const goal = lavacaoGoal();

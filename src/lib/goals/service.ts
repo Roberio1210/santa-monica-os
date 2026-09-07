@@ -1,8 +1,9 @@
 import "server-only";
 import { and, eq, lte, gte } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
+import { auditLogs } from "@/db/schema/system";
 import { goalBonusTiers, goals } from "@/db/schema";
-import type { Goal, GoalArea, GoalPace, GoalProgress } from "@/lib/goals/types";
+import type { Goal, GoalArea, GoalPace, GoalProgress, SetMonthlyGoalInput, SetMonthlyGoalResult } from "@/lib/goals/types";
 
 /**
  * Metas (Sprint 4.0) — nada hardcoded: todo valor vem da tabela `goals`/`goal_bonus_tiers`
@@ -77,4 +78,67 @@ export function computeGoalProgress(goal: Goal, currentAmount: number, asOfDate:
   const amountToNextBonus = nextBonusTier ? Math.round((nextBonusTier.thresholdAmount - currentAmount) * 100) / 100 : null;
 
   return { goal, currentAmount, percentComplete, remainingAmount, daysElapsed, daysTotal, projectedAmount, projectedPercent, pace, nextBonusTier, amountToNextBonus };
+}
+
+const MONTH_NAMES_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+function lastDayOfMonthIso(year: number, month: number): string {
+  // Dia 0 do mês seguinte = último dia do mês pedido (aritmética de calendário pura, sem fuso).
+  const last = new Date(Date.UTC(year, month, 0));
+  return last.toISOString().slice(0, 10);
+}
+
+/**
+ * Missão 32 (Etapa D) — o menor CRUD possível para a meta mensal CONSOLIDADA do Painel
+ * Gerencial: um único upsert por (area="consolidado", periodStart), reaproveitando o índice
+ * único já existente (`goals_area_period_start_idx`) para garantir, no próprio banco, que nunca
+ * existam duas metas consolidadas ativas para o mesmo mês — não é uma checagem de aplicação, é
+ * uma garantia estrutural. Nunca toca `goal_bonus_tiers` (essa tela não lida com premiação) nem
+ * qualquer meta de outra área/período (o `WHERE` do upsert é sempre exatamente essa chave).
+ */
+export async function setConsolidatedMonthlyGoal(input: SetMonthlyGoalInput, actorUserId: string | null): Promise<SetMonthlyGoalResult> {
+  if (!Number.isFinite(input.targetAmount) || input.targetAmount <= 0) {
+    return { status: "invalid", reason: "O valor da meta precisa ser um número maior que zero." };
+  }
+  if (!Number.isInteger(input.month) || input.month < 1 || input.month > 12) {
+    return { status: "invalid", reason: "Mês inválido." };
+  }
+  if (!Number.isInteger(input.year) || input.year < 2000 || input.year > 2100) {
+    return { status: "invalid", reason: "Ano inválido." };
+  }
+
+  const db = getDb();
+  if (!db) throw new Error("setConsolidatedMonthlyGoal exige DATABASE_URL configurada.");
+
+  const periodStart = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
+  const periodEnd = lastDayOfMonthIso(input.year, input.month);
+  const label = `Meta mensal — Consolidado (${MONTH_NAMES_PT[input.month - 1]}/${input.year})`;
+  const targetAmount = String(Math.round(input.targetAmount * 100) / 100);
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(goals).where(and(eq(goals.area, "consolidado"), eq(goals.periodStart, periodStart))).limit(1);
+
+    const [row] = await tx
+      .insert(goals)
+      .values({ area: "consolidado", label, targetAmount, periodStart, periodEnd, active: true, source: "manual" })
+      .onConflictDoUpdate({
+        target: [goals.area, goals.periodStart],
+        set: { label, targetAmount, periodEnd, active: true, updatedAt: new Date() },
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorUserId,
+      action: existing ? "goal_consolidated_monthly_updated" : "goal_consolidated_monthly_created",
+      entityType: "goals",
+      entityId: row.id,
+      beforeState: existing ? { targetAmount: existing.targetAmount, periodStart: existing.periodStart, periodEnd: existing.periodEnd, active: existing.active } : null,
+      afterState: { targetAmount: row.targetAmount, periodStart: row.periodStart, periodEnd: row.periodEnd, active: row.active },
+      source: "manual",
+      notes: null,
+    });
+
+    const goal: Goal = { id: row.id, area: row.area, label: row.label, targetAmount: Number(row.targetAmount), periodStart: row.periodStart, periodEnd: row.periodEnd, bonusTiers: [] };
+    return { status: existing ? "updated" : "created", goal };
+  });
 }

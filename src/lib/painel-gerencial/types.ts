@@ -1,6 +1,7 @@
 import type { OperationalServiceCategory } from "@/lib/domain/operational";
 import type { PaymentMethod } from "@/types/common";
 import type { PeriodComparison, PeriodRange } from "@/lib/utils/timezone";
+import type { GoalProgress } from "@/lib/goals/types";
 
 /**
  * Read model temporário do Painel Gerencial (Sprint MVP Gerencial).
@@ -155,4 +156,14 @@ export interface PainelGerencialResult {
   operationalResultCalculable: boolean;
   comparison: PainelGerencialComparison;
   findings: ManagementFinding[];
+  /**
+   * Missão 32 — meta mensal consolidada. Sempre referente ao MÊS CORRENTE (`monthPeriod`),
+   * independente de `period` acima. `progress` é `null` quando não há meta ativa cadastrada para
+   * o mês — a UI deve mostrar "Meta mensal não definida", nunca inventar um alvo.
+   */
+  goal: {
+    monthPeriod: PeriodRange;
+    progress: GoalProgress | null;
+    error: string | null;
+  };
 }

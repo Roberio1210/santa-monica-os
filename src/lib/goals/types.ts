@@ -32,3 +32,13 @@ export interface GoalProgress {
   nextBonusTier: GoalBonusTier | null;
   amountToNextBonus: number | null;
 }
+
+/** Missão 32 (Etapa D) — entrada mínima para definir/editar a meta mensal consolidada. */
+export interface SetMonthlyGoalInput {
+  targetAmount: number;
+  /** 1-12. */
+  month: number;
+  year: number;
+}
+
+export type SetMonthlyGoalResult = { status: "created" | "updated"; goal: Goal } | { status: "invalid"; reason: string };
