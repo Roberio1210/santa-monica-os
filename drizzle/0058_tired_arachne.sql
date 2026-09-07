@@ -1,0 +1,1 @@
+ALTER TYPE "public"."identity_review_status" ADD VALUE 'linked';

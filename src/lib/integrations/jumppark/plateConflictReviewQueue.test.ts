@@ -56,3 +56,17 @@ describe("dispatch legado vs. conflito de placa — Missão 20", () => {
     expect(belongsToLegacyQueue(unknownRow)).toBe(true);
   });
 });
+
+describe("split pending/decided — Missão 28 (X: item resolvido deixa de aparecer como pending)", () => {
+  function splitByPending<T extends { status: string }>(items: T[]): { pending: T[]; decided: T[] } {
+    // Mesma regra usada em `fetchPlateConflictReviewQueue`/`fetchIdentityReviewQueue`.
+    return { pending: items.filter((i) => i.status === "pending"), decided: items.filter((i) => i.status !== "pending") };
+  }
+
+  it("X. item com status linked cai em 'decided', nunca em 'pending'", () => {
+    const items = [{ id: "a", status: "pending" }, { id: "b", status: "linked" }, { id: "c", status: "kept_separate" }, { id: "d", status: "deferred" }];
+    const { pending, decided } = splitByPending(items);
+    expect(pending.map((i) => i.id)).toEqual(["a"]);
+    expect(decided.map((i) => i.id)).toEqual(["b", "c", "d"]);
+  });
+});

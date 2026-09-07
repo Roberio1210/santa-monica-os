@@ -37,7 +37,8 @@ export interface PlateConflictReviewViewModel {
   reviewItemId: string;
   /** Guardado apenas como informação auxiliar — nunca reparseado para decidir o tipo do conflito. */
   subjectKey: string;
-  status: "pending" | "kept_separate" | "deferred";
+  /** `linked` (Missão 27/28, Etapa E2/E3) — operador confirmou "é o mesmo veículo". */
+  status: "pending" | "kept_separate" | "deferred" | "linked";
   conflictType: PlateConflictType;
   /** Uso lógico/dedup — nunca exibir diretamente sem passar por `displayPlate`. */
   normalizedPlate: string;

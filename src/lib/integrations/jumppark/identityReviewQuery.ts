@@ -34,7 +34,8 @@ export interface IdentityReviewItemRow {
   plateMasked: string;
   confidence: string;
   rule: string;
-  status: "pending" | "kept_separate" | "deferred";
+  /** `linked` (Missão 27/28) nunca é gravado por este fluxo (ambiguidade de nome de cliente) — só existe aqui por completude estrutural, já que a coluna é compartilhada com o fluxo de conflito de placa. */
+  status: "pending" | "kept_separate" | "deferred" | "linked";
   candidates: IdentityReviewCandidateRow[];
   unresolvedOrders: IdentityReviewUnresolvedOrderRow[];
   decidedAt: Date | null;

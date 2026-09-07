@@ -173,6 +173,14 @@ describe("decidePlateConflictReopen — Missão 24/E1, decisão pura de reabertu
     const result = decidePlateConflictReopen("deferred", { incomingOrderIds: ["order-100"] }, ["order-100", "order-200"]);
     expect(result.shouldReopen).toBe(true);
   });
+
+  it("Missão 28 (Y): status linked também é sujeito à reabertura por evidência nova — E1 não precisou de nenhuma mudança de código", () => {
+    const reopens = decidePlateConflictReopen("linked", { incomingOrderIds: ["order-100"] }, ["order-100", "order-200"]);
+    expect(reopens.shouldReopen).toBe(true);
+
+    const staysLinked = decidePlateConflictReopen("linked", { incomingOrderIds: ["order-100"] }, ["order-100"]);
+    expect(staysLinked.shouldReopen).toBe(false);
+  });
 });
 
 /**

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/planning/status-badge";
+import { PlateConflictActions } from "@/components/jumppark/plate-conflict-actions";
 import type { EnrichedExistingVehicle, EnrichedIncomingOrder, EnrichedPlateConflictReviewViewModel } from "@/lib/integrations/jumppark/plateConflictEnrichment";
 import type { PlateConflictType } from "@/lib/integrations/jumppark/plateConflictEvidence";
 import type { AppointmentStatus } from "@/lib/planning/types";
@@ -9,14 +10,16 @@ import { formatDateBR } from "@/lib/utils/format";
 import { saoPauloTimeHM } from "@/lib/utils/timezone";
 
 /**
- * Missão 20 (Etapa D — UI read-only) — card dedicado para conflitos de placa detectados pelo
- * sync JumpPark (Missão 14/17), consumindo só o `EnrichedPlateConflictReviewViewModel` da Missão
- * 19 (parser da Missão 18 + enrichment da Missão 19) — nunca acessa `evidence` bruta.
+ * Missão 20 (Etapa D — UI read-only) / Missão 28 (Etapa E6 — ações). Card dedicado para
+ * conflitos de placa detectados pelo sync JumpPark (Missão 14/17), consumindo só o
+ * `EnrichedPlateConflictReviewViewModel` da Missão 19 (parser da Missão 18 + enrichment da
+ * Missão 19) — nunca acessa `evidence` bruta.
  *
- * Puramente leitura: nenhum form, nenhuma action, nenhuma mutação. As ações genéricas da fila
- * antiga (`keepSeparateAction`/`deferReviewAction`/`reopenReviewAction`) têm semântica pensada
- * para ambiguidade de nome de cliente, não para conflito de placa — deliberadamente não
- * reaproveitadas aqui (ver checkpoint da Missão 20, item 10 da missão).
+ * O card em si continua Server Component, só leitura. As três ações humanas (Missão 28) vivem
+ * isoladas em `PlateConflictActions` (Client Component), renderizadas só quando `!decided` — as
+ * ações genéricas da fila antiga (`keepSeparateAction`/`deferReviewAction`/`reopenReviewAction`)
+ * têm semântica pensada para ambiguidade de nome de cliente, nunca reaproveitadas aqui (ver
+ * checkpoint da Missão 20, item 10).
  */
 
 const CONFLICT_TYPE_LABEL: Record<PlateConflictType, string> = {
@@ -33,12 +36,14 @@ const REVIEW_STATUS_LABEL: Record<string, string> = {
   pending: "Pendente",
   kept_separate: "Mantido separado",
   deferred: "Revisar depois",
+  linked: "Vinculado (mesmo veículo)",
 };
 
 const REVIEW_STATUS_VARIANT: Record<string, "outline" | "positive" | "warning" | "critical"> = {
   pending: "warning",
   kept_separate: "positive",
   deferred: "outline",
+  linked: "positive",
 };
 
 function ExistingVehicleBlock({ vehicle }: { vehicle: EnrichedExistingVehicle }) {
@@ -168,7 +173,7 @@ export function PlateConflictReviewCard({ item, decided }: { item: EnrichedPlate
 
         {item.decidedNotes ? <p className="text-xs italic text-foreground-subtle">Observação: {item.decidedNotes}</p> : null}
 
-        {decided ? <p className="border-t border-border-subtle pt-3 text-xs text-foreground-subtle">Decisão já registrada nesta fila — esta tela ainda não permite refazer a decisão.</p> : null}
+        {!decided ? <PlateConflictActions reviewItemId={item.reviewItemId} /> : null}
       </CardContent>
     </Card>
   );

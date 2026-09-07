@@ -6,6 +6,14 @@ import { eq } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { identityReviewItems, vehicles } from "@/db/schema/crm";
 import { jumpParkServiceOrders } from "@/db/schema/jumppark";
+import { getCurrentUser } from "@/lib/auth/session";
+import {
+  deferPlateConflictReview,
+  outcomeToActionState,
+  resolvePlateConflictDifferentVehicles,
+  resolvePlateConflictSameVehicle,
+  type PlateConflictActionState,
+} from "@/lib/integrations/jumppark/plateConflictResolution";
 
 /**
  * Ações manuais da fila "Identidades para revisar" (Missão 28) — nunca excluem ordens, nunca
@@ -86,4 +94,51 @@ export async function reopenReviewAction(formData: FormData): Promise<void> {
 
   revalidatePath("/ordens/clientes/revisao");
   redirect("/ordens/clientes/revisao");
+}
+
+/**
+ * Missão 28 (Etapas E3/E4/E5) — as três decisões humanas para CONFLITO DE PLACA. Diferente das
+ * ações acima (que dão `redirect`), estas seguem o padrão de `useActionState`
+ * (ex.: `reverseConsumptionAction`, `src/app/estoque/ordens/actions.ts`): recebem o estado
+ * anterior + `FormData`, nunca lançam para o cliente (erro operacional vira `{error}`, nunca uma
+ * página de erro), e devolvem `{error, success}` para a UI renderizar sem esconder falha. Toda a
+ * mutação real (transação, lock, revalidação de evidência, audit_log) vive em
+ * `plateConflictResolution.ts` — estas funções só traduzem `FormData` -> chamada -> texto.
+ */
+async function actorContext(notes: string | null): Promise<{ actorUserId: string | null; notes: string | null }> {
+  const user = await getCurrentUser();
+  return { actorUserId: user?.id ?? null, notes };
+}
+
+export async function resolvePlateConflictSameVehicleAction(_prevState: PlateConflictActionState, formData: FormData): Promise<PlateConflictActionState> {
+  const reviewItemId = String(formData.get("reviewItemId") ?? "");
+  if (!reviewItemId) return { error: "Item de revisão não identificado.", success: null };
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  const outcome = await resolvePlateConflictSameVehicle(reviewItemId, await actorContext(notes));
+  const result = outcomeToActionState(outcome, "Confirmado: mesmo veículo. O veículo manual passa a receber as próximas atualizações desta placa vindas da JumpPark.");
+  if (outcome.status === "resolved") revalidatePath("/ordens/clientes/revisao");
+  return result;
+}
+
+export async function resolvePlateConflictDifferentVehiclesAction(_prevState: PlateConflictActionState, formData: FormData): Promise<PlateConflictActionState> {
+  const reviewItemId = String(formData.get("reviewItemId") ?? "");
+  if (!reviewItemId) return { error: "Item de revisão não identificado.", success: null };
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  const outcome = await resolvePlateConflictDifferentVehicles(reviewItemId, await actorContext(notes));
+  const result = outcomeToActionState(outcome, "Registrado: são veículos diferentes. Nada foi alterado nos veículos existentes.");
+  if (outcome.status === "resolved") revalidatePath("/ordens/clientes/revisao");
+  return result;
+}
+
+export async function deferPlateConflictReviewAction(_prevState: PlateConflictActionState, formData: FormData): Promise<PlateConflictActionState> {
+  const reviewItemId = String(formData.get("reviewItemId") ?? "");
+  if (!reviewItemId) return { error: "Item de revisão não identificado.", success: null };
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  const outcome = await deferPlateConflictReview(reviewItemId, await actorContext(notes));
+  const result = outcomeToActionState(outcome, "Adiado para revisão posterior.");
+  if (outcome.status === "resolved") revalidatePath("/ordens/clientes/revisao");
+  return result;
 }

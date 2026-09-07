@@ -18,8 +18,13 @@ import { active, externalId, id, notes, source, timestamps } from "./common";
  */
 export const identityConfidenceEnum = pgEnum("identity_confidence", ["confirmado", "provavel", "provisorio", "ambiguo"]);
 
-/** Status da decisão manual de um item da fila "Identidades para revisar" — sempre reversível (nunca apaga o item, só muda o status/decisão). */
-export const identityReviewStatusEnum = pgEnum("identity_review_status", ["pending", "kept_separate", "deferred"]);
+/**
+ * Status da decisão manual de um item da fila "Identidades para revisar" — sempre reversível
+ * (nunca apaga o item, só muda o status/decisão). `linked` (Missão 27/28, Etapa E2/E3) — só usado
+ * por conflito de placa: operador confirmou que o vehicle manual e o vehicle JumpPark incoming
+ * representam o MESMO carro físico; nunca usado pelo fluxo de ambiguidade de nome de cliente.
+ */
+export const identityReviewStatusEnum = pgEnum("identity_review_status", ["pending", "kept_separate", "deferred", "linked"]);
 
 export const customers = pgTable("customers", {
   id: id(),
