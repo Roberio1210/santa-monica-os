@@ -1,10 +1,13 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, isNotNull } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { customers, identityReviewItems, vehicles } from "@/db/schema/crm";
 import { jumpParkServiceOrders } from "@/db/schema/jumppark";
 import { aggregateJumpParkCustomersAndVehicles, type OrderForAggregation } from "@/lib/integrations/jumppark/customers";
 import { jumpParkLogger } from "@/lib/integrations/jumppark/logger";
+import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
+import { normalizePlate } from "@/lib/crm/normalize";
+import { classifyPlateValue } from "@/lib/crm/identityEvidence";
 
 /**
  * Recalcula Clientes e Veículos (tabelas `customers`/`vehicles`, `source = 'jumppark'`) a partir
@@ -33,6 +36,101 @@ import { jumpParkLogger } from "@/lib/integrations/jumppark/logger";
  *      apagados) para preservar o histórico e permitir reverter.
  */
 
+/** "manual_jumppark" quando pelo menos um candidato é `source='manual'` (prioridade sobre jumppark — ver `classifyVehiclePlateConflict`); "jumppark_jumppark" só quando TODOS os candidatos são `source='jumppark'`. */
+export type VehiclePlateConflictType = "manual_jumppark" | "jumppark_jumppark";
+
+export interface VehicleConflictCandidateEntry {
+  vehicleId: string;
+  customerId: string;
+  source: string;
+}
+
+/**
+ * Missão 16/17 — contrato estrutural mínimo da evidência: só identificadores (nunca nome/
+ * telefone/CPF/e-mail/modelo/marca/cor — tudo isso é buscável depois por ID, nunca duplicado
+ * aqui). `incomingOrderIds` é a peça-chave do modelo híbrido aprovado na Missão 16: a ordem crua
+ * já fica persistida em `jumppark_service_orders` independente deste bloqueio (o sync a upserta
+ * antes de chegar aqui), então qualquer dado do lado incoming (nome, telefone, modelo, cor,
+ * valores) pode ser buscado sob demanda por esses ids, sem nunca precisar ser copiado para cá.
+ */
+export interface VehicleConflictEvidence {
+  conflictType: VehiclePlateConflictType;
+  normalizedPlate: string;
+  /** Sempre array, mesmo com um único candidato — nunca escolhido/reduzido a um só (Missão 14/16). */
+  existingVehicles: VehicleConflictCandidateEntry[];
+  incomingJumpParkExternalId: string;
+  /** `null` quando a ordem incoming não tem identidade de cliente resolvida (sem nome nem telefone utilizável) — nunca inventado. */
+  incomingJumpParkCustomerExternalId: string | null;
+  /** Ids internos de `jumppark_service_orders` — permitem buscar nome/telefone/modelo/cor/valores da ordem incoming sob demanda, sem duplicar aqui. */
+  incomingOrderIds: string[];
+  origin: "jumppark";
+}
+
+export interface VehicleConflictItem {
+  subjectKey: string;
+  plateMasked: string;
+  rule: string;
+  evidence: VehicleConflictEvidence;
+}
+
+interface VehicleConflictCandidate {
+  id: string;
+  customerId: string;
+  source: string;
+}
+
+/**
+ * Missão 14 (ajustada na Missão 17 — contrato de evidência da Missão 16) — decide, de forma PURA
+ * (sem I/O, sem `db`, sem chamada de rede), se um vehicle JumpPark com `external_id` novo pode ser
+ * criado com segurança ou colide com um vehicle já existente (manual ou outro jumppark sob um
+ * `external_id` diferente). `candidates` é o resultado já consultado de
+ * `findVehiclesByNormalizedPlate` — esta função nunca faz a consulta, só decide a partir do
+ * resultado. Extraída assim para ser testável sem depender do reprocessamento completo de
+ * `refreshJumpParkCustomers` (que sempre varre TODA a tabela `jumppark_service_orders` por desenho
+ * — ver docstring dela — e por isso é lenta demais para testar em memória).
+ *
+ * Retorna `null` quando é seguro prosseguir com a criação normal (nenhum candidato encontrado).
+ * Retorna o item de revisão a ser upsertado quando há qualquer candidato — nunca escolhe um
+ * automaticamente, nunca funde, nunca decide por customer/modelo/marca/cor.
+ *
+ * Se `candidates` misturar sources (manual + jumppark ao mesmo tempo), a classificação prioriza
+ * `manual_jumppark` — um conflito envolvendo um vehicle manual é operacionalmente mais sensível
+ * (risco de duplicar um cliente/agendamento real) do que uma inconsistência só entre dois
+ * registros jumppark, então nunca fica "escondido" atrás do outro tipo.
+ */
+export function classifyVehiclePlateConflict(
+  candidates: VehicleConflictCandidate[],
+  normalizedPlate: string,
+  incomingExternalId: string,
+  incomingCustomerExternalId: string | null,
+  incomingOrderIds: string[] = [],
+): VehicleConflictItem | null {
+  if (candidates.length === 0) return null;
+
+  const isManualConflict = candidates.some((c) => c.source === "manual");
+  const conflictType: VehiclePlateConflictType = isManualConflict ? "manual_jumppark" : "jumppark_jumppark";
+  const subjectKey = `vehicle_plate_collision_${conflictType}:${normalizedPlate}`;
+
+  const evidence: VehicleConflictEvidence = {
+    conflictType,
+    normalizedPlate,
+    existingVehicles: candidates.map((c) => ({ vehicleId: c.id, customerId: c.customerId, source: c.source })),
+    incomingJumpParkExternalId: incomingExternalId,
+    incomingJumpParkCustomerExternalId: incomingCustomerExternalId,
+    incomingOrderIds,
+    origin: "jumppark",
+  };
+
+  return {
+    subjectKey,
+    plateMasked: normalizedPlate,
+    rule: isManualConflict
+      ? "Placa de ordem JumpPark nova (external_id ainda desconhecido) coincide com a placa de um vehicle já cadastrado manualmente — nunca fundido/sobrescrito automaticamente, requer decisão manual."
+      : "Placa de ordem JumpPark nova (external_id ainda desconhecido) coincide com a placa de outro vehicle já sincronizado da própria JumpPark, sob external_id diferente — inconsistência de identidade, nunca duplicada automaticamente.",
+    evidence,
+  };
+}
+
 export interface CustomersRefreshResult {
   status: "success" | "not_configured";
   customersUpserted: number;
@@ -41,14 +139,27 @@ export interface CustomersRefreshResult {
   ordersUnlinked: number;
   reviewItemsUpserted: number;
   reviewItemsDeactivated: number;
+  /** Missão 14 — veículos JumpPark cuja criação foi bloqueada por colisão de placa (com vehicle manual ou com outro vehicle jumppark) e viraram item de revisão em vez de duplicata silenciosa. */
+  vehicleConflictsQueued: number;
 }
+
+const NOT_CONFIGURED_RESULT: CustomersRefreshResult = {
+  status: "not_configured",
+  customersUpserted: 0,
+  vehiclesUpserted: 0,
+  ordersLinked: 0,
+  ordersUnlinked: 0,
+  reviewItemsUpserted: 0,
+  reviewItemsDeactivated: 0,
+  vehicleConflictsQueued: 0,
+};
 
 export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult> {
   if (!isDatabaseConfigured()) {
-    return { status: "not_configured", customersUpserted: 0, vehiclesUpserted: 0, ordersLinked: 0, ordersUnlinked: 0, reviewItemsUpserted: 0, reviewItemsDeactivated: 0 };
+    return NOT_CONFIGURED_RESULT;
   }
   const db = getDb();
-  if (!db) return { status: "not_configured", customersUpserted: 0, vehiclesUpserted: 0, ordersLinked: 0, ordersUnlinked: 0, reviewItemsUpserted: 0, reviewItemsDeactivated: 0 };
+  if (!db) return NOT_CONFIGURED_RESULT;
 
   const rows = await db
     .select({
@@ -114,6 +225,17 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
     customerIdByExternalId.set(c.externalId, row.id);
   }
 
+  // Missão 14 — proteção contra duplicação de vehicle entre o sync JumpPark e um vehicle já
+  // existente (manual, com placa preenchida via `assignPlateToVehicle` da Missão 11, ou até outro
+  // jumppark com external_id diferente). O único conflito que este `ON CONFLICT` abaixo já
+  // resolve sozinho é quando o `external_id` JÁ é conhecido (PASSO A da missão) — esse caminho
+  // permanece 100% inalterado. O risco real é quando o `external_id` é NOVO: sem a checagem
+  // abaixo, o INSERT criaria um segundo vehicle para a mesma placa física, silenciosamente.
+  const existingExternalIdRows = await db.select({ externalId: vehicles.externalId }).from(vehicles).where(isNotNull(vehicles.externalId));
+  const knownExternalIds = new Set(existingExternalIdRows.map((r) => r.externalId as string));
+
+  const vehicleConflictItems: VehicleConflictItem[] = [];
+
   const vehicleIdByExternalId = new Map<string, string>();
   for (const v of aggregation.vehicles) {
     const ownerId = v.customerExternalId ? customerIdByExternalId.get(v.customerExternalId) : null;
@@ -121,6 +243,38 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
       jumpParkLogger.warn("Veículo sem cliente resolvido — pulado no recálculo.", { vehicleExternalId: v.externalId });
       continue;
     }
+
+    // PASSO A — external_id já conhecido: fluxo atual, sem nenhuma mudança. A nova checagem de
+    // conflito só se aplica a external_id NOVO (PASSO B/C).
+    if (!knownExternalIds.has(v.externalId)) {
+      // PASSO B — só placas FULL (Mercosul ou padrão antigo) participam da checagem de conflito;
+      // placas mascaradas/parciais/ausentes nunca são comparáveis contra a coluna `plate` de um
+      // vehicle manual, então seguem o fluxo atual sem bloqueio (nunca inventamos correspondência
+      // a partir de um dado incompleto).
+      const evidence = classifyPlateValue(v.plate);
+      if (evidence.classification === "FULL" && evidence.fullPlate) {
+        // PASSO C — normalizador canônico já existente (mesmo usado por `assignPlateToVehicle`,
+        // Missão 11) e o mecanismo de busca cross-source já existente e auditado (Missão 13),
+        // nunca uma comparação nova.
+        const normalizedPlate = normalizePlate(evidence.fullPlate);
+        const candidates = normalizedPlate ? await getAttendanceRepository().findVehiclesByNormalizedPlate(normalizedPlate) : [];
+        const conflict = normalizedPlate ? classifyVehiclePlateConflict(candidates, normalizedPlate, v.externalId, v.customerExternalId, v.orderIds) : null;
+
+        if (conflict) {
+          vehicleConflictItems.push(conflict);
+          jumpParkLogger.warn("Criação de vehicle JumpPark bloqueada por colisão de placa — item de revisão gerado.", {
+            vehicleExternalId: v.externalId,
+            candidateCount: candidates.length,
+            subjectKey: conflict.subjectKey,
+          });
+
+          // Não insere, não atualiza vehicle nenhum, não vincula este external_id a nenhum id —
+          // ordens deste veículo ficam sem vehicle_id até decisão humana (nunca um vínculo inventado).
+          continue;
+        }
+      }
+    }
+
     const values = {
       customerId: ownerId,
       plate: v.plate,
@@ -185,6 +339,30 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
     reviewItemsUpserted += 1;
   }
 
+  // Missão 14 — mesmo mecanismo de upsert idempotente por `subjectKey`, para os conflitos de
+  // colisão de placa vehicle manual↔jumppark/jumppark↔jumppark detectados acima. Precisam entrar
+  // no MESMO `seenSubjectKeys` da fila de ambiguidade de cliente — senão a limpeza de itens obsoletos
+  // logo abaixo desativaria, na mesma passagem, um item que acabou de ser criado/atualizado aqui.
+  for (const item of vehicleConflictItems) {
+    seenSubjectKeys.add(item.subjectKey);
+    await db
+      .insert(identityReviewItems)
+      .values({
+        subjectKey: item.subjectKey,
+        plateMasked: item.plateMasked,
+        confidence: "ambiguo",
+        rule: item.rule,
+        evidence: item.evidence,
+        active: true,
+        source: "jumppark",
+      })
+      .onConflictDoUpdate({
+        target: identityReviewItems.subjectKey,
+        set: { plateMasked: item.plateMasked, rule: item.rule, evidence: item.evidence, active: true, updatedAt: new Date() },
+      });
+  }
+  const vehicleConflictsQueued = vehicleConflictItems.length;
+
   // Itens que existiam mas cuja ambiguidade não foi detectada nesta passagem: marcar inativos
   // (nunca apagar — preserva histórico e permite reverter se a ambiguidade reaparecer).
   const staleRows = await db.select({ subjectKey: identityReviewItems.subjectKey }).from(identityReviewItems).where(eq(identityReviewItems.active, true));
@@ -206,6 +384,7 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
     ordersUnlinked,
     reviewItemsUpserted,
     reviewItemsDeactivated,
+    vehicleConflictsQueued,
   });
 
   return {
@@ -216,5 +395,6 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
     ordersUnlinked,
     reviewItemsUpserted,
     reviewItemsDeactivated,
+    vehicleConflictsQueued,
   };
 }
