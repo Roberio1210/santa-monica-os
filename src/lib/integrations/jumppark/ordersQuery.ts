@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, ilike, lte, sql as sqlOp } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, sql as sqlOp } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { jumpParkServiceOrders, jumpParkServiceOrderItems, jumpParkSyncLogs } from "@/db/schema/jumppark";
 
@@ -124,6 +124,20 @@ export async function fetchOrderById(id: string): Promise<JumpParkServiceOrderRo
   if (!db) return null;
   const rows = await db.select().from(jumpParkServiceOrders).where(eq(jumpParkServiceOrders.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Missão 19 (enrichment read-only de conflito de placa) — versão em lote de `fetchOrderById`,
+ * mesmo espírito das versões em lote de `attendance`/`planning`: 1 consulta para os poucos
+ * `incomingOrderIds` de um item de revisão, nunca N+1. Ids não encontrados simplesmente não
+ * aparecem no resultado — quem chama decide como representar "não encontrado".
+ */
+export async function fetchOrdersByIds(ids: string[]): Promise<JumpParkServiceOrderRow[]> {
+  if (!isDatabaseConfigured()) return [];
+  if (ids.length === 0) return [];
+  const db = getDb();
+  if (!db) return [];
+  return db.select().from(jumpParkServiceOrders).where(inArray(jumpParkServiceOrders.id, ids));
 }
 
 export type JumpParkServiceOrderItemRow = typeof jumpParkServiceOrderItems.$inferSelect;

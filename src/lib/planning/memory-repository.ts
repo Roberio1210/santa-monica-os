@@ -8,6 +8,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Mesma lista de `RELEVANT_APPOINTMENT_STATUSES` de `postgres-repository.ts` — ver docstring de `getRelevantAppointmentsByVehicleIds` em `repository.ts`. */
+const RELEVANT_APPOINTMENT_STATUSES = new Set<AppointmentStatus>(["agendado", "confirmado", "em_andamento", "reagendado"]);
+
 /**
  * Implementação em memória — mesmo papel de `MemoryAttendanceRepository`, só para desenvolvimento
  * sem Postgres. Resolve nome/telefone/veículo/serviço chamando `getAttendanceRepository()`
@@ -71,6 +74,16 @@ export class MemoryPlanningRepository implements PlanningRepository {
   async listUpcoming(fromIso: string): Promise<AppointmentRow[]> {
     const upcoming = Array.from(this.appointments.values()).filter((a) => saoPauloDateISO(new Date(a.scheduledAt)) >= fromIso);
     return Promise.all(upcoming.map((a) => this.toRow(a)));
+  }
+
+  async getRelevantAppointmentsByVehicleIds(vehicleIds: string[], nowIso: string): Promise<AppointmentRow[]> {
+    const ids = new Set(vehicleIds);
+    const now = new Date(nowIso);
+    const relevant = Array.from(this.appointments.values()).filter(
+      (a) => ids.has(a.vehicleId) && RELEVANT_APPOINTMENT_STATUSES.has(a.status) && (a.status === "em_andamento" || new Date(a.scheduledAt) >= now),
+    );
+    relevant.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    return Promise.all(relevant.map((a) => this.toRow(a)));
   }
 
   async searchAppointments(query: string, fromIso: string): Promise<AppointmentRow[]> {

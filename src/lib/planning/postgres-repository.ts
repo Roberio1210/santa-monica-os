@@ -1,10 +1,13 @@
 import "server-only";
-import { desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { getDb, type DbOrTx } from "@/db/client";
 import { appointments, customers, operationalCapacityConfig, serviceOrderItems, serviceOrders, services, serviceVisits, vehicles } from "@/db/schema";
 import type { AppointmentRow, CompletedOrderSample, PlanningRepository } from "@/lib/planning/repository";
 import type { Appointment, AppointmentStatus, CapacityConfig, CreateAppointmentInput, SetCapacityConfigInput } from "@/lib/planning/types";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
+
+/** Missão 19 — ver docstring de `getRelevantAppointmentsByVehicleIds` em `repository.ts`. */
+const RELEVANT_APPOINTMENT_STATUSES: AppointmentStatus[] = ["agendado", "confirmado", "em_andamento", "reagendado"];
 
 function toAppointment(row: typeof appointments.$inferSelect): Appointment {
   return {
@@ -112,6 +115,16 @@ export class PostgresPlanningRepository implements PlanningRepository {
     const rows = await this.rowSelect().orderBy(appointments.scheduledAt);
     const upcoming = rows.filter((r) => saoPauloDateISO(r.scheduledAt) >= fromIso);
     return upcoming.map((r) => this.toRow(r));
+  }
+
+  async getRelevantAppointmentsByVehicleIds(vehicleIds: string[], nowIso: string): Promise<AppointmentRow[]> {
+    if (vehicleIds.length === 0) return [];
+    const rows = await this.rowSelect()
+      .where(and(inArray(appointments.vehicleId, vehicleIds), inArray(appointments.status, RELEVANT_APPOINTMENT_STATUSES)))
+      .orderBy(appointments.scheduledAt);
+    const now = new Date(nowIso);
+    const relevant = rows.filter((r) => r.status === "em_andamento" || r.scheduledAt >= now);
+    return relevant.map((r) => this.toRow(r));
   }
 
   async searchAppointments(query: string, fromIso: string): Promise<AppointmentRow[]> {

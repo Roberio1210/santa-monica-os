@@ -41,6 +41,16 @@ export interface PlanningRepository {
   listAppointmentsInRange(fromIso: string, toIso: string): Promise<AppointmentRow[]>;
   /** Todo agendamento a partir de `fromIso` (inclusive), sem limite superior — filtro "Todos". */
   listUpcoming(fromIso: string): Promise<AppointmentRow[]>;
+  /**
+   * Missão 19 (enrichment read-only de conflito de placa) — em lote (1 consulta para todos os
+   * `vehicleId`s, nunca N+1), agendamentos "relevantes" desses veículos: status `agendado`,
+   * `confirmado`, `em_andamento` ou `reagendado` (nunca `cancelado` nem `concluido` — passado,
+   * não relevante para esta tela) E (`scheduledAt >= nowIso` OU status `em_andamento`). Retorna
+   * TODOS os agendamentos relevantes encontrados, ordenados por `scheduledAt` — a escolha do "mais
+   * próximo" por veículo é responsabilidade de quem consome (ver `plateConflictEnrichment.ts`),
+   * não desta consulta.
+   */
+  getRelevantAppointmentsByVehicleIds(vehicleIds: string[], nowIso: string): Promise<AppointmentRow[]>;
   /** Busca por nome do cliente, telefone, placa ou veículo — só agendamentos a partir de `fromIso`. */
   searchAppointments(query: string, fromIso: string): Promise<AppointmentRow[]>;
   updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<Appointment>;
