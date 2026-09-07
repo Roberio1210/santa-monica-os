@@ -33,8 +33,14 @@ export interface GoalProgress {
   amountToNextBonus: number | null;
 }
 
-/** Missão 32 (Etapa D) — entrada mínima para definir/editar a meta mensal consolidada. */
+/**
+ * Missão 32 (Etapa D) / Missão 36 — entrada mínima para definir/editar uma meta mensal de
+ * qualquer área. `area` é sempre explícito (nunca inferido) — quem chama decide se está mexendo
+ * na Meta Geral (`consolidado`) ou na Meta Estética (`lavacao`); o upsert só pode tocar a linha
+ * exata dessa área+período (índice único `(area, periodStart)`), nunca a de outra área.
+ */
 export interface SetMonthlyGoalInput {
+  area: GoalArea;
   targetAmount: number;
   /** 1-12. */
   month: number;

@@ -25,12 +25,18 @@ describe("previousPeriodOf — filtros de período e comparação", () => {
   });
 });
 
-describe("Missão 32 (item 14) — realizado da meta usa a mesma fonte de faturamento do Painel, nunca uma segunda lógica", () => {
-  it("computeGoalProgress é chamado com monthIndicators.netRevenue (mesma função computeManagementIndicators dos outros cards), nunca com dado do módulo Atendimento", () => {
+describe("Missão 32/36 (item 14) — realizado de cada meta usa a fonte correta, nunca uma segunda lógica de faturamento", () => {
+  it("Meta Geral: computeGoalProgress é chamado com monthIndicators.netRevenue (mesma função computeManagementIndicators dos outros cards), nunca com dado do módulo Atendimento", () => {
     const source = readFileSync(path.resolve(__dirname, "service.ts"), "utf-8");
-    expect(source).toContain("computeGoalProgress(activeGoal, monthIndicators.netRevenue, today)");
+    expect(source).toContain("computeGoalProgress(generalGoal, monthIndicators.netRevenue, today)");
     expect(source).toMatch(/monthIndicators\s*=[\s\S]*computeManagementIndicators/);
     expect(source).not.toMatch(/attendance/i);
+  });
+
+  it("Meta Estética: computeGoalProgress é chamado com servicesRevenue (computeServicesRevenue, campo amountServices), nunca com netRevenue/indicators consolidados", () => {
+    const source = readFileSync(path.resolve(__dirname, "service.ts"), "utf-8");
+    expect(source).toContain("computeGoalProgress(detailingGoal, servicesRevenue, today)");
+    expect(source).toMatch(/servicesRevenue\s*=\s*computeServicesRevenue/);
   });
 });
 

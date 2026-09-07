@@ -88,15 +88,24 @@ function lastDayOfMonthIso(year: number, month: number): string {
   return last.toISOString().slice(0, 10);
 }
 
+const GOAL_AREA_LABEL: Record<GoalArea, string> = { consolidado: "Consolidado", lavacao: "Estética/Lavação", estacionamento: "Estacionamento" };
+const VALID_GOAL_AREAS = new Set<GoalArea>(["consolidado", "lavacao", "estacionamento"]);
+
 /**
- * Missão 32 (Etapa D) — o menor CRUD possível para a meta mensal CONSOLIDADA do Painel
- * Gerencial: um único upsert por (area="consolidado", periodStart), reaproveitando o índice
- * único já existente (`goals_area_period_start_idx`) para garantir, no próprio banco, que nunca
- * existam duas metas consolidadas ativas para o mesmo mês — não é uma checagem de aplicação, é
- * uma garantia estrutural. Nunca toca `goal_bonus_tiers` (essa tela não lida com premiação) nem
- * qualquer meta de outra área/período (o `WHERE` do upsert é sempre exatamente essa chave).
+ * Missão 32 (Etapa D) / Missão 36 — o menor CRUD possível para uma meta mensal de UMA área
+ * específica (Meta Geral = `consolidado`, Meta Estética = `lavacao`): um único upsert por
+ * `(area, periodStart)`, reaproveitando o índice único já existente
+ * (`goals_area_period_start_idx`) para garantir, no próprio banco, que nunca existam duas metas
+ * ativas da MESMA área para o mesmo mês — não é uma checagem de aplicação, é uma garantia
+ * estrutural. Como `area` sempre faz parte da chave do upsert, esta função NUNCA consegue tocar a
+ * linha de outra área, mesmo por engano — definir a Meta Estética nunca sobrescreve a Meta Geral,
+ * e vice-versa. Nunca toca `goal_bonus_tiers` (essa tela não lida com premiação) nem qualquer
+ * meta de outro período.
  */
-export async function setConsolidatedMonthlyGoal(input: SetMonthlyGoalInput, actorUserId: string | null): Promise<SetMonthlyGoalResult> {
+export async function setMonthlyGoal(input: SetMonthlyGoalInput, actorUserId: string | null): Promise<SetMonthlyGoalResult> {
+  if (!VALID_GOAL_AREAS.has(input.area)) {
+    return { status: "invalid", reason: "Área de meta inválida." };
+  }
   if (!Number.isFinite(input.targetAmount) || input.targetAmount <= 0) {
     return { status: "invalid", reason: "O valor da meta precisa ser um número maior que zero." };
   }
@@ -108,19 +117,19 @@ export async function setConsolidatedMonthlyGoal(input: SetMonthlyGoalInput, act
   }
 
   const db = getDb();
-  if (!db) throw new Error("setConsolidatedMonthlyGoal exige DATABASE_URL configurada.");
+  if (!db) throw new Error("setMonthlyGoal exige DATABASE_URL configurada.");
 
   const periodStart = `${input.year}-${String(input.month).padStart(2, "0")}-01`;
   const periodEnd = lastDayOfMonthIso(input.year, input.month);
-  const label = `Meta mensal — Consolidado (${MONTH_NAMES_PT[input.month - 1]}/${input.year})`;
+  const label = `Meta mensal — ${GOAL_AREA_LABEL[input.area]} (${MONTH_NAMES_PT[input.month - 1]}/${input.year})`;
   const targetAmount = String(Math.round(input.targetAmount * 100) / 100);
 
   return db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(goals).where(and(eq(goals.area, "consolidado"), eq(goals.periodStart, periodStart))).limit(1);
+    const [existing] = await tx.select().from(goals).where(and(eq(goals.area, input.area), eq(goals.periodStart, periodStart))).limit(1);
 
     const [row] = await tx
       .insert(goals)
-      .values({ area: "consolidado", label, targetAmount, periodStart, periodEnd, active: true, source: "manual" })
+      .values({ area: input.area, label, targetAmount, periodStart, periodEnd, active: true, source: "manual" })
       .onConflictDoUpdate({
         target: [goals.area, goals.periodStart],
         set: { label, targetAmount, periodEnd, active: true, updatedAt: new Date() },
@@ -129,11 +138,11 @@ export async function setConsolidatedMonthlyGoal(input: SetMonthlyGoalInput, act
 
     await tx.insert(auditLogs).values({
       actorUserId,
-      action: existing ? "goal_consolidated_monthly_updated" : "goal_consolidated_monthly_created",
+      action: existing ? "goal_monthly_updated" : "goal_monthly_created",
       entityType: "goals",
       entityId: row.id,
-      beforeState: existing ? { targetAmount: existing.targetAmount, periodStart: existing.periodStart, periodEnd: existing.periodEnd, active: existing.active } : null,
-      afterState: { targetAmount: row.targetAmount, periodStart: row.periodStart, periodEnd: row.periodEnd, active: row.active },
+      beforeState: existing ? { area: existing.area, targetAmount: existing.targetAmount, periodStart: existing.periodStart, periodEnd: existing.periodEnd, active: existing.active } : null,
+      afterState: { area: row.area, targetAmount: row.targetAmount, periodStart: row.periodStart, periodEnd: row.periodEnd, active: row.active },
       source: "manual",
       notes: null,
     });

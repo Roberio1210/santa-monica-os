@@ -5,7 +5,7 @@ import { getFinanceRepository } from "@/lib/finance/repository-factory";
 import { toAccountsPayableView } from "@/lib/finance/status";
 import type { JumpParkOrderInput } from "@/lib/domain/operational";
 import { comparePeriodValues, previousPeriodOf, resolvePeriod, saoPauloDateISO, type PeriodRange } from "@/lib/utils/timezone";
-import { buildCustomerAggregates, buildManagementOrderRows, buildServiceAggregates, computeManagementIndicators, rankCustomersBySpend } from "@/lib/painel-gerencial/orders";
+import { buildCustomerAggregates, buildManagementOrderRows, buildServiceAggregates, computeManagementIndicators, computeServicesRevenue, rankCustomersBySpend } from "@/lib/painel-gerencial/orders";
 import { buildExpenseRows, computeExpensesSummary, filterPayablesByCompetencePeriod, isOperationalResultCalculable } from "@/lib/painel-gerencial/expenses";
 import { buildFindings } from "@/lib/painel-gerencial/insights";
 import { computeGoalProgress, fetchActiveGoal } from "@/lib/goals/service";
@@ -52,14 +52,17 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
   const monthPeriod = period.key === "month" ? period : resolvePeriod("month");
   const reuseCurrentFetchForMonth = period.key === "month";
 
-  const [currentFetch, previousFetch, payableItemsRaw, monthFetch, activeGoal] = await Promise.all([
+  const [currentFetch, previousFetch, payableItemsRaw, monthFetch, generalGoal, detailingGoal] = await Promise.all([
     jumpparkConfigured ? fetchOrdersOrEmpty(period.from, period.to) : Promise.resolve({ orders: [], error: null }),
     jumpparkConfigured ? fetchOrdersOrEmpty(previous.from, previous.to) : Promise.resolve({ orders: [], error: null }),
     getFinanceRepository()
       .listAccountsPayable()
       .catch(() => []),
     jumpparkConfigured && !reuseCurrentFetchForMonth ? fetchOrdersOrEmpty(monthPeriod.from, monthPeriod.to) : Promise.resolve(null),
+    // Missão 32 — Meta Geral (área "consolidado"). Missão 36 — Meta Estética (área "lavacao",
+    // já existente desde a Sprint 4.0 — nenhum valor de enum novo).
     jumpparkConfigured ? fetchActiveGoal("consolidado", today) : Promise.resolve(null),
+    jumpparkConfigured ? fetchActiveGoal("lavacao", today) : Promise.resolve(null),
   ]);
 
   const payableViews = payableItemsRaw.map((item) => toAccountsPayableView(item, today));
@@ -96,13 +99,18 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
   const operationalResult = Math.round((indicators.netRevenue - expensesSummary.total) * 100) / 100;
   const operationalResultCalculable = isOperationalResultCalculable(jumpparkConfigured, currentFetch.error, expensesSummary.hasData);
 
-  // Missão 32 — realizado da meta é SEMPRE `netRevenue` do mês corrente, calculado pela MESMA
-  // função (`computeManagementIndicators`) que já alimenta todos os outros cards do Painel —
-  // nunca uma segunda lógica de faturamento (nunca reaproveita a fonte do módulo Atendimento).
+  // Missão 32 — realizado da Meta Geral é SEMPRE `netRevenue` do mês corrente, calculado pela
+  // MESMA função (`computeManagementIndicators`) que já alimenta todos os outros cards do
+  // Painel — nunca uma segunda lógica de faturamento (nunca reaproveita a fonte do módulo
+  // Atendimento). Missão 36 — realizado da Meta Estética vem exclusivamente de
+  // `computeServicesRevenue` (campo estruturado `amountServices`) sobre as MESMAS ordens do mês,
+  // nunca uma nova chamada à JumpPark, nunca misturando a parcela de estacionamento.
   const monthFetchResolved = reuseCurrentFetchForMonth ? currentFetch : (monthFetch ?? { orders: [], error: null });
   const monthRows = buildManagementOrderRows(monthFetchResolved.orders);
   const monthIndicators = reuseCurrentFetchForMonth ? indicators : computeManagementIndicators(monthRows);
-  const goalProgress = activeGoal ? computeGoalProgress(activeGoal, monthIndicators.netRevenue, today) : null;
+  const servicesRevenue = computeServicesRevenue(monthFetchResolved.orders);
+  const generalGoalProgress = generalGoal ? computeGoalProgress(generalGoal, monthIndicators.netRevenue, today) : null;
+  const detailingGoalProgress = detailingGoal ? computeGoalProgress(detailingGoal, servicesRevenue, today) : null;
 
   return {
     period,
@@ -132,8 +140,9 @@ export async function fetchPainelGerencial(period: PeriodRange): Promise<PainelG
     findings,
     goal: {
       monthPeriod,
-      progress: goalProgress,
       error: reuseCurrentFetchForMonth ? currentFetch.error : monthFetchResolved.error,
+      general: generalGoalProgress,
+      detailing: detailingGoalProgress,
     },
   };
 }

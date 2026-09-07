@@ -157,13 +157,19 @@ export interface PainelGerencialResult {
   comparison: PainelGerencialComparison;
   findings: ManagementFinding[];
   /**
-   * Missão 32 — meta mensal consolidada. Sempre referente ao MÊS CORRENTE (`monthPeriod`),
-   * independente de `period` acima. `progress` é `null` quando não há meta ativa cadastrada para
-   * o mês — a UI deve mostrar "Meta mensal não definida", nunca inventar um alvo.
+   * Missão 32 / Missão 36 — duas metas mensais independentes, sempre referentes ao MÊS CORRENTE
+   * (`monthPeriod`), independente de `period` acima. `general` (área `consolidado`) usa o mesmo
+   * `netRevenue` de todo o resto do Painel; `detailing` (área `lavacao`, rotulada "Meta Estética"
+   * na UI) usa exclusivamente `computeServicesRevenue` (campo estruturado `amountServices`,
+   * nunca estacionamento). Cada `progress` é `null` quando não há meta ativa cadastrada para
+   * aquela área/mês — a UI deve mostrar o estado "não definida" correspondente, nunca inventar
+   * um alvo nem copiar o valor da outra meta.
    */
   goal: {
     monthPeriod: PeriodRange;
-    progress: GoalProgress | null;
+    /** Erro ao buscar as ordens do mês (comum às duas metas, mesma busca) — `null` quando ok. */
     error: string | null;
+    general: GoalProgress | null;
+    detailing: GoalProgress | null;
   };
 }

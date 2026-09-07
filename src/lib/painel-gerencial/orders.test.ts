@@ -5,6 +5,7 @@ import {
   buildManagementOrderRows,
   buildServiceAggregates,
   computeManagementIndicators,
+  computeServicesRevenue,
   groupNetRevenueByDay,
   rankCustomersByVisits,
 } from "@/lib/painel-gerencial/orders";
@@ -174,5 +175,56 @@ describe("groupNetRevenueByDay", () => {
     const byDay = groupNetRevenueByDay(rows);
     expect(byDay.get("2026-07-20")).toBe(150);
     expect(byDay.get("2026-07-21")).toBe(80);
+  });
+});
+
+describe("computeServicesRevenue — Missão 36 (Meta Estética, exclusivamente amountServices)", () => {
+  it("A. ordem somente de estacionamento (amountServices ausente/zero, amount > 0) -> estética = 0", () => {
+    const total = computeServicesRevenue([order({ amount: "150.00", amountServices: "0.00", totalAmount: 150, services: [] })]);
+    expect(total).toBe(0);
+  });
+
+  it("B. ordem somente de estética (amount = 0) -> estética = amountServices", () => {
+    const total = computeServicesRevenue([order({ amount: "0.00", amountServices: "180.00", totalAmount: 180 })]);
+    expect(total).toBe(180);
+  });
+
+  it("C. várias ordens -> soma correta", () => {
+    const total = computeServicesRevenue([
+      order({ serviceOrderId: "so-1", amount: "0.00", amountServices: "180.00", totalAmount: 180 }),
+      order({ serviceOrderId: "so-2", amount: "40.00", amountServices: "0.00", totalAmount: 40, services: [] }),
+      order({ serviceOrderId: "so-3", amount: "0.00", amountServices: "220.50", totalAmount: 220.5 }),
+    ]);
+    expect(total).toBe(400.5);
+  });
+
+  it("D. amountServices explicitamente '0.00' -> contribui 0, sem erro", () => {
+    const total = computeServicesRevenue([order({ amount: "60.00", amountServices: "0.00", totalAmount: 60, services: [] })]);
+    expect(total).toBe(0);
+  });
+
+  it("E. valores ausentes/null conforme o tipo real (string, number, undefined) -> tratados com segurança, nunca NaN", () => {
+    const total = computeServicesRevenue([
+      order({ serviceOrderId: "so-1", amountServices: "150.00", totalAmount: 150 }), // string, formato real da API
+      order({ serviceOrderId: "so-2", amountServices: 90, totalAmount: 90 }), // number
+      order({ serviceOrderId: "so-3", amountServices: undefined, amount: "40.00", totalAmount: 40, services: [] }), // campo ausente
+    ]);
+    expect(total).toBe(240);
+    expect(Number.isFinite(total)).toBe(true);
+  });
+
+  it("F. amount/totalAmount de estacionamento nunca entram na soma, mesmo quando muito maiores que amountServices", () => {
+    const total = computeServicesRevenue([order({ amount: "5000.00", amountServices: "10.00", totalAmount: 5010 })]);
+    expect(total).toBe(10); // nunca 5000 nem 5010
+  });
+
+  it("ordem sem saída registrada (não finalizada) é excluída, mesmo tendo amountServices", () => {
+    const total = computeServicesRevenue([order({ exitDateTime: undefined, amountServices: "300.00" })]);
+    expect(total).toBe(0);
+  });
+
+  it("nunca faz I/O — função pura, mesma lista de entrada sempre produz a mesma saída", () => {
+    const orders = [order({ amountServices: "123.45" })];
+    expect(computeServicesRevenue(orders)).toBe(computeServicesRevenue(orders));
   });
 });

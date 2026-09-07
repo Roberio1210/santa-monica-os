@@ -83,7 +83,28 @@ export default async function PainelGerencialPage({
         <p className="text-xs text-foreground-subtle">Atualizado às {formatGeneratedAt(result.generatedAt)}</p>
       </div>
 
-      {result.jumpparkConfigured ? <GoalSection monthLabel={goalMonthLabel} monthKey={goalMonthKey} progress={result.goal.progress} error={result.goal.error} /> : null}
+      {result.jumpparkConfigured ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <GoalSection
+            area="consolidado"
+            title={`Meta Geral — ${goalMonthLabel}`}
+            subtitle="Estacionamento + Estética"
+            monthKey={goalMonthKey}
+            progress={result.goal.general}
+            error={result.goal.error}
+            undefinedLabel="Meta geral não definida."
+          />
+          <GoalSection
+            area="lavacao"
+            title={`Meta Estética — ${goalMonthLabel}`}
+            subtitle="Somente serviços de estética automotiva"
+            monthKey={goalMonthKey}
+            progress={result.goal.detailing}
+            error={result.goal.error}
+            undefinedLabel="Meta da estética não definida."
+          />
+        </div>
+      ) : null}
 
       {!result.jumpparkConfigured ? (
         <Card>

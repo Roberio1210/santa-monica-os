@@ -92,6 +92,30 @@ export function buildManagementOrderRows(rawOrders: JumpParkOrderInput[]): Manag
     .sort((a, b) => `${b.date}${b.exitTime ?? ""}`.localeCompare(`${a.date}${a.exitTime ?? ""}`));
 }
 
+function toAmountNumber(value: string | number | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Missão 36 — faturamento SOMENTE de serviços de estética/lavação, para a Meta Estética. Usa
+ * exclusivamente o campo estruturado `amountServices` que a própria API da JumpPark já separa da
+ * parcela de estacionamento (`amount`) — nunca por texto/nome de serviço, nunca por
+ * `classifyServiceCategory` (que classifica a ordem inteira por palavra-chave, não separa valor).
+ * Auditoria da Missão 35 confirmou empiricamente (produção, setembro/2026): as duas parcelas nunca
+ * aparecem simultaneamente numa mesma ordem, e `amount + amountServices = totalAmount` sempre.
+ *
+ * Opera sobre as MESMAS ordens já buscadas pelo Painel Gerencial (nenhuma chamada nova à
+ * JumpPark), mesmo critério de "finalizada" de `buildManagementOrderRows` (`exitDateTime`
+ * presente) — nunca altera `computeManagementIndicators`/o cálculo consolidado atual.
+ */
+export function computeServicesRevenue(rawOrders: JumpParkOrderInput[]): number {
+  const finalized = rawOrders.filter((order) => !!order.exitDateTime);
+  const total = finalized.reduce((sum, order) => sum + toAmountNumber(order.amountServices), 0);
+  return round2(total);
+}
+
 export function computeManagementIndicators(rows: ManagementOrderRow[]): ManagementIndicators {
   const grossRevenue = round2(rows.reduce((sum, r) => sum + r.grossAmount, 0));
   const discountTotal = round2(rows.reduce((sum, r) => sum + r.discountAmount, 0));

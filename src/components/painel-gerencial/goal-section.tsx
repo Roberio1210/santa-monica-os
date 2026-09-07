@@ -7,14 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatCard } from "@/components/cards/stat-card";
 import { setMonthlyGoalAction, type SetMonthlyGoalActionState } from "@/app/painel-gerencial/actions";
-import type { GoalProgress, GoalPace } from "@/lib/goals/types";
+import type { GoalArea, GoalProgress, GoalPace } from "@/lib/goals/types";
 import { formatCurrency } from "@/lib/utils/format";
 
 /**
- * Missão 32 — seção de meta mensal consolidada do Painel Gerencial. Server-agnóstica quanto ao
- * dado (recebe `progress` já calculado por `computeGoalProgress`, mesma fonte que alimenta o
- * Zezinho) — só decide como mostrar. CRUD mínimo (Etapa D) embutido: um botão discreto revela um
- * formulário de 2 campos (valor + mês), nunca uma página nova.
+ * Missão 32 / Missão 36 — card de UMA meta mensal do Painel Gerencial. Reaproveitado duas vezes
+ * na página (Meta Geral = `area="consolidado"`, Meta Estética = `area="lavacao"`) — o componente
+ * é agnóstico quanto à área, só recebe `title`/`subtitle` para o rótulo visível e `progress` já
+ * calculado (`computeGoalProgress`, mesma fonte que alimenta o Zezinho). CRUD mínimo (Etapa D)
+ * embutido: um botão discreto revela um formulário de 2 campos (valor + mês) + a área em campo
+ * oculto — a `area` NUNCA é escolhida pelo usuário, vem fixa deste componente, então o formulário
+ * da Meta Estética estruturalmente não consegue submeter para a área da Meta Geral.
  */
 
 const PACE_LABEL: Record<GoalPace, string> = {
@@ -40,7 +43,7 @@ const PACE_BAR_COLOR: Record<GoalPace, string> = {
 
 const initialState: SetMonthlyGoalActionState = { error: null, success: null };
 
-function GoalForm({ defaultMonth, defaultAmount, onCancel }: { defaultMonth: string; defaultAmount: number | null; onCancel: () => void }) {
+function GoalForm({ area, defaultMonth, defaultAmount, onCancel }: { area: GoalArea; defaultMonth: string; defaultAmount: number | null; onCancel: () => void }) {
   const [state, formAction, isPending] = useActionState(setMonthlyGoalAction, initialState);
 
   if (state.success) {
@@ -49,6 +52,7 @@ function GoalForm({ defaultMonth, defaultAmount, onCancel }: { defaultMonth: str
 
   return (
     <form action={formAction} className="space-y-3 rounded-lg border border-border-subtle p-3">
+      <input type="hidden" name="area" value={area} />
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-foreground-muted">
           Mês da meta
@@ -85,7 +89,24 @@ function GoalForm({ defaultMonth, defaultAmount, onCancel }: { defaultMonth: str
   );
 }
 
-export function GoalSection({ monthLabel, monthKey, progress, error }: { monthLabel: string; monthKey: string; progress: GoalProgress | null; error: string | null }) {
+export function GoalSection({
+  area,
+  title,
+  subtitle,
+  monthKey,
+  progress,
+  error,
+  undefinedLabel,
+}: {
+  area: GoalArea;
+  title: string;
+  subtitle: string;
+  monthKey: string;
+  progress: GoalProgress | null;
+  error: string | null;
+  /** Texto do estado "sem meta" — cada card tem o seu (Missão 36, Passo 4: "Meta da estética não definida" é diferente de "Meta mensal não definida"). */
+  undefinedLabel: string;
+}) {
   const [editing, setEditing] = useState(false);
 
   if (!progress) {
@@ -94,16 +115,17 @@ export function GoalSection({ monthLabel, monthKey, progress, error }: { monthLa
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Target className="h-4 w-4 text-foreground-subtle" />
-            Meta mensal — {monthLabel}
+            {title}
           </CardTitle>
+          <p className="text-xs text-foreground-subtle">{subtitle}</p>
         </CardHeader>
         <CardContent className="space-y-3 pt-0">
           {error ? <p className="text-xs text-critical">Faturamento do mês indisponível ({error}) — a meta não pode ser comparada agora.</p> : null}
           {editing ? (
-            <GoalForm defaultMonth={monthKey} defaultAmount={null} onCancel={() => setEditing(false)} />
+            <GoalForm area={area} defaultMonth={monthKey} defaultAmount={null} onCancel={() => setEditing(false)} />
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-foreground-muted">Meta mensal não definida.</p>
+              <p className="text-sm text-foreground-muted">{undefinedLabel}</p>
               <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
                 Definir meta
               </Button>
@@ -120,10 +142,13 @@ export function GoalSection({ monthLabel, monthKey, progress, error }: { monthLa
   return (
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Target className="h-4 w-4 text-foreground-subtle" />
-          Meta mensal — {progress.goal.label}
-        </CardTitle>
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Target className="h-4 w-4 text-foreground-subtle" />
+            {title}
+          </CardTitle>
+          <p className="text-xs text-foreground-subtle">{subtitle}</p>
+        </div>
         <Badge variant={PACE_VARIANT[progress.pace]}>{PACE_LABEL[progress.pace]}</Badge>
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
@@ -155,7 +180,7 @@ export function GoalSection({ monthLabel, monthKey, progress, error }: { monthLa
         {error ? <p className="text-xs text-critical">Aviso: faturamento do mês pode estar desatualizado ({error}).</p> : null}
 
         {editing ? (
-          <GoalForm defaultMonth={monthKey} defaultAmount={progress.goal.targetAmount} onCancel={() => setEditing(false)} />
+          <GoalForm area={area} defaultMonth={monthKey} defaultAmount={progress.goal.targetAmount} onCancel={() => setEditing(false)} />
         ) : (
           <div className="flex justify-end border-t border-border-subtle pt-3">
             <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
