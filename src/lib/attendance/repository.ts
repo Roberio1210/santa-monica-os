@@ -46,6 +46,8 @@ export interface AttendanceRepository {
   findCustomerByPhone(phone: string, runner?: DbOrTx): Promise<Customer | null>;
   findCustomerByCpf(cpf: string): Promise<Customer | null>;
   getCustomer(id: string): Promise<Customer | null>;
+  /** Missão 19 (enrichment read-only de conflito de placa) — mesmo espírito de `listVehiclesForCustomers`: 1 consulta em vez de N para os poucos `customerId`s de um conjunto de candidatos. Ids não encontrados simplesmente não aparecem no resultado. */
+  getCustomersByIds(ids: string[]): Promise<Customer[]>;
   createCustomer(input: CreateCustomerInput, runner?: DbOrTx): Promise<Customer>;
   /** Busca livre por nome do cliente OU marca/modelo de veículo — usada quando a query não é telefone nem placa. Limitada a poucos resultados. */
   searchCustomersByText(query: string): Promise<Customer[]>;
@@ -62,10 +64,20 @@ export interface AttendanceRepository {
 
   findVehicleByPlate(plate: string, runner?: DbOrTx): Promise<Vehicle | null>;
   getVehicle(id: string): Promise<Vehicle | null>;
+  /** Missão 19 (enrichment read-only de conflito de placa) — versão em lote de `getVehicle`, mesmo espírito de `listVehiclesForCustomers`, para os poucos `existingVehicles[].vehicleId` de um conjunto de candidatos. Ids não encontrados simplesmente não aparecem no resultado. */
+  getVehiclesByIds(ids: string[]): Promise<Vehicle[]>;
   listVehiclesByCustomer(customerId: string): Promise<Vehicle[]>;
   createVehicle(input: CreateVehicleInput, runner?: DbOrTx): Promise<Vehicle>;
   /** Placa normalizada (maiúscula, sem espaço), comparada mesmo quando a formatação salva difere — só para aviso de possível duplicidade, nunca funde/bloqueia. */
   findVehiclesByNormalizedPlate(plate: string, runner?: DbOrTx): Promise<Vehicle[]>;
+  /**
+   * Missão 11 — preenche `plate` de um veículo já existente (fluxo "placa chegou depois").
+   * Operação mecânica: só grava a coluna `plate`, nunca decide se é seguro fazer isso — essa
+   * decisão (conflito com outro vehicle/customer/JumpPark, placa já preenchida, formato inválido)
+   * é toda de `assignPlateToVehicle` (`attendance/service.ts`), que é quem deve ser chamado de
+   * fora deste módulo.
+   */
+  updateVehiclePlate(vehicleId: string, plate: string, runner?: DbOrTx): Promise<Vehicle>;
   /**
    * Missão de Performance do CRM — mesma consulta de `listVehiclesByCustomer`, mas para MUITOS
    * clientes de uma vez (1 consulta em vez de N). Existe só porque `listCustomerOverviews`

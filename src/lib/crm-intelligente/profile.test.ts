@@ -90,7 +90,7 @@ describe("computeCustomerProfile", () => {
   });
 
   it("conta veículos e visitas reais", () => {
-    const vehicles: Vehicle[] = [{ id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla", year: 2022, color: "Branco", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }];
+    const vehicles: Vehicle[] = [{ id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla", year: 2022, color: "Branco", source: "manual", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }];
     const visits = [visit("visit1", "2026-01-01T00:00:00Z"), visit("visit2", "2026-02-01T00:00:00Z")];
     const profile = computeCustomerProfile({ customer: customer(), vehicles, visits, orders: [], servicePriceById: {}, now: NOW });
     expect(profile.vehicleCount).toBe(1);

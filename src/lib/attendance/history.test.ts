@@ -3,7 +3,7 @@ import { summarizeCustomerHistory } from "@/lib/attendance/history";
 import { emptyTechnicalDiagnostic, type Customer, type Diagnostic, type ServiceOrder, type ServiceVisit, type TechnicalRecommendation, type Vehicle } from "@/lib/attendance/types";
 
 const customer: Customer = { id: "c1", name: "Fulano", phone: "48999998888", cpf: null, email: null, notes: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
-const vehicle: Vehicle = { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla Cross", year: 2023, color: "Branco", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+const vehicle: Vehicle = { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla Cross", year: 2023, color: "Branco", source: "manual", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
 
 function visit(id: string, createdAt: string): ServiceVisit {
   return { id, customerId: "c1", vehicleId: "v1", mileageAtVisit: 10000, createdAt };

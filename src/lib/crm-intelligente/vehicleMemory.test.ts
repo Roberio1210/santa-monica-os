@@ -3,7 +3,7 @@ import { buildVehicleMemories } from "@/lib/crm-intelligente/vehicleMemory";
 import type { ServiceVisit, Vehicle } from "@/lib/attendance/types";
 
 function vehicle(id: string): Vehicle {
-  return { id, customerId: "c1", plate: `PLT-${id}`, brand: "Toyota", model: "Corolla", year: 2022, color: "Branco", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  return { id, customerId: "c1", plate: `PLT-${id}`, brand: "Toyota", model: "Corolla", year: 2022, color: "Branco", source: "manual", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
 }
 
 function visit(id: string, vehicleId: string, createdAt: string): ServiceVisit {

@@ -53,6 +53,7 @@ function toVehicle(row: typeof vehicles.$inferSelect): Vehicle {
     model: row.model,
     year: row.year,
     color: row.color,
+    source: row.source,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -130,6 +131,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
   async getCustomer(id: string): Promise<Customer | null> {
     const [row] = await this.db().select().from(customers).where(eq(customers.id, id)).limit(1);
     return row ? toCustomer(row) : null;
+  }
+
+  async getCustomersByIds(ids: string[]): Promise<Customer[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db().select().from(customers).where(inArray(customers.id, ids));
+    return rows.map(toCustomer);
   }
 
   async createCustomer(input: CreateCustomerInput, runner: DbOrTx = this.db()): Promise<Customer> {
@@ -225,6 +232,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return row ? toVehicle(row) : null;
   }
 
+  async getVehiclesByIds(ids: string[]): Promise<Vehicle[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db().select().from(vehicles).where(inArray(vehicles.id, ids));
+    return rows.map(toVehicle);
+  }
+
   async listVehiclesByCustomer(customerId: string): Promise<Vehicle[]> {
     const rows = await this.db().select().from(vehicles).where(eq(vehicles.customerId, customerId));
     return rows.map(toVehicle);
@@ -249,6 +262,18 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         source: "manual",
       })
       .returning();
+    return toVehicle(row);
+  }
+
+  /**
+   * Missão 11 — operação mecânica específica para preencher a placa de um veículo já existente
+   * (`plate` estava `NULL`). Só altera a coluna `plate`; nunca toca `customerId` ou qualquer outro
+   * campo. Toda a decisão de segurança (validar formato, checar conflito com outro vehicle/
+   * customer/JumpPark) é responsabilidade de `assignPlateToVehicle` (`attendance/service.ts`) —
+   * este método nunca deve ser chamado diretamente fora dali.
+   */
+  async updateVehiclePlate(vehicleId: string, plate: string, runner: DbOrTx = this.db()): Promise<Vehicle> {
+    const [row] = await runner.update(vehicles).set({ plate }).where(eq(vehicles.id, vehicleId)).returning();
     return toVehicle(row);
   }
 

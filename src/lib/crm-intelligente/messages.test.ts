@@ -4,7 +4,7 @@ import type { Customer, Vehicle } from "@/lib/attendance/types";
 import type { CustomerProfile } from "@/lib/crm-intelligente/types";
 
 const customer: Customer = { id: "c1", name: "Maria Silva", phone: "48999999999", cpf: null, email: null, notes: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
-const vehicle: Vehicle = { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla", year: 2020, color: "Prata", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+const vehicle: Vehicle = { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Toyota", model: "Corolla", year: 2020, color: "Prata", source: "manual", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 const profile: CustomerProfile = { customer, firstVisitAt: "2026-01-01T00:00:00.000Z", daysAsCustomer: 200, visitCount: 6, vehicleCount: 1, lastVisitAt: "2026-06-01T00:00:00.000Z", daysSinceLastVisit: 50, totalSpent: 1200, averageTicket: 200, isRecurring: true, isVip: true };
 
 const TYPES: MessageType[] = ["retorno", "agradecimento", "lembrete_manutencao", "aviso_protecao", "convite_lavagem", "vip", "recuperacao", "pos_servico"];

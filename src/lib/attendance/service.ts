@@ -36,6 +36,8 @@ import { nextStatus } from "@/lib/attendance/status";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import { fetchActiveGoal } from "@/lib/goals/service";
 import { resolveCustomerIdentity, resolveVehicleIdentity } from "@/lib/crm/identityResolution";
+import { normalizePlate } from "@/lib/crm/normalize";
+import { classifyPlateValue } from "@/lib/crm/identityEvidence";
 
 /**
  * Orquestração do Atendimento Inteligente — único ponto de I/O do módulo. Toda lógica pura
@@ -241,6 +243,90 @@ export async function registerQuickCustomerAndVehicle(input: QuickRegisterInput,
   }
 
   return { customer, vehicle, possibleDuplicateCustomers, possibleDuplicateVehicles };
+}
+
+export interface AssignPlateInput {
+  vehicleId: string;
+  plate: string;
+}
+
+export type AssignPlateConflictReason =
+  | "vehicle_has_different_plate"
+  | "plate_used_by_another_vehicle_same_customer"
+  | "plate_used_by_another_vehicle_other_customer"
+  | "plate_used_by_jumppark_vehicle";
+
+export type AssignPlateResult =
+  | { status: "assigned"; vehicle: Vehicle }
+  | { status: "already_assigned"; vehicle: Vehicle }
+  | { status: "invalid_plate" }
+  | { status: "vehicle_not_found" }
+  | { status: "conflict"; reason: AssignPlateConflictReason; conflictingVehicle: Vehicle };
+
+/**
+ * Missão 11 — preenchimento de placa de um veículo já existente, criado sem ela (agendamento
+ * futuro do Planejamento, carro ainda não tinha chegado — Missão 3.2.3/9). Isto é preenchimento de
+ * placa AUSENTE, não troca de placa: se o veículo já tem uma placa diferente preenchida, o
+ * resultado é `conflict` (`vehicle_has_different_plate`), nunca uma sobrescrita silenciosa.
+ *
+ * Reaproveita 100% da normalização/validação já oficiais do projeto — `normalizePlate`
+ * (`crm/normalize.ts`, mesma usada por `registerQuickCustomerAndVehicle`) e `classifyPlateValue`
+ * (`crm/identityEvidence.ts`, mesma usada no motor de identidade CRM/JumpPark). Nenhuma normalização
+ * ou validação nova foi criada — `crm/normalize.ts` e `jumppark-orders/plate.ts` continuam com
+ * `normalizePlate` duplicado (dívida técnica pré-existente, documentada na Missão 10, não corrigida
+ * aqui por estar fora do escopo desta missão).
+ *
+ * `findVehiclesByNormalizedPlate` não filtra por `source`, então já cobre conflito com veículos
+ * `source='jumppark'` na mesma consulta — usado aqui só para CLASSIFICAR o conflito (nunca funde,
+ * nunca escreve na JumpPark).
+ *
+ * IMPORTANTE — concorrência: NÃO existe hoje um índice único em `vehicles.plate` (ver Missão 10).
+ * A checagem de conflito abaixo e o `UPDATE` final não estão dentro de um lock — duas chamadas
+ * verdadeiramente simultâneas para a MESMA placa em vehicles DIFERENTES podem ambas passar pela
+ * checagem antes de qualquer uma escrever, resultando em duas linhas com a mesma placa. Esta
+ * função NÃO elimina essa corrida, só a torna menos provável. A proteção definitiva (índice único
+ * parcial `WHERE plate IS NOT NULL`) é responsabilidade de uma missão futura, depois de auditar
+ * placas duplicadas já existentes nos dados reais.
+ */
+export async function assignPlateToVehicle(input: AssignPlateInput, runner?: DbOrTx): Promise<AssignPlateResult> {
+  const repo = getAttendanceRepository();
+
+  const normalizedInput = normalizePlate(input.plate);
+  const evidence = classifyPlateValue(normalizedInput ?? input.plate);
+  if (!normalizedInput || evidence.classification !== "FULL" || !evidence.fullPlate) {
+    return { status: "invalid_plate" };
+  }
+  const finalPlate = evidence.fullPlate;
+
+  const vehicle = await repo.getVehicle(input.vehicleId);
+  if (!vehicle) {
+    return { status: "vehicle_not_found" };
+  }
+
+  const currentNormalized = normalizePlate(vehicle.plate);
+  if (currentNormalized === finalPlate) {
+    return { status: "already_assigned", vehicle };
+  }
+  if (currentNormalized !== null) {
+    return { status: "conflict", reason: "vehicle_has_different_plate", conflictingVehicle: vehicle };
+  }
+
+  const candidates = await repo.findVehiclesByNormalizedPlate(finalPlate, runner);
+  const others = candidates.filter((v) => v.id !== vehicle.id);
+  if (others.length > 0) {
+    const jumpparkConflict = others.find((v) => v.source === "jumppark");
+    if (jumpparkConflict) {
+      return { status: "conflict", reason: "plate_used_by_jumppark_vehicle", conflictingVehicle: jumpparkConflict };
+    }
+    const sameCustomerConflict = others.find((v) => v.customerId === vehicle.customerId);
+    if (sameCustomerConflict) {
+      return { status: "conflict", reason: "plate_used_by_another_vehicle_same_customer", conflictingVehicle: sameCustomerConflict };
+    }
+    return { status: "conflict", reason: "plate_used_by_another_vehicle_other_customer", conflictingVehicle: others[0] };
+  }
+
+  const updated = await repo.updateVehiclePlate(vehicle.id, finalPlate, runner);
+  return { status: "assigned", vehicle: updated };
 }
 
 export async function startAttendance(customerId: string, vehicleId: string, mileageAtVisit: number | null): Promise<ServiceVisit> {

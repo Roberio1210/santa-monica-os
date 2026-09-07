@@ -15,7 +15,7 @@ function overviewEntry(overrides: Partial<CustomerOverviewEntry> = {}): Customer
     profile: profile(),
     status: "em_risco",
     statusReason: "",
-    primaryVehicle: { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Jeep", model: "Compass", year: 2022, color: "Preto", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    primaryVehicle: { id: "v1", customerId: "c1", plate: "ABC1D23", brand: "Jeep", model: "Compass", year: 2022, color: "Preto", source: "manual", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
     lastServiceNames: ["Bronze"],
     pendingRecommendationsCount: 0,
     lastCourtesy: null,

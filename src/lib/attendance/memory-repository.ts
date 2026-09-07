@@ -65,6 +65,10 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return this.customers.get(id) ?? null;
   }
 
+  async getCustomersByIds(ids: string[]): Promise<Customer[]> {
+    return ids.map((id) => this.customers.get(id)).filter((c): c is Customer => !!c);
+  }
+
   async createCustomer(input: CreateCustomerInput): Promise<Customer> {
     const customer: Customer = {
       id: randomUUID(),
@@ -132,6 +136,10 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return this.vehicles.get(id) ?? null;
   }
 
+  async getVehiclesByIds(ids: string[]): Promise<Vehicle[]> {
+    return ids.map((id) => this.vehicles.get(id)).filter((v): v is Vehicle => !!v);
+  }
+
   async listVehiclesByCustomer(customerId: string): Promise<Vehicle[]> {
     return Array.from(this.vehicles.values()).filter((v) => v.customerId === customerId);
   }
@@ -150,11 +158,21 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
       model: input.model ?? null,
       year: input.year ?? null,
       color: input.color ?? null,
+      source: "manual",
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
     this.vehicles.set(vehicle.id, vehicle);
     return vehicle;
+  }
+
+  /** Missão 11 — mesmo papel do equivalente em `postgres-repository.ts`: só grava `plate`, nunca decide segurança. */
+  async updateVehiclePlate(vehicleId: string, plate: string): Promise<Vehicle> {
+    const existing = this.vehicles.get(vehicleId);
+    if (!existing) throw new Error(`updateVehiclePlate: vehicle ${vehicleId} não encontrado.`);
+    const updated: Vehicle = { ...existing, plate, updatedAt: nowIso() };
+    this.vehicles.set(vehicleId, updated);
+    return updated;
   }
 
   async createServiceVisit(input: { customerId: string; vehicleId: string; mileageAtVisit: number | null }): Promise<ServiceVisit> {

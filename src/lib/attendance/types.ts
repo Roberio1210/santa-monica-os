@@ -29,6 +29,8 @@ export interface Vehicle {
   model: string | null;
   year: number | null;
   color: string | null;
+  /** Missão 11 (atribuição de placa) — "manual" (Atendimento/Planejamento) ou "jumppark" (sincronizado). Nunca fundido automaticamente entre os dois. */
+  source: string;
   createdAt: string;
   updatedAt: string;
 }
