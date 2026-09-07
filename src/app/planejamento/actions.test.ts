@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { createAppointmentAction } from "@/app/planejamento/actions";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { createAppointmentAction, updateAppointmentStatusAction } from "@/app/planejamento/actions";
 import { fetchServiceCatalog, registerQuickCustomerAndVehicle } from "@/lib/attendance/service";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
-import { setCapacityConfig, updateAppointmentStatus } from "@/lib/planning/service";
+import { createAppointment, setCapacityConfig, updateAppointmentStatus } from "@/lib/planning/service";
 import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
@@ -309,5 +311,57 @@ describe("createAppointmentAction — Missão 3.2 (motor de disponibilidade cone
 
     expect(second.vehicle.id).toBe(first.vehicle.id);
     expect(second.vehicle.plate).toBe(plate);
+  });
+});
+
+describe("updateAppointmentStatusAction — proteção temporal (Missão 46, item 28)", () => {
+  it("item 28. appointment de ontem -> a action retorna erro controlado (string amigável), nunca deixa o erro técnico vazar", async () => {
+    const yesterdayIso = addDaysIso(saoPauloDateISO(), -1);
+    const { customer, vehicle } = await newCustomerAndVehicle("AcaoOntem");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${yesterdayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const result = await updateAppointmentStatusAction(appointment.id, "cancelado");
+
+    expect(result.error).toBe("Este agendamento pertence a uma data encerrada e não pode ser alterado pela agenda operacional.");
+    expect(result.error).not.toMatch(/Error:|at Object|node_modules/); // nunca stack técnico
+  });
+
+  it("appointment de hoje -> a action continua funcionando normalmente (regressão)", async () => {
+    const todayIso = saoPauloDateISO();
+    const { customer, vehicle } = await newCustomerAndVehicle("AcaoHoje");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${todayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const result = await updateAppointmentStatusAction(appointment.id, "confirmado");
+
+    expect(result.error).toBeNull();
+    const updated = await getPlanningRepository().getAppointment(appointment.id);
+    expect(updated?.status).toBe("confirmado");
+  });
+
+  it("appointment de amanhã -> iniciar retorna erro controlado específico (não reaproveita a mensagem de data encerrada)", async () => {
+    const tomorrowIsoLocal = addDaysIso(saoPauloDateISO(), 1);
+    const { customer, vehicle } = await newCustomerAndVehicle("AcaoAmanha");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${tomorrowIsoLocal}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const result = await updateAppointmentStatusAction(appointment.id, "em_andamento");
+
+    expect(result.error).toBe("Só é possível iniciar o atendimento no dia do agendamento.");
+  });
+});
+
+describe("itens 21-24 (Missão 46) — nenhuma ação de status toca JumpPark/Financeiro", () => {
+  it("service.ts do planejamento não importa nenhum módulo de JumpPark ou Financeiro", () => {
+    const source = readFileSync(path.resolve(__dirname, "../../lib/planning/service.ts"), "utf-8");
+    expect(source).not.toMatch(/integrations\/jumppark/i);
+    expect(source).not.toMatch(/lib\/finance/i);
+  });
+
+  it("actions.ts do planejamento não importa nenhum módulo de JumpPark ou Financeiro", () => {
+    const source = readFileSync(path.resolve(__dirname, "actions.ts"), "utf-8");
+    expect(source).not.toMatch(/integrations\/jumppark/i);
+    expect(source).not.toMatch(/lib\/finance/i);
   });
 });

@@ -6,7 +6,7 @@ import type { DayAppointmentView } from "@/lib/planning/types";
  * colunas de box e sem slots vazios inventados a cada 15min — só os horários que têm agendamento
  * real ganham um marcador na régua vertical.
  */
-export function DayTimeline({ appointments, capacityBoxesCount }: { appointments: DayAppointmentView[]; capacityBoxesCount: number | null }) {
+export function DayTimeline({ appointments, capacityBoxesCount, todayIso }: { appointments: DayAppointmentView[]; capacityBoxesCount: number | null; todayIso: string }) {
   if (appointments.length === 0) {
     return <p className="py-3 text-sm text-foreground-subtle">Nenhum agendamento para este dia.</p>;
   }
@@ -16,7 +16,7 @@ export function DayTimeline({ appointments, capacityBoxesCount }: { appointments
       {appointments.map((appointment) => (
         <div key={appointment.id} className="relative">
           <span className="absolute -left-[21px] top-4 h-2.5 w-2.5 rounded-full border-2 border-background bg-accent sm:-left-[25px]" aria-hidden="true" />
-          <DayAppointmentCard appointment={appointment} capacityBoxesCount={capacityBoxesCount} />
+          <DayAppointmentCard appointment={appointment} capacityBoxesCount={capacityBoxesCount} todayIso={todayIso} />
         </div>
       ))}
     </div>

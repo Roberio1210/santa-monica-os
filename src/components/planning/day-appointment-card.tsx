@@ -12,7 +12,7 @@ import type { DayAppointmentView } from "@/lib/planning/types";
  * telas menores, indicador de ocupação e status à direita. Mesmos dados de antes (Missão 40),
  * só reorganizados — nenhum campo novo, nenhuma regra nova.
  */
-export function DayAppointmentCard({ appointment, capacityBoxesCount }: { appointment: DayAppointmentView; capacityBoxesCount: number | null }) {
+export function DayAppointmentCard({ appointment, capacityBoxesCount, todayIso }: { appointment: DayAppointmentView; capacityBoxesCount: number | null; todayIso: string }) {
   const start = saoPauloTimeHM(new Date(appointment.scheduledAt));
   const end = appointment.endAt ? saoPauloTimeHM(new Date(appointment.endAt)) : null;
   const showOccupancyBadge = appointment.simultaneousCount !== null && capacityBoxesCount !== null;
@@ -65,7 +65,13 @@ export function DayAppointmentCard({ appointment, capacityBoxesCount }: { appoin
         {appointment.notes ? <p className="mt-1.5 rounded-lg bg-background-elevated p-2 text-xs text-foreground-subtle">{appointment.notes}</p> : null}
 
         <div className="mt-2">
-          <DayAppointmentActions appointmentId={appointment.id} status={appointment.status} />
+          <DayAppointmentActions
+            appointmentId={appointment.id}
+            status={appointment.status}
+            scheduledAt={appointment.scheduledAt}
+            todayIso={todayIso}
+            customerName={appointment.customerName}
+          />
         </div>
       </div>
     </div>

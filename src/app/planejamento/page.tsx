@@ -93,7 +93,7 @@ export default async function PlanejamentoPage({ searchParams }: { searchParams:
       <RangeFilter current={null} />
       <DayNavigator dateIso={dateIso} todayIso={todayIso} />
       <DaySummaryCards dayView={dayView} />
-      <DayTimeline appointments={dayView.appointments} capacityBoxesCount={capacityBoxesCount} />
+      <DayTimeline appointments={dayView.appointments} capacityBoxesCount={capacityBoxesCount} todayIso={todayIso} />
     </div>
   );
 }

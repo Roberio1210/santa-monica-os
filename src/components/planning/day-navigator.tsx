@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { isDatePast } from "@/lib/planning/dayView";
 import { addDaysIso } from "@/lib/utils/timezone";
 import { formatDateBR } from "@/lib/utils/format";
 
@@ -21,7 +22,7 @@ export function dayContextLabel(dateIso: string, todayIso: string): { relative: 
   if (dateIso === todayIso) return { relative: "Hoje", isPast: false };
   if (dateIso === addDaysIso(todayIso, 1)) return { relative: "Amanhã", isPast: false };
   if (dateIso === addDaysIso(todayIso, -1)) return { relative: "Ontem", isPast: true };
-  return { relative: null, isPast: dateIso < todayIso };
+  return { relative: null, isPast: isDatePast(dateIso, todayIso) };
 }
 
 /** Missão 40 (item 1) — navegador `[<] [Hoje] [>]`, server-driven via query param `date`. */

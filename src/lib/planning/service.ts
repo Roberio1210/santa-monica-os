@@ -9,6 +9,7 @@ import {
   computeOccupiedNow,
   computeSimultaneousOccupancyMap,
   findNextAvailableSlot,
+  isDatePast,
   resolveExpedienteWindow,
   type ResolvedDurationAppointment,
 } from "@/lib/planning/dayView";
@@ -190,7 +191,7 @@ export async function fetchDayView(dateIso: string): Promise<DayView> {
   // decidido ANTES de chamar `findNextAvailableSlot` (que sozinha não distingue isso de "hoje,
   // fora do expediente" — ver o comentário dela em `dayView.ts`). Nenhuma regra de disponibilidade
   // nova: só evita reaproveitar "Expediente encerrado" para um dia que já passou por completo.
-  const nextAvailability = dateIso < todayIso
+  const nextAvailability = isDatePast(dateIso, todayIso)
     ? ({ status: "dia_encerrado" } as const)
     : !config
       ? ({ status: "nao_configurado" } as const)
@@ -336,8 +337,57 @@ export async function createAppointmentWithNewCustomerAtomic(input: CreateAppoin
   });
 }
 
+/**
+ * Missão 46 (Parte B) — lançado quando alguém tenta mudar o status de um agendamento cuja data
+ * calendário (América/São Paulo) já passou por completo. Bloqueia TODA transição nesse caso
+ * (inclusive `confirmado`/`reagendado`), nunca só `em_andamento`/`cancelado` — histórico nunca é
+ * alterado pela agenda operacional. Mensagem já é a exibida ao usuário (mesmo padrão de
+ * `AppointmentAvailabilityError`: `updateAppointmentStatusAction` já repassa `err.message`).
+ */
+export class AppointmentPastDateError extends Error {
+  constructor() {
+    super("Este agendamento pertence a uma data encerrada e não pode ser alterado pela agenda operacional.");
+    this.name = "AppointmentPastDateError";
+  }
+}
+
+/**
+ * Missão 46 (Parte D) — "Iniciar atendimento" e "Concluir" só fazem sentido no PRÓPRIO dia do
+ * agendamento (nunca antes, nunca depois) — diferente do bloqueio de data passada acima, que vale
+ * para qualquer transição. `Cancelar`/`confirmado`/`reagendado` continuam permitidos em datas
+ * futuras (matriz existente, não alterada).
+ */
+export class AppointmentNotTodayError extends Error {
+  constructor(action: "iniciar" | "concluir") {
+    super(action === "iniciar" ? "Só é possível iniciar o atendimento no dia do agendamento." : "Só é possível concluir o atendimento no dia do agendamento.");
+    this.name = "AppointmentNotTodayError";
+  }
+}
+
+/**
+ * Missão 46 — ponto central e autoritativo da proteção temporal: qualquer chamador (a server
+ * action `updateAppointmentStatusAction`, o `ConfirmPresence` das visões semana/todos, ou uma
+ * futura tool do Zézinho) passa por aqui, nunca só pela UI. Se o agendamento não for encontrado,
+ * o comportamento é idêntico a antes desta missão (o `repo.updateAppointmentStatus` abaixo lança o
+ * próprio erro de "não encontrado" — nenhuma mensagem duplicada).
+ */
 export async function updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<Appointment> {
-  return getPlanningRepository().updateAppointmentStatus(id, status);
+  const repo = getPlanningRepository();
+  const existing = await repo.getAppointment(id);
+  if (existing) {
+    const todayIso = saoPauloDateISO();
+    const appointmentDateIso = saoPauloDateISO(new Date(existing.scheduledAt));
+    if (isDatePast(appointmentDateIso, todayIso)) {
+      throw new AppointmentPastDateError();
+    }
+    if (status === "em_andamento" && appointmentDateIso !== todayIso) {
+      throw new AppointmentNotTodayError("iniciar");
+    }
+    if (status === "concluido" && appointmentDateIso !== todayIso) {
+      throw new AppointmentNotTodayError("concluir");
+    }
+  }
+  return repo.updateAppointmentStatus(id, status);
 }
 
 export async function fetchActiveCapacityConfig(): Promise<CapacityConfig | null> {

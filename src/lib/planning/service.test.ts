@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AppointmentNotTodayError,
+  AppointmentPastDateError,
   createAppointment,
   fetchActiveCapacityConfig,
   fetchNextClient,
@@ -172,5 +174,97 @@ describe("sinalizadores de cliente no agendamento", () => {
     const board = await fetchPlanningBoard("amanha");
     const entry = board.days[0].appointments.find((a) => a.customerId === customer.id);
     expect(entry?.signals.some((s) => s.id === "recorrente")).toBe(true);
+  });
+});
+
+describe("updateAppointmentStatus — proteção temporal (Missão 46, itens 1-3)", () => {
+  it("item 1. appointment de ONTEM -> mudar para em_andamento é bloqueado no backend (AppointmentPastDateError)", async () => {
+    const yesterdayIso = addDaysIso(saoPauloDateISO(), -1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210050", "PLN0050", "Cliente Ontem Iniciar");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${yesterdayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    await expect(updateAppointmentStatus(appointment.id, "em_andamento")).rejects.toThrow(AppointmentPastDateError);
+    const stillOriginal = await getPlanningRepository().getAppointment(appointment.id);
+    expect(stillOriginal?.status).toBe("agendado"); // nada foi escrito
+  });
+
+  it("item 2. appointment de ONTEM -> mudar para cancelado é bloqueado no backend", async () => {
+    const yesterdayIso = addDaysIso(saoPauloDateISO(), -1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210051", "PLN0051", "Cliente Ontem Cancelar");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${yesterdayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    await expect(updateAppointmentStatus(appointment.id, "cancelado")).rejects.toThrow(AppointmentPastDateError);
+  });
+
+  it("item 3. appointment de ONTEM já em_andamento -> mudar para concluido é bloqueado no backend", async () => {
+    const yesterdayIso = addDaysIso(saoPauloDateISO(), -1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210052", "PLN0052", "Cliente Ontem Concluir");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${yesterdayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    await expect(updateAppointmentStatus(appointment.id, "concluido")).rejects.toThrow(AppointmentPastDateError);
+  });
+
+  it("mensagem do erro de data passada é a mesma sugerida pela missão, controlada (nunca um stack técnico)", async () => {
+    const yesterdayIso = addDaysIso(saoPauloDateISO(), -1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210053", "PLN0053", "Cliente Ontem Mensagem");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${yesterdayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    await expect(updateAppointmentStatus(appointment.id, "cancelado")).rejects.toThrow(
+      "Este agendamento pertence a uma data encerrada e não pode ser alterado pela agenda operacional.",
+    );
+  });
+
+  it("appointment de HOJE continua permitindo todas as transições normalmente (nada quebrou)", async () => {
+    const todayIso = saoPauloDateISO();
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210054", "PLN0054", "Cliente Hoje OK");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${todayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const started = await updateAppointmentStatus(appointment.id, "em_andamento");
+    expect(started.status).toBe("em_andamento");
+    const completed = await updateAppointmentStatus(appointment.id, "concluido");
+    expect(completed.status).toBe("concluido");
+  });
+
+  it("appointment de AMANHÃ -> mudar para em_andamento é bloqueado (AppointmentNotTodayError, só no próprio dia)", async () => {
+    const tomorrowIsoLocal = addDaysIso(saoPauloDateISO(), 1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210055", "PLN0055", "Cliente Amanhã Iniciar");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${tomorrowIsoLocal}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    await expect(updateAppointmentStatus(appointment.id, "em_andamento")).rejects.toThrow(AppointmentNotTodayError);
+  });
+
+  it("appointment de AMANHÃ -> cancelar continua permitido (matriz existente, não alterada)", async () => {
+    const tomorrowIsoLocal = addDaysIso(saoPauloDateISO(), 1);
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210056", "PLN0056", "Cliente Amanhã Cancelar");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${tomorrowIsoLocal}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const canceled = await updateAppointmentStatus(appointment.id, "cancelado");
+    expect(canceled.status).toBe("cancelado");
+  });
+
+  it("item 27. status cancelado continua fora de OCCUPYING_STATUSES — capacidade comprometida some após cancelar, comportamento idêntico a antes desta missão", async () => {
+    const todayIso = saoPauloDateISO();
+    await setCapacityConfig({ boxesCount: 4, dailyOperatingMinutes: 480 });
+    const { customer, vehicle } = await newCustomerAndVehicle("48999210057", "PLN0057", "Cliente Capacidade Cancelar");
+    const catalog = await fetchServiceCatalog();
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${todayIso}T16:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const repo = getPlanningRepository();
+    const beforeRows = await repo.listAppointmentsInRange(todayIso, todayIso);
+    expect(beforeRows.some((r) => r.customerId === customer.id && r.status === "agendado")).toBe(true);
+
+    await updateAppointmentStatus(appointment.id, "cancelado");
+
+    const afterRows = await repo.listAppointmentsInRange(todayIso, todayIso);
+    const entry = afterRows.find((r) => r.customerId === customer.id);
+    expect(entry?.status).toBe("cancelado"); // status realmente mudou...
+    expect(entry).toBeDefined(); // ...mas continua aparecendo na listagem do dia (nunca some/apaga)
   });
 });

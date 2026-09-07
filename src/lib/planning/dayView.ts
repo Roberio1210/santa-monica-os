@@ -16,6 +16,17 @@ export function resolveDayParam(raw: string | undefined | null, todayIso: string
 }
 
 /**
+ * Missão 46 — "data passada" é sempre comparação de CALENDÁRIO (YYYY-MM-DD em América/São Paulo),
+ * nunca `scheduledAt < now`: um agendamento de hoje às 08:00 não é "passado" só porque já são
+ * 18h agora. Fonte única, reaproveitada tanto pelo backend (`updateAppointmentStatus`/`fetchDayView`
+ * em `service.ts`) quanto pela UI (`DayNavigator`, `DayAppointmentActions`) — nunca duas
+ * comparações divergentes.
+ */
+export function isDatePast(dateIso: string, todayIso: string): boolean {
+  return dateIso < todayIso;
+}
+
+/**
  * Missão 39 (Parte E) confirmou: não existe horário de abertura estruturado em nenhuma tabela —
  * só o texto livre de `COMPANY_INFO.businessHours` ("08:00 às 18:00" nos dias úteis, "08:00 às
  * 14:00" aos sábados — o INÍCIO é sempre 08:00, real e confirmado pelo gestor). O FIM da janela
