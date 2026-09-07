@@ -3,6 +3,7 @@ import { eq, inArray, isNotNull } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { customers, identityReviewItems, vehicles } from "@/db/schema/crm";
 import { jumpParkServiceOrders } from "@/db/schema/jumppark";
+import { auditLogs } from "@/db/schema/system";
 import { aggregateJumpParkCustomersAndVehicles, type OrderForAggregation } from "@/lib/integrations/jumppark/customers";
 import { jumpParkLogger } from "@/lib/integrations/jumppark/logger";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
@@ -128,6 +129,47 @@ export function classifyVehiclePlateConflict(
       ? "Placa de ordem JumpPark nova (external_id ainda desconhecido) coincide com a placa de um vehicle já cadastrado manualmente — nunca fundido/sobrescrito automaticamente, requer decisão manual."
       : "Placa de ordem JumpPark nova (external_id ainda desconhecido) coincide com a placa de outro vehicle já sincronizado da própria JumpPark, sob external_id diferente — inconsistência de identidade, nunca duplicada automaticamente.",
     evidence,
+  };
+}
+
+export interface ReopenPlateConflictDecision {
+  shouldReopen: boolean;
+  /** `null` quando `shouldReopen` é `false` — motivo humano-legível, usado como `notes` do `audit_logs` gerado. */
+  reason: string | null;
+}
+
+/** Fail-safe: evidence sem `incomingOrderIds` reconhecível (ausente, malformada, tipo errado) nunca é lida como "cobre tudo" — só como conjunto vazio, o que força reabertura sempre que a evidência nova trouxer qualquer ordem. */
+function extractIncomingOrderIdSet(evidence: unknown): Set<string> {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return new Set();
+  const raw = (evidence as Record<string, unknown>).incomingOrderIds;
+  if (!Array.isArray(raw)) return new Set();
+  return new Set(raw.filter((entry): entry is string => typeof entry === "string"));
+}
+
+/**
+ * Missão 24 (Etapa E1) — decide, de forma PURA (sem I/O), se um review-item de conflito de placa
+ * JÁ DECIDIDO por um humano (`existingStatus !== "pending"`) precisa voltar para revisão porque a
+ * evidência JumpPark da passagem atual (`newIncomingOrderIds`) contém pelo menos uma ordem que a
+ * decisão anterior nunca viu. Comparação sempre por CONJUNTO (nunca por posição/ordem do array,
+ * nunca afetada por duplicatas) — "uma decisão humana vale para o caso concreto analisado, nunca
+ * para toda ocorrência futura da mesma placa" (Missão 24).
+ *
+ * Não decide OUTRA coisa: não sabe (nem precisa saber) qual foi a decisão ("mesmo veículo",
+ * "diferentes" etc. — Etapa E, ainda não implementada) — só se a evidência atual ultrapassa o que
+ * foi revisado. Item ainda `pending` nunca precisa "reabrir" (já está aberto) — `shouldReopen`
+ * sempre `false` nesse caso, upsert de evidência continua exatamente como antes desta missão.
+ */
+export function decidePlateConflictReopen(existingStatus: string, existingEvidence: unknown, newIncomingOrderIds: string[]): ReopenPlateConflictDecision {
+  if (existingStatus === "pending") return { shouldReopen: false, reason: null };
+
+  const previouslySeen = extractIncomingOrderIdSet(existingEvidence);
+  const uncovered = Array.from(new Set(newIncomingOrderIds)).filter((id) => !previouslySeen.has(id));
+
+  if (uncovered.length === 0) return { shouldReopen: false, reason: null };
+
+  return {
+    shouldReopen: true,
+    reason: `Nova(s) ordem(ns) JumpPark não abrangida(s) pela decisão anterior: ${uncovered.join(", ")}.`,
   };
 }
 
@@ -343,19 +385,59 @@ export async function refreshJumpParkCustomers(): Promise<CustomersRefreshResult
   // colisão de placa vehicle manual↔jumppark/jumppark↔jumppark detectados acima. Precisam entrar
   // no MESMO `seenSubjectKeys` da fila de ambiguidade de cliente — senão a limpeza de itens obsoletos
   // logo abaixo desativaria, na mesma passagem, um item que acabou de ser criado/atualizado aqui.
+  //
+  // Missão 24 (Etapa E1) — antes de fazer o upsert, busca em lote as linhas já existentes para
+  // estes subjectKeys: se uma já estiver decidida (`status !== "pending"`) e a evidência desta
+  // passagem trouxer ordem incoming que a decisão anterior nunca viu, o item volta para `pending`
+  // (nunca um status novo — reaproveita o mesmo mecanismo já usado por `reopenReviewAction`) e um
+  // `audit_logs` preserva o estado anterior antes de qualquer coisa ser sobrescrita. Itens ainda
+  // `pending`, ou decididos sem ordem nova, seguem exatamente o comportamento de antes desta missão.
+  const vehicleConflictSubjectKeys = vehicleConflictItems.map((item) => item.subjectKey);
+  const existingVehicleConflictRows =
+    vehicleConflictSubjectKeys.length > 0 ? await db.select().from(identityReviewItems).where(inArray(identityReviewItems.subjectKey, vehicleConflictSubjectKeys)) : [];
+  const existingVehicleConflictBySubjectKey = new Map(existingVehicleConflictRows.map((row) => [row.subjectKey, row]));
+
   for (const item of vehicleConflictItems) {
     seenSubjectKeys.add(item.subjectKey);
+    const existing = existingVehicleConflictBySubjectKey.get(item.subjectKey);
+    const reopenDecision = existing ? decidePlateConflictReopen(existing.status, existing.evidence, item.evidence.incomingOrderIds) : { shouldReopen: false, reason: null };
+
+    const values = {
+      subjectKey: item.subjectKey,
+      plateMasked: item.plateMasked,
+      confidence: "ambiguo" as const,
+      rule: item.rule,
+      evidence: item.evidence,
+      active: true,
+      source: "jumppark" as const,
+    };
+
+    if (reopenDecision.shouldReopen && existing) {
+      await db.transaction(async (tx) => {
+        await tx.insert(auditLogs).values({
+          actorUserId: null,
+          action: "plate_conflict_review_reopened",
+          entityType: "identity_review_items",
+          entityId: existing.id,
+          beforeState: { status: existing.status, decidedAt: existing.decidedAt ? existing.decidedAt.toISOString() : null, decidedNotes: existing.decidedNotes, evidence: existing.evidence },
+          afterState: { status: "pending", decidedAt: null, decidedNotes: null, evidence: item.evidence },
+          source: "jumppark",
+          notes: reopenDecision.reason,
+        });
+        await tx
+          .insert(identityReviewItems)
+          .values(values)
+          .onConflictDoUpdate({
+            target: identityReviewItems.subjectKey,
+            set: { ...values, updatedAt: new Date(), status: "pending", decidedAt: null, decidedNotes: null },
+          });
+      });
+      continue;
+    }
+
     await db
       .insert(identityReviewItems)
-      .values({
-        subjectKey: item.subjectKey,
-        plateMasked: item.plateMasked,
-        confidence: "ambiguo",
-        rule: item.rule,
-        evidence: item.evidence,
-        active: true,
-        source: "jumppark",
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: identityReviewItems.subjectKey,
         set: { plateMasked: item.plateMasked, rule: item.rule, evidence: item.evidence, active: true, updatedAt: new Date() },

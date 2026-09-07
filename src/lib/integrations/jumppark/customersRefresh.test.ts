@@ -4,7 +4,8 @@ import { getDb } from "@/db/client";
 import { customers, identityReviewItems, vehicles } from "@/db/schema/crm";
 import { jumpParkServiceOrders } from "@/db/schema/jumppark";
 import { appointments } from "@/db/schema/planning";
-import { classifyVehiclePlateConflict, refreshJumpParkCustomers } from "@/lib/integrations/jumppark/customersRefresh";
+import { auditLogs } from "@/db/schema/system";
+import { classifyVehiclePlateConflict, decidePlateConflictReopen, refreshJumpParkCustomers } from "@/lib/integrations/jumppark/customersRefresh";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
 import { assignPlateToVehicle, fetchServiceCatalog, registerQuickCustomerAndVehicle } from "@/lib/attendance/service";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
@@ -113,6 +114,67 @@ describe("classifyVehiclePlateConflict — decisão pura, sem I/O (roda sempre)"
   });
 });
 
+describe("decidePlateConflictReopen — Missão 24/E1, decisão pura de reabertura (roda sempre)", () => {
+  it("A. item pending, mesma incoming order reaparece -> NÃO reabre (já está aberto)", () => {
+    const result = decidePlateConflictReopen("pending", { incomingOrderIds: ["order-100"] }, ["order-100"]);
+    expect(result.shouldReopen).toBe(false);
+    expect(result.reason).toBeNull();
+  });
+
+  it("B. item decidido, mesma incoming order reaparece -> NÃO reabre", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: ["order-100"] }, ["order-100"]);
+    expect(result.shouldReopen).toBe(false);
+    expect(result.reason).toBeNull();
+  });
+
+  it("C. item decidido, order antiga + order nova aparecem juntas -> REABRE", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: ["order-100"] }, ["order-100", "order-200"]);
+    expect(result.shouldReopen).toBe(true);
+    expect(result.reason).toContain("order-200");
+  });
+
+  it("D. item decidido, só a order nova aparece (a antiga não está mais na passagem) -> REABRE", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: ["order-100"] }, ["order-200"]);
+    expect(result.shouldReopen).toBe(true);
+    expect(result.reason).toContain("order-200");
+  });
+
+  it("E. mesmo conjunto, ordem diferente no array -> NÃO reabre (comparação é por conjunto, não posição)", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: ["order-100", "order-101"] }, ["order-101", "order-100"]);
+    expect(result.shouldReopen).toBe(false);
+  });
+
+  it("F. duplicatas na evidence nova (e na antiga) não causam falsa reabertura", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: ["order-100", "order-100"] }, ["order-100", "order-100", "order-100"]);
+    expect(result.shouldReopen).toBe(false);
+  });
+
+  it("G1. evidence antiga sem incomingOrderIds -> fail-safe, REABRE (nunca assume que já foi revisada)", () => {
+    const result = decidePlateConflictReopen("kept_separate", { conflictType: "manual_jumppark" }, ["order-100"]);
+    expect(result.shouldReopen).toBe(true);
+  });
+
+  it("G2. evidence antiga nula -> fail-safe, REABRE", () => {
+    const result = decidePlateConflictReopen("kept_separate", null, ["order-100"]);
+    expect(result.shouldReopen).toBe(true);
+  });
+
+  it("G3. evidence antiga com incomingOrderIds de tipo errado (não-array) -> fail-safe, REABRE", () => {
+    const result = decidePlateConflictReopen("kept_separate", { incomingOrderIds: "order-100" }, ["order-100"]);
+    expect(result.shouldReopen).toBe(true);
+  });
+
+  it("nenhuma incoming order na passagem atual -> nunca reabre, mesmo com evidence antiga malformada", () => {
+    const result = decidePlateConflictReopen("kept_separate", null, []);
+    expect(result.shouldReopen).toBe(false);
+  });
+
+  it("status deferred (não só kept_separate) também é sujeito à reabertura por evidência nova", () => {
+    const result = decidePlateConflictReopen("deferred", { incomingOrderIds: ["order-100"] }, ["order-100", "order-200"]);
+    expect(result.shouldReopen).toBe(true);
+  });
+});
+
 /**
  * Placas de teste no formato Mercosul válido, prefixo "MQT" exclusivo desta suíte. Prefixo de
  * telefone exclusivo: `489994...`.
@@ -148,6 +210,12 @@ async function cleanupTestData() {
     await db.delete(customers).where(inArray(customers.id, ids));
   }
 
+  // Missão 25 (Etapa E1) — audit_logs gerados pelo teste de reabertura abaixo, removidos ANTES da
+  // linha de review que referenciam (entityId), para nunca deixar log órfão nem review residual.
+  const testReviewRows = await db.select({ id: identityReviewItems.id }).from(identityReviewItems).where(like(identityReviewItems.subjectKey, "vehicle_plate_collision_%MQT%"));
+  if (testReviewRows.length > 0) {
+    await db.delete(auditLogs).where(inArray(auditLogs.entityId, testReviewRows.map((r) => r.id)));
+  }
   await db.delete(identityReviewItems).where(like(identityReviewItems.subjectKey, "vehicle_plate_collision_%MQT%"));
 }
 
@@ -207,20 +275,20 @@ describe.skipIf(!hasRealDb)("refreshJumpParkCustomers — integração real de p
       // (inserido acima como "ClienteJumpparkM14") nunca deveria aparecer aqui.
       expect(JSON.stringify(persistedEvidence)).not.toContain("ClienteJumpparkM14");
 
-      // "Review já decidido não sobrescrito" (item J da missão) — sem rodar o refresh completo de
-      // novo (~4min): simula a MESMA forma exata de upsert que `refreshJumpParkCustomers` usa
-      // (idêntico `onConflictDoUpdate`, mesmas colunas no `set`) depois de marcar o item como
-      // decidido por um humano. Prova a garantia real (o `set` nunca inclui status/decidedAt/
-      // decidedNotes) sem pagar o custo de uma segunda chamada completa.
+      // "Review já decidido não sobrescrito por um resync com A MESMA evidência" (item J da
+      // missão) — sem rodar o refresh completo de novo (~4min): simula a MESMA forma exata de
+      // upsert que `refreshJumpParkCustomers` usa quando `decidePlateConflictReopen` (Missão 25)
+      // decide `shouldReopen: false` (mesmo `incomingOrderIds`, nenhuma ordem nova) — o `set` não
+      // inclui status/decidedAt/decidedNotes, exatamente como antes da Missão 25.
       await db.update(identityReviewItems).set({ status: "kept_separate", decidedAt: new Date(), decidedNotes: "Decisão de teste — carros diferentes" }).where(eq(identityReviewItems.id, reviewRows[0].id));
 
-      const repeatedEvidence = { ...persistedEvidence, incomingOrderIds: [...(persistedEvidence.incomingOrderIds as string[]), "order-extra-simulado"] };
+      const sameEvidence = { ...persistedEvidence }; // incomingOrderIds idêntico — nenhuma ordem nova nesta passagem
       await db
         .insert(identityReviewItems)
-        .values({ subjectKey: "vehicle_plate_collision_manual_jumppark:MQT3C03", plateMasked: "MQT3C03", confidence: "ambiguo", rule: "re-upsert simulado", evidence: repeatedEvidence, active: true, source: "jumppark" })
+        .values({ subjectKey: "vehicle_plate_collision_manual_jumppark:MQT3C03", plateMasked: "MQT3C03", confidence: "ambiguo", rule: "re-upsert simulado", evidence: sameEvidence, active: true, source: "jumppark" })
         .onConflictDoUpdate({
           target: identityReviewItems.subjectKey,
-          set: { plateMasked: "MQT3C03", rule: "re-upsert simulado", evidence: repeatedEvidence, active: true, updatedAt: new Date() },
+          set: { plateMasked: "MQT3C03", rule: "re-upsert simulado", evidence: sameEvidence, active: true, updatedAt: new Date() },
         });
 
       const afterReupsert = await db.select().from(identityReviewItems).where(eq(identityReviewItems.subjectKey, "vehicle_plate_collision_manual_jumppark:MQT3C03"));
@@ -228,18 +296,61 @@ describe.skipIf(!hasRealDb)("refreshJumpParkCustomers — integração real de p
       expect(afterReupsert[0].status).toBe("kept_separate"); // decisão humana preservada
       expect(afterReupsert[0].decidedNotes).toBe("Decisão de teste — carros diferentes");
 
-      // I/J — appointment e customer permanecem exatamente como estavam.
+      // Missão 24/25 (Etapa E1) — agora o caso oposto: uma ordem JumpPark NOVA (não vista na
+      // decisão) aparece para a mesma placa. `decidePlateConflictReopen` (função pura real,
+      // exportada) decide `shouldReopen: true`; a escrita real que `refreshJumpParkCustomers`
+      // faria nesse caso (transação: audit_logs + upsert com status resetado) é reproduzida aqui
+      // literalmente, contra Postgres real, sem pagar o custo de uma segunda chamada de ~4min.
+      const currentRow = afterReupsert[0];
+      const newIncomingOrderIds = [...(persistedEvidence.incomingOrderIds as string[]), "order-nova-real-m25"];
+      const reopenDecision = decidePlateConflictReopen(currentRow.status, currentRow.evidence, newIncomingOrderIds);
+      expect(reopenDecision.shouldReopen).toBe(true);
+      expect(reopenDecision.reason).toContain("order-nova-real-m25");
+
+      const evidenceWithNewOrder = { ...(currentRow.evidence as Record<string, unknown>), incomingOrderIds: newIncomingOrderIds };
+      await db.transaction(async (tx) => {
+        await tx.insert(auditLogs).values({
+          actorUserId: null,
+          action: "plate_conflict_review_reopened",
+          entityType: "identity_review_items",
+          entityId: currentRow.id,
+          beforeState: { status: currentRow.status, decidedAt: currentRow.decidedAt ? currentRow.decidedAt.toISOString() : null, decidedNotes: currentRow.decidedNotes, evidence: currentRow.evidence },
+          afterState: { status: "pending", decidedAt: null, decidedNotes: null, evidence: evidenceWithNewOrder },
+          source: "jumppark",
+          notes: reopenDecision.reason,
+        });
+        await tx
+          .insert(identityReviewItems)
+          .values({ subjectKey: currentRow.subjectKey, plateMasked: currentRow.plateMasked, confidence: "ambiguo", rule: "reabertura de teste M25", evidence: evidenceWithNewOrder, active: true, source: "jumppark" })
+          .onConflictDoUpdate({
+            target: identityReviewItems.subjectKey,
+            set: { plateMasked: currentRow.plateMasked, rule: "reabertura de teste M25", evidence: evidenceWithNewOrder, active: true, updatedAt: new Date(), status: "pending", decidedAt: null, decidedNotes: null },
+          });
+      });
+
+      const afterReopen = await db.select().from(identityReviewItems).where(eq(identityReviewItems.subjectKey, currentRow.subjectKey));
+      expect(afterReopen).toHaveLength(1); // idempotente — ainda uma única linha, nunca duplicada
+      expect(afterReopen[0].status).toBe("pending"); // REABERTO — decisão anterior não se aplica à evidência nova
+      expect(afterReopen[0].decidedAt).toBeNull();
+      expect(afterReopen[0].decidedNotes).toBeNull();
+
+      const auditRows = await db.select().from(auditLogs).where(eq(auditLogs.entityId, currentRow.id));
+      const reopenLog = auditRows.find((r) => r.action === "plate_conflict_review_reopened");
+      expect(reopenLog).toBeDefined();
+      expect((reopenLog!.beforeState as Record<string, unknown>).status).toBe("kept_separate"); // decisão anterior preservada no log, nunca apagada
+      expect((reopenLog!.afterState as Record<string, unknown>).status).toBe("pending");
+      expect(JSON.stringify(reopenLog!.beforeState)).not.toMatch(/postgres:\/\/|neon\.tech/i);
+
+      // Rodar de novo com a MESMA evidência (agora que está pending) nunca reabre de novo —
+      // item já pending, `decidePlateConflictReopen` retorna sempre `false` (ver teste "A" puro).
+      expect(decidePlateConflictReopen("pending", evidenceWithNewOrder, newIncomingOrderIds).shouldReopen).toBe(false);
+
+      // I/J — appointment e customer permanecem exatamente como estavam, em nenhum momento tocados.
       const persistedAppointment = await getPlanningRepository().getAppointment(appointment.id);
       expect(persistedAppointment?.vehicleId).toBe(vehicle.id);
       expect(persistedAppointment?.customerId).toBe(customer.id);
       const persistedCustomer = await getAttendanceRepository().getCustomer(customer.id);
       expect(persistedCustomer?.name).toBe(customer.name);
-
-      // A — rodar de novo com o MESMO external_id (agora conhecido, se tivesse sido criado) não
-      // altera nada adicional; como o vehicle nunca foi criado, o comportamento continua idêntico
-      // (mesmo conflito reportado, nada duplicado). Não repetimos a chamada aqui pelo custo de
-      // ~4min por execução — a idempotência da fila já está provada pela decisão pura (teste D)
-      // mais o upsert-por-subjectKey já auditado (Missão 28/13).
 
       await cleanupTestData();
     },
