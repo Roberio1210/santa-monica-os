@@ -11,6 +11,7 @@ import { NextClientCard } from "@/components/planning/next-client-card";
 import { PlanningSearchBar } from "@/components/planning/search-bar";
 import { RangeFilter } from "@/components/planning/range-filter";
 import { TomorrowPreparation } from "@/components/planning/tomorrow-preparation";
+import { fetchServiceCatalog } from "@/lib/attendance/service";
 import { resolveDayParam } from "@/lib/planning/dayView";
 import { fetchDayView, fetchPlanningBoard, searchPlanningAppointments } from "@/lib/planning/service";
 import { PLANNING_RANGE_LABELS, type PlanningRangeKey } from "@/lib/planning/types";
@@ -83,7 +84,7 @@ export default async function PlanejamentoPage({ searchParams }: { searchParams:
 
   const todayIso = saoPauloDateISO();
   const dateIso = resolveDayParam(rawDate, todayIso);
-  const dayView = await fetchDayView(dateIso);
+  const [dayView, serviceCatalog] = await Promise.all([fetchDayView(dateIso), fetchServiceCatalog()]);
   const capacityBoxesCount = dayView.capacity.configured ? dayView.capacity.boxesCount : null;
 
   return (
@@ -93,7 +94,7 @@ export default async function PlanejamentoPage({ searchParams }: { searchParams:
       <RangeFilter current={null} />
       <DayNavigator dateIso={dateIso} todayIso={todayIso} />
       <DaySummaryCards dayView={dayView} />
-      <DayTimeline appointments={dayView.appointments} capacityBoxesCount={capacityBoxesCount} todayIso={todayIso} />
+      <DayTimeline appointments={dayView.appointments} capacityBoxesCount={capacityBoxesCount} todayIso={todayIso} serviceCatalog={serviceCatalog} />
     </div>
   );
 }

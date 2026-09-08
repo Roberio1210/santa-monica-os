@@ -31,6 +31,7 @@ function appointment(overrides: Partial<AppointmentView> = {}): AppointmentView 
     expectedDurationMinutes: 180,
     notes: null,
     signals: [],
+    updatedAt: "2026-08-24T14:00:00.000Z",
     ...overrides,
   };
 }

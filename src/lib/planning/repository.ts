@@ -16,6 +16,8 @@ export interface AppointmentRow {
   serviceName: string;
   expectedDurationMinutes: number | null;
   notes: string | null;
+  /** Missão 48 (Parte H) — token de concorrência otimista para a futura edição (`updateAppointmentDetails`); nunca exibido na UI. */
+  updatedAt: string;
 }
 
 export interface CompletedOrderSample {
@@ -54,6 +56,18 @@ export interface PlanningRepository {
   /** Busca por nome do cliente, telefone, placa ou veículo — só agendamentos a partir de `fromIso`. */
   searchAppointments(query: string, fromIso: string): Promise<AppointmentRow[]>;
   updateAppointmentStatus(id: string, status: AppointmentStatus): Promise<Appointment>;
+  /**
+   * Missão 48 (Partes G/H) — UPDATE atômico dos campos editáveis (serviço/horário/duração/notas),
+   * nunca `customerId`/`vehicleId`/`source`/`externalId`/`createdAt`. Concorrência otimista via
+   * `expectedUpdatedAt`: só escreve se `updatedAt` no banco ainda for exatamente esse valor —
+   * `null` de retorno significa "não encontrado OU alterado por outra operação enquanto isso",
+   * nunca uma sobrescrita silenciosa.
+   */
+  updateAppointmentDetails(
+    id: string,
+    fields: { serviceId: string; scheduledAt: string; expectedDurationMinutes: number; notes: string | null },
+    expectedUpdatedAt: string,
+  ): Promise<Appointment | null>;
 
   /** No máximo uma configuração ativa por vez — a mais recente vale (mesmo espírito de `goals`). */
   getActiveCapacityConfig(): Promise<CapacityConfig | null>;
@@ -68,4 +82,12 @@ export interface PlanningRepository {
    * sem duração cadastrada (nunca inventado); ids não encontrados simplesmente não aparecem no mapa.
    */
   getServiceEstimatedDurations(serviceIds: string[]): Promise<Record<string, number | null>>;
+
+  /**
+   * Missão 49 (Parte E, bug real encontrado na revisão) — usado exclusivamente por
+   * `updateAppointmentDetails` para distinguir "serviço não existe/inativo" (rejeição imediata,
+   * nunca confundida com "existe mas sem duração cadastrada") de "existe, ativo, mas sem
+   * `estimated_duration_minutes`". `null` de retorno = serviço não encontrado.
+   */
+  getService(serviceId: string): Promise<{ id: string; active: boolean; estimatedDurationMinutes: number | null } | null>;
 }

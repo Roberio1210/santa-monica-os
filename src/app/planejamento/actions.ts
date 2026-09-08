@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { registerQuickCustomerAndVehicle, type QuickRegisterInput } from "@/lib/attendance/service";
-import { checkAvailabilityForRequest, createAppointment, setCapacityConfig, updateAppointmentStatus } from "@/lib/planning/service";
+import { assignPlateToVehicle, registerQuickCustomerAndVehicle, type QuickRegisterInput } from "@/lib/attendance/service";
+import { checkAvailabilityForRequest, createAppointment, setCapacityConfig, updateAppointmentDetails, updateAppointmentStatus } from "@/lib/planning/service";
 import type { AppointmentStatus, ConflictingAppointmentRef } from "@/lib/planning/types";
 
 export interface ActionResult {
@@ -95,6 +95,60 @@ export async function updateAppointmentStatusAction(id: string, status: Appointm
   }
   revalidatePath("/planejamento");
   return { error: null };
+}
+
+export interface EditAppointmentInput {
+  appointmentId: string;
+  serviceId: string;
+  date: string;
+  time: string;
+  notes: string | null;
+  expectedUpdatedAt: string;
+}
+
+/**
+ * Missão 48 — único caminho de edição estrutural do agendamento (serviço/data/horário/observações).
+ * Toda a validação real (status, data passada, duração do novo serviço, expediente, disponibilidade
+ * excluindo o próprio agendamento, concorrência via `updatedAt`) vive em `updateAppointmentDetails`
+ * — esta action só monta `scheduledAt` (mesmo padrão `${date}T${time}:00-03:00` de
+ * `new-appointment-form.tsx`) e traduz o erro para uma mensagem já pronta para o usuário.
+ */
+export async function updateAppointmentDetailsAction(input: EditAppointmentInput): Promise<ActionResult> {
+  try {
+    await updateAppointmentDetails({
+      appointmentId: input.appointmentId,
+      serviceId: input.serviceId,
+      scheduledAt: `${input.date}T${input.time}:00-03:00`,
+      notes: input.notes,
+      expectedUpdatedAt: input.expectedUpdatedAt,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Falha ao editar o agendamento." };
+  }
+  revalidatePath("/planejamento");
+  return { error: null };
+}
+
+/**
+ * Missão 48 (Parte J) — reaproveita 100% de `assignPlateToVehicle` (Missão 11, já auditado na
+ * Missão 45): só PREENCHE uma placa ausente, nunca substitui uma já existente, nunca funde
+ * veículos, nunca escreve na JumpPark. `vehicleId` nunca muda no `appointment` — placa é atributo
+ * do veículo, não do agendamento (Parte J, explícito).
+ */
+export async function assignVehiclePlateAction(vehicleId: string, plate: string): Promise<ActionResult> {
+  const result = await assignPlateToVehicle({ vehicleId, plate });
+  switch (result.status) {
+    case "assigned":
+    case "already_assigned":
+      revalidatePath("/planejamento");
+      return { error: null };
+    case "invalid_plate":
+      return { error: "Placa inválida." };
+    case "vehicle_not_found":
+      return { error: "Veículo não encontrado." };
+    case "conflict":
+      return { error: "Esta placa já está vinculada a outro veículo." };
+  }
 }
 
 export async function setCapacityConfigAction(boxesCount: number, dailyOperatingMinutes: number): Promise<ActionResult> {

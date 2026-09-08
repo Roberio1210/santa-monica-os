@@ -83,6 +83,8 @@ export interface AppointmentView {
   expectedDurationMinutes: number | null;
   notes: string | null;
   signals: ClientSignal[];
+  /** Missão 48 (Parte H) — token de concorrência otimista para `updateAppointmentDetails`; nunca exibido na UI. */
+  updatedAt: string;
 }
 
 export interface PlanningDay {

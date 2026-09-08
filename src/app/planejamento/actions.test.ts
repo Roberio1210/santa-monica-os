@@ -4,9 +4,10 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createAppointmentAction, updateAppointmentStatusAction } from "@/app/planejamento/actions";
+import { assignVehiclePlateAction, createAppointmentAction, updateAppointmentDetailsAction, updateAppointmentStatusAction } from "@/app/planejamento/actions";
 import { fetchServiceCatalog, registerQuickCustomerAndVehicle } from "@/lib/attendance/service";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
+import { MemoryPlanningRepository } from "@/lib/planning/memory-repository";
 import { createAppointment, setCapacityConfig, updateAppointmentStatus } from "@/lib/planning/service";
 import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
 
@@ -363,5 +364,93 @@ describe("itens 21-24 (Missão 46) — nenhuma ação de status toca JumpPark/Fi
     const source = readFileSync(path.resolve(__dirname, "actions.ts"), "utf-8");
     expect(source).not.toMatch(/integrations\/jumppark/i);
     expect(source).not.toMatch(/lib\/finance/i);
+  });
+});
+
+describe("updateAppointmentDetailsAction — Missão 48 (Parte P, itens 15/16/17/23/31)", () => {
+  const repo = getPlanningRepository() as MemoryPlanningRepository;
+
+  it("mensagens de erro chegam prontas para o usuário (nunca stack técnico), incluindo duração recalculada e serviço sem duração", async () => {
+    const dayIso = addDaysIso(saoPauloDateISO(), 80);
+    await setCapacityConfig({ boxesCount: 1, dailyOperatingMinutes: 480 });
+    const catalog = await fetchServiceCatalog();
+    repo.setServiceEstimatedDurationForTesting(catalog[0].id, 60);
+    repo.setServiceEstimatedDurationForTesting(catalog[1].id, null);
+    const { customer, vehicle } = await newCustomerAndVehicle("EditAction");
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${dayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const blocked = await updateAppointmentDetailsAction({ appointmentId: appointment.id, serviceId: catalog[1].id, date: dayIso, time: "09:00", notes: null, expectedUpdatedAt: appointment.updatedAt });
+    expect(blocked.error).toBe("O serviço selecionado não possui duração prevista.");
+    expect(blocked.error).not.toMatch(/Error:|at Object|node_modules/);
+
+    const success = await updateAppointmentDetailsAction({ appointmentId: appointment.id, serviceId: catalog[0].id, date: dayIso, time: "10:00", notes: "Editado via action", expectedUpdatedAt: appointment.updatedAt });
+    expect(success.error).toBeNull();
+    const updated = await getPlanningRepository().getAppointment(appointment.id);
+    expect(updated?.notes).toBe("Editado via action");
+  });
+
+  it("item 17. data passada bloqueada -> mensagem controlada, sem alterar o agendamento", async () => {
+    const pastDayIso = addDaysIso(saoPauloDateISO(), -5);
+    const catalog = await fetchServiceCatalog();
+    repo.setServiceEstimatedDurationForTesting(catalog[0].id, 60);
+    const { customer, vehicle } = await newCustomerAndVehicle("EditPassado");
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${pastDayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const result = await updateAppointmentDetailsAction({ appointmentId: appointment.id, serviceId: catalog[0].id, date: pastDayIso, time: "09:00", notes: "tentativa", expectedUpdatedAt: appointment.updatedAt });
+    expect(result.error).toBe("Este agendamento pertence a uma data encerrada e não pode ser alterado pela agenda operacional.");
+  });
+
+  it("item 23/31. dois envios com o mesmo expectedUpdatedAt (proxy de duplo submit): o primeiro salva, o segundo é rejeitado por concorrência, nunca sobrescreve", async () => {
+    const dayIso = addDaysIso(saoPauloDateISO(), 81);
+    await setCapacityConfig({ boxesCount: 1, dailyOperatingMinutes: 480 });
+    const catalog = await fetchServiceCatalog();
+    repo.setServiceEstimatedDurationForTesting(catalog[0].id, 60);
+    const { customer, vehicle } = await newCustomerAndVehicle("EditDuploSubmit");
+    const appointment = await createAppointment({ customerId: customer.id, vehicleId: vehicle.id, serviceId: catalog[0].id, scheduledAt: `${dayIso}T09:00:00-03:00`, expectedDurationMinutes: 60, notes: null });
+
+    const [first, second] = await Promise.all([
+      updateAppointmentDetailsAction({ appointmentId: appointment.id, serviceId: catalog[0].id, date: dayIso, time: "10:00", notes: "Primeiro clique", expectedUpdatedAt: appointment.updatedAt }),
+      updateAppointmentDetailsAction({ appointmentId: appointment.id, serviceId: catalog[0].id, date: dayIso, time: "11:00", notes: "Segundo clique (duplicado)", expectedUpdatedAt: appointment.updatedAt }),
+    ]);
+
+    const results = [first, second];
+    const successes = results.filter((r) => r.error === null);
+    const failures = results.filter((r) => r.error !== null);
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].error).toBe("Este agendamento foi alterado por outra operação. Atualize a agenda e tente novamente.");
+  });
+});
+
+describe("assignVehiclePlateAction — Missão 48 (Parte J, Parte P itens 24-27)", () => {
+  it("item 25. plate ausente -> assignVehiclePlateAction preenche com sucesso, normalizada", async () => {
+    counter++;
+    const { vehicle } = await registerQuickCustomerAndVehicle({ customerName: `PlacaAusente ${counter}`, customerPhone: `4899966${String(counter).padStart(4, "0")}`, vehiclePlate: null, vehicleModel: "Onix" });
+    expect(vehicle.plate).toBeNull();
+
+    const result = await assignVehiclePlateAction(vehicle.id, "xyz9a87");
+    expect(result.error).toBeNull();
+  });
+
+  it("item 27. veículo já tem placa preenchida -> ação recusa substituir automaticamente", async () => {
+    const { customer } = await newCustomerAndVehicle("PlacaExistenteDono");
+    const { vehicle: vehicleComPlaca } = await registerQuickCustomerAndVehicle({ customerName: customer.name ?? "Cliente", customerPhone: `${customer.phone}`, vehiclePlate: "JJJ1234" });
+
+    const result = await assignVehiclePlateAction(vehicleComPlaca.id, "KKK9999");
+    expect(result.error).toBe("Esta placa já está vinculada a outro veículo."); // vehicle_has_different_plate cai no mesmo texto genérico e honesto de conflito
+  });
+
+  it("item 26. placa já pertence a outro veículo -> conflito, nunca merge automático", async () => {
+    await registerQuickCustomerAndVehicle({ customerName: "Dono Original", customerPhone: "48999880001", vehiclePlate: "MMM1111" });
+    const { vehicle: vehicleSemPlaca } = await newCustomerAndVehicle("OutroCliente");
+
+    const result = await assignVehiclePlateAction(vehicleSemPlaca.id, "MMM1111");
+    expect(result.error).toBe("Esta placa já está vinculada a outro veículo.");
+  });
+
+  it("placa inválida é recusada com mensagem honesta, nunca aceita um valor mal formado", async () => {
+    const { vehicle } = await newCustomerAndVehicle("PlacaInvalida");
+    const result = await assignVehiclePlateAction(vehicle.id, "??");
+    expect(result.error).toBe("Placa inválida.");
   });
 });

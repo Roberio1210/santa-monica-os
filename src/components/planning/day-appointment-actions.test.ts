@@ -2,13 +2,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DayAppointmentActions } from "./day-appointment-actions";
-import type { AppointmentStatus } from "@/lib/planning/types";
+import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
+import type { AppointmentStatus, DayAppointmentView } from "@/lib/planning/types";
 
 /**
- * Missão 40 (item 10, V) / Missão 46 (Partes B-H, itens 4/6-19) — ações expostas somente quando
- * válidas para o status atual E a data do agendamento em relação a hoje (América/São Paulo).
- * Nenhuma regra de transição nova: a proteção autoritativa vive em `service.ts`, isto aqui só
- * evita oferecer um botão que o backend recusaria.
+ * Missão 40 (item 10, V) / Missão 46 (Partes B-H, itens 4/6-19) / Missão 48 (Parte P, itens 1-7) —
+ * ações expostas somente quando válidas para o status atual E a data do agendamento em relação a
+ * hoje (América/São Paulo). Nenhuma regra de transição/edição nova: a proteção autoritativa vive
+ * em `service.ts`, isto aqui só evita oferecer um botão que o backend recusaria.
  */
 
 const TODAY_ISO = "2026-09-07";
@@ -16,8 +17,33 @@ const TODAY_AT = `${TODAY_ISO}T11:00:00-03:00`; // 08:00 -03:00
 const YESTERDAY_AT = "2026-09-06T11:00:00-03:00"; // 08:00 -03:00, um dia antes
 const TOMORROW_AT = "2026-09-08T11:00:00-03:00"; // 08:00 -03:00, um dia depois
 
+const SERVICE_CATALOG: ServiceCatalogEntry[] = [{ id: "s1", name: "Bronze", category: "Lavação", defaultPrice: 80 }];
+
+function baseAppointment(status: AppointmentStatus, scheduledAt: string): DayAppointmentView {
+  return {
+    id: "a1",
+    scheduledAt,
+    status,
+    customerId: "c1",
+    customerName: "Cliente Teste",
+    phone: "48999990000",
+    vehicleId: "v1",
+    vehicleLabel: "Fiat Argo",
+    plate: "ABC1D23",
+    serviceId: "s1",
+    serviceName: "Bronze",
+    expectedDurationMinutes: 60,
+    notes: null,
+    signals: [],
+    updatedAt: "2026-09-07T11:00:00.000Z",
+    resolvedDurationMinutes: 60,
+    endAt: null,
+    simultaneousCount: 1,
+  };
+}
+
 function render(status: AppointmentStatus, scheduledAt: string = TODAY_AT, todayIso: string = TODAY_ISO) {
-  return renderToStaticMarkup(createElement(DayAppointmentActions, { appointmentId: "a1", status, scheduledAt, todayIso, customerName: "Cliente Teste" }));
+  return renderToStaticMarkup(createElement(DayAppointmentActions, { appointment: baseAppointment(status, scheduledAt), todayIso, serviceCatalog: SERVICE_CATALOG }));
 }
 
 describe("DayAppointmentActions — appointment de HOJE (itens 7-14)", () => {
@@ -60,6 +86,7 @@ describe("DayAppointmentActions — appointment de DATA PASSADA (itens 4/6)", ()
     expect(html).not.toContain("Iniciar atendimento");
     expect(html).not.toContain("Cancelar");
     expect(html).not.toContain("Concluir");
+    expect(html).not.toContain(">Editar<");
   });
 
   it("item 6. ontem -> mostra indicador discreto 'Histórico'", () => {
@@ -121,7 +148,7 @@ describe("DayAppointmentActions — timezone América/São Paulo (itens 18/19)",
   });
 });
 
-describe("DayAppointmentActions — confirmação de cancelamento (item 20)", () => {
+describe("DayAppointmentActions — confirmação de cancelamento (item 20 da Missão 46)", () => {
   it("botão 'Cancelar' é o gatilho de um Dialog (window.confirm não é usado) — conteúdo de confirmação só existe quando o Dialog abre, nunca dispara a ação direto no clique", () => {
     const html = render("agendado");
     // O trigger existe e é um <button>, mas o texto do modal de confirmação ("Cancelar
@@ -129,5 +156,41 @@ describe("DayAppointmentActions — confirmação de cancelamento (item 20)", ()
     // renderização inicial (fechado) prova que clicar em "Cancelar" não executa nada sozinho.
     expect(html).toContain("Cancelar");
     expect(html).not.toContain("Confirmar cancelamento");
+  });
+});
+
+describe("DayAppointmentActions — botão Editar (Missão 48, Parte P itens 1-7)", () => {
+  it("item 1. agendado (hoje) -> mostra 'Editar'", () => {
+    expect(render("agendado")).toContain(">Editar<");
+  });
+
+  it("item 2. confirmado (hoje) -> mostra 'Editar'", () => {
+    expect(render("confirmado")).toContain(">Editar<");
+  });
+
+  it("agendado (futuro) -> também mostra 'Editar' (edição não é restrita ao próprio dia, diferente de Iniciar/Concluir)", () => {
+    expect(render("agendado", TOMORROW_AT)).toContain(">Editar<");
+  });
+
+  it("item 3. em_andamento -> NÃO mostra 'Editar' (Parte M: sem edição estrutural nesta missão)", () => {
+    expect(render("em_andamento")).not.toContain(">Editar<");
+  });
+
+  it("item 4. concluido -> NÃO mostra 'Editar'", () => {
+    expect(render("concluido")).not.toContain(">Editar<");
+  });
+
+  it("item 5. cancelado -> NÃO mostra 'Editar'", () => {
+    expect(render("cancelado")).not.toContain(">Editar<");
+  });
+
+  it("item 6. reagendado -> NÃO mostra 'Editar'", () => {
+    expect(render("reagendado")).not.toContain(">Editar<");
+  });
+
+  it("item 7. appointment de data passada -> NÃO mostra 'Editar' (vira 'Histórico')", () => {
+    const html = render("agendado", YESTERDAY_AT);
+    expect(html).not.toContain(">Editar<");
+    expect(html).toContain("Histórico");
   });
 });

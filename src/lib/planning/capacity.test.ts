@@ -92,6 +92,7 @@ function view(expectedDurationMinutes: number | null): AppointmentView {
     expectedDurationMinutes,
     notes: null,
     signals: [],
+    updatedAt: "2026-01-02T10:00:00.000Z",
   };
 }
 

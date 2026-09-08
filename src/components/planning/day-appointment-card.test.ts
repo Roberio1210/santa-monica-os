@@ -2,7 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DayAppointmentCard } from "./day-appointment-card";
+import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
 import type { AppointmentStatus, DayAppointmentView } from "@/lib/planning/types";
+
+const SERVICE_CATALOG: ServiceCatalogEntry[] = [
+  { id: "s1", name: "Bronze", category: "Lavação", defaultPrice: 80 },
+  { id: "s2", name: "Silver", category: "Lavação", defaultPrice: 120 },
+];
 
 /**
  * Missão 40 (item 6, R) / Missão 43 (Parte B/H/I) / Missão 46 (Parte E, itens 5/6) — mesma técnica
@@ -28,6 +34,7 @@ function baseAppointment(overrides: Partial<DayAppointmentView> = {}): DayAppoin
     expectedDurationMinutes: 75,
     notes: null,
     signals: [],
+    updatedAt: "2026-09-07T11:00:00.000Z",
     resolvedDurationMinutes: 75,
     endAt: "2026-09-07T12:15:00-03:00",
     simultaneousCount: 1,
@@ -36,7 +43,7 @@ function baseAppointment(overrides: Partial<DayAppointmentView> = {}): DayAppoin
 }
 
 function renderCard(overrides: Partial<DayAppointmentView> = {}, capacityBoxesCount: number | null = 2, todayIso: string = TODAY_ISO): string {
-  return renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment(overrides), capacityBoxesCount, todayIso }));
+  return renderToStaticMarkup(createElement(DayAppointmentCard, { appointment: baseAppointment(overrides), capacityBoxesCount, todayIso, serviceCatalog: SERVICE_CATALOG }));
 }
 
 describe("DayAppointmentCard", () => {

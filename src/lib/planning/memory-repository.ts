@@ -19,6 +19,8 @@ const RELEVANT_APPOINTMENT_STATUSES = new Set<AppointmentStatus>(["agendado", "c
 export class MemoryPlanningRepository implements PlanningRepository {
   private appointments = new Map<string, Appointment>();
   private capacityConfigs: CapacityConfig[] = [];
+  private serviceDurations = new Map<string, number | null>();
+  private inactiveServiceIds = new Set<string>();
 
   async createAppointment(input: CreateAppointmentInput): Promise<Appointment> {
     const appointment: Appointment = {
@@ -60,6 +62,7 @@ export class MemoryPlanningRepository implements PlanningRepository {
       serviceName: service?.name ?? "Serviço",
       expectedDurationMinutes: appointment.expectedDurationMinutes,
       notes: appointment.notes,
+      updatedAt: appointment.updatedAt,
     };
   }
 
@@ -107,6 +110,26 @@ export class MemoryPlanningRepository implements PlanningRepository {
     return updated;
   }
 
+  /** Missão 48 — mesmo CAS de `PostgresPlanningRepository.updateAppointmentDetails`: `null` quando não encontrado ou `expectedUpdatedAt` não bate mais com o valor atual. */
+  async updateAppointmentDetails(
+    id: string,
+    fields: { serviceId: string; scheduledAt: string; expectedDurationMinutes: number; notes: string | null },
+    expectedUpdatedAt: string,
+  ): Promise<Appointment | null> {
+    const appointment = this.appointments.get(id);
+    if (!appointment || appointment.updatedAt !== expectedUpdatedAt) return null;
+    const updated: Appointment = {
+      ...appointment,
+      serviceId: fields.serviceId,
+      scheduledAt: fields.scheduledAt,
+      expectedDurationMinutes: fields.expectedDurationMinutes,
+      notes: fields.notes,
+      updatedAt: nowIso(),
+    };
+    this.appointments.set(id, updated);
+    return updated;
+  }
+
   async getActiveCapacityConfig(): Promise<CapacityConfig | null> {
     return this.capacityConfigs[this.capacityConfigs.length - 1] ?? null;
   }
@@ -125,9 +148,43 @@ export class MemoryPlanningRepository implements PlanningRepository {
   /**
    * Missão 3.1 — o catálogo de serviços em memória (`ServiceCatalogEntry`) não carrega
    * `estimatedDurationMinutes`; mesmo espírito de `listCompletedSingleServiceOrders` acima —
-   * mapa vazio (nunca inventa duração), aceitável pois memória nunca é usada em produção.
+   * mapa vazio (nunca inventa duração) SALVO para os ids explicitamente semeados via
+   * `setServiceEstimatedDurationForTesting` (Missão 48) — nunca um valor implícito/adivinhado.
    */
-  async getServiceEstimatedDurations(): Promise<Record<string, number | null>> {
-    return {};
+  async getServiceEstimatedDurations(serviceIds: string[]): Promise<Record<string, number | null>> {
+    const result: Record<string, number | null> = {};
+    for (const id of serviceIds) {
+      if (this.serviceDurations.has(id)) result[id] = this.serviceDurations.get(id) ?? null;
+    }
+    return result;
+  }
+
+  /**
+   * Missão 48 — método de TESTE, fora da interface `PlanningRepository` (produção/Postgres sempre
+   * lê o valor real de `services.estimated_duration_minutes`, nunca isto). Só existe porque o
+   * repositório em memória não tem um catálogo real com duração — sem isso, nenhum teste de
+   * `updateAppointmentDetails` conseguiria exercitar o caminho de sucesso (duração sempre viria
+   * `null`, bloqueando toda edição). `minutes: null` simula um serviço real sem duração cadastrada.
+   */
+  setServiceEstimatedDurationForTesting(serviceId: string, minutes: number | null): void {
+    this.serviceDurations.set(serviceId, minutes);
+  }
+
+  /** Missão 49 — ver docstring em `repository.ts`. `null` = id não existe no catálogo (nem em memória, nem hipoteticamente em produção). */
+  async getService(serviceId: string): Promise<{ id: string; active: boolean; estimatedDurationMinutes: number | null } | null> {
+    const catalog = await getAttendanceRepository().listServiceCatalog();
+    const found = catalog.find((s) => s.id === serviceId);
+    if (!found) return null;
+    return { id: found.id, active: !this.inactiveServiceIds.has(serviceId), estimatedDurationMinutes: this.serviceDurations.get(serviceId) ?? null };
+  }
+
+  /**
+   * Missão 49 — método de TESTE, mesmo espírito de `setServiceEstimatedDurationForTesting`: o
+   * catálogo em memória não modela serviço inativo (produção/Postgres sempre lê `services.active`
+   * real). Sem isso, não haveria como testar "serviço inativo bloqueado" fora do Postgres.
+   */
+  setServiceActiveForTesting(serviceId: string, active: boolean): void {
+    if (active) this.inactiveServiceIds.delete(serviceId);
+    else this.inactiveServiceIds.add(serviceId);
   }
 }

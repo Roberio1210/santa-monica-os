@@ -22,6 +22,7 @@ function baseAppointment(overrides: Partial<AppointmentView> = {}): AppointmentV
     expectedDurationMinutes: 60,
     notes: null,
     signals: [],
+    updatedAt: "2026-09-07T11:00:00.000Z",
     ...overrides,
   };
 }

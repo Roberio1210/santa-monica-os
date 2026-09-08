@@ -3,35 +3,35 @@
 import { useState, useTransition } from "react";
 import { updateAppointmentStatusAction } from "@/app/planejamento/actions";
 import { Dialog, DialogBody, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { EditAppointmentDialog } from "@/components/planning/edit-appointment-dialog";
+import type { ServiceCatalogEntry } from "@/lib/attendance/repository";
 import { isDatePast } from "@/lib/planning/dayView";
 import { cn } from "@/lib/utils/cn";
 import { formatDateBR } from "@/lib/utils/format";
 import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
-import type { AppointmentStatus } from "@/lib/planning/types";
+import type { AppointmentStatus, DayAppointmentView } from "@/lib/planning/types";
 
 /**
- * Missão 40 (item 10) / Missão 46 (Partes B-H) — expõe SOMENTE as transições que fazem sentido
- * operacionalmente a partir do status atual E da data do agendamento em relação a hoje (América/
- * São Paulo, mesma fonte usada pelo backend em `updateAppointmentStatus`). Nenhuma regra de
- * transição nova: a proteção real (autoritativa) já vive em `service.ts` — isto aqui só evita
- * oferecer um botão que o backend recusaria, e adiciona confirmação explícita antes de cancelar.
+ * Missão 40 (item 10) / Missão 46 (Partes B-H) / Missão 48 (Partes A/B/M) — expõe SOMENTE as
+ * transições/ações que fazem sentido operacionalmente a partir do status atual E da data do
+ * agendamento em relação a hoje (América/São Paulo, mesma fonte usada pelo backend). Nenhuma
+ * regra nova aqui: a proteção real (autoritativa) vive em `service.ts` — isto só evita oferecer um
+ * botão que o backend recusaria, e adiciona confirmação explícita antes de cancelar.
  *
  * Datas passadas: nenhuma ação, card vira histórico ("Histórico" no lugar dos botões).
  * Datas futuras: nunca "Iniciar atendimento"/"Concluir" (só fazem sentido no próprio dia).
+ * Editar: só agendado/confirmado (mesma matriz de `updateAppointmentDetails`), qualquer data não passada.
  */
 export function DayAppointmentActions({
-  appointmentId,
-  status,
-  scheduledAt,
+  appointment,
   todayIso,
-  customerName,
+  serviceCatalog,
 }: {
-  appointmentId: string;
-  status: AppointmentStatus;
-  scheduledAt: string;
+  appointment: DayAppointmentView;
   todayIso: string;
-  customerName: string | null;
+  serviceCatalog: ServiceCatalogEntry[];
 }) {
+  const { id: appointmentId, status, scheduledAt, customerName } = appointment;
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -55,13 +55,15 @@ export function DayAppointmentActions({
   const canStart = (status === "agendado" || status === "confirmado") && isToday;
   const canComplete = status === "em_andamento" && isToday;
   const canCancel = status === "agendado" || status === "confirmado" || status === "em_andamento";
+  const canEdit = status === "agendado" || status === "confirmado";
 
-  if (!canStart && !canComplete && !canCancel) return null;
+  if (!canStart && !canComplete && !canCancel && !canEdit) return null;
 
   return (
     <div className="space-y-1.5">
       {error ? <p className="text-xs text-critical">{error}</p> : null}
       <div className="flex flex-wrap gap-1.5">
+        {canEdit ? <EditAppointmentDialog appointment={appointment} serviceCatalog={serviceCatalog} /> : null}
         {canStart ? <ActionButton label="Iniciar atendimento" tone="positive" disabled={isPending} onClick={() => handle("em_andamento")} /> : null}
         {canComplete ? <ActionButton label="Concluir" tone="positive" disabled={isPending} onClick={() => handle("concluido")} /> : null}
         {canCancel ? (

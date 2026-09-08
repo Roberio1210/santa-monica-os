@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { getDb, type DbOrTx } from "@/db/client";
 import { appointments, customers, operationalCapacityConfig, serviceOrderItems, serviceOrders, services, serviceVisits, vehicles } from "@/db/schema";
 import type { AppointmentRow, CompletedOrderSample, PlanningRepository } from "@/lib/planning/repository";
@@ -77,6 +77,7 @@ export class PostgresPlanningRepository implements PlanningRepository {
         serviceName: services.name,
         expectedDurationMinutes: appointments.expectedDurationMinutes,
         notes: appointments.notes,
+        updatedAt: appointments.updatedAt,
       })
       .from(appointments)
       .innerJoin(customers, eq(appointments.customerId, customers.id))
@@ -99,6 +100,7 @@ export class PostgresPlanningRepository implements PlanningRepository {
       serviceName: row.serviceName,
       expectedDurationMinutes: row.expectedDurationMinutes,
       notes: row.notes,
+      updatedAt: row.updatedAt.toISOString(),
     };
   }
 
@@ -142,6 +144,39 @@ export class PostgresPlanningRepository implements PlanningRepository {
     const [row] = await this.db().update(appointments).set({ status, updatedAt: new Date() }).where(eq(appointments.id, id)).returning();
     if (!row) throw new Error(`Agendamento ${id} não encontrado.`);
     return toAppointment(row);
+  }
+
+  /**
+   * Missão 48 — ver docstring em `repository.ts`. `WHERE ... AND updated_at = expectedUpdatedAt` é
+   * o próprio CAS: 0 linhas = não encontrado ou já alterado por outra operação.
+   *
+   * Missão 49 (Parte C, bug real encontrado na revisão) — `updated_at` é `timestamp(withTimezone)`
+   * SEM precisão limitada no schema, então um `updatedAt` que ainda carrega o valor original de
+   * `defaultNow()` (função `now()` do Postgres, precisão de microssegundos) tem dígitos que um
+   * `Date` do JS NUNCA consegue representar (só milissegundos) — o cliente só recebe/reenvia a
+   * versão truncada, então uma comparação direta (`eq`) quase sempre dava falso-negativo no
+   * PRIMEIRO edit de qualquer agendamento nunca antes tocado por `updateAppointmentStatus` (que já
+   * escreve `updatedAt` via `new Date()`, sempre em milissegundos). `date_trunc('milliseconds', ...)`
+   * nivela os dois lados na mesma precisão que o cliente realmente enxerga — corrige tanto para
+   * linhas novas quanto para linhas antigas, sem tocar em nenhum dado existente.
+   */
+  async updateAppointmentDetails(
+    id: string,
+    fields: { serviceId: string; scheduledAt: string; expectedDurationMinutes: number; notes: string | null },
+    expectedUpdatedAt: string,
+  ): Promise<Appointment | null> {
+    const [row] = await this.db()
+      .update(appointments)
+      .set({
+        serviceId: fields.serviceId,
+        scheduledAt: new Date(fields.scheduledAt),
+        expectedDurationMinutes: fields.expectedDurationMinutes,
+        notes: fields.notes,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(appointments.id, id), sql`date_trunc('milliseconds', ${appointments.updatedAt}) = ${expectedUpdatedAt}::timestamptz`))
+      .returning();
+    return row ? toAppointment(row) : null;
   }
 
   async getActiveCapacityConfig(): Promise<CapacityConfig | null> {
@@ -198,5 +233,15 @@ export class PostgresPlanningRepository implements PlanningRepository {
     const result: Record<string, number | null> = {};
     for (const row of rows) result[row.id] = row.estimatedDurationMinutes;
     return result;
+  }
+
+  /** Missão 49 — ver docstring em `repository.ts`. */
+  async getService(serviceId: string): Promise<{ id: string; active: boolean; estimatedDurationMinutes: number | null } | null> {
+    const [row] = await this.db()
+      .select({ id: services.id, active: services.active, estimatedDurationMinutes: services.estimatedDurationMinutes })
+      .from(services)
+      .where(eq(services.id, serviceId))
+      .limit(1);
+    return row ?? null;
   }
 }

@@ -390,6 +390,151 @@ export async function updateAppointmentStatus(id: string, status: AppointmentSta
   return repo.updateAppointmentStatus(id, status);
 }
 
+/** Missão 48 (Parte A/M) — status a partir do qual a edição estrutural (serviço/data/horário) não é mais permitida, mesma matriz usada na UI (`DayAppointmentActions`), nunca uma segunda regra divergente. */
+export class AppointmentNotEditableError extends Error {
+  constructor() {
+    super("Este agendamento não pode mais ser editado.");
+    this.name = "AppointmentNotEditableError";
+  }
+}
+
+/** Missão 48 (Parte C) — o novo serviço escolhido não tem `estimated_duration_minutes` cadastrado; nunca inventa/reaproveita uma duração antiga. */
+export class ServiceDurationMissingError extends Error {
+  constructor() {
+    super("O serviço selecionado não possui duração prevista.");
+    this.name = "ServiceDurationMissingError";
+  }
+}
+
+/**
+ * Missão 49 (Parte E, bug real encontrado na revisão) — serviço inexistente OU inativo, distinto
+ * de "existe mas sem duração cadastrada" (`ServiceDurationMissingError`). Antes desta correção,
+ * um `serviceId` inexistente/inativo passado por uma chamada direta (fora do `<select>`, que já só
+ * lista serviços ativos) caía silenciosamente no mesmo caminho de "sem duração" — mensagem
+ * enganosa e nenhuma checagem real de existência/atividade.
+ */
+export class ServiceNotFoundError extends Error {
+  constructor() {
+    super("Serviço não encontrado ou indisponível.");
+    this.name = "ServiceNotFoundError";
+  }
+}
+
+/** Missão 48 (Parte D) — candidato de edição não cabe no expediente configurado (nunca um horário comercial inventado). */
+export class AppointmentOutsideExpedienteError extends Error {
+  constructor(reason: "antes_do_expediente" | "termina_apos_expediente") {
+    super(reason === "antes_do_expediente" ? "O horário informado está fora do expediente." : "O atendimento terminaria após o expediente.");
+    this.name = "AppointmentOutsideExpedienteError";
+  }
+}
+
+/** Missão 48 (Parte E) — mesmo `checkAvailabilityForRequest` da criação, sem `excludeAppointmentId` nesta mensagem específica de edição (mais clara para quem está editando). */
+export class AppointmentEditConflictError extends Error {
+  constructor() {
+    super("Este horário não possui capacidade disponível.");
+    this.name = "AppointmentEditConflictError";
+  }
+}
+
+/** Missão 48 (Parte H) — CAS via `updatedAt` falhou: outra operação alterou o agendamento entre a leitura e esta escrita. Nunca sobrescreve silenciosamente. */
+export class AppointmentConcurrentUpdateError extends Error {
+  constructor() {
+    super("Este agendamento foi alterado por outra operação. Atualize a agenda e tente novamente.");
+    this.name = "AppointmentConcurrentUpdateError";
+  }
+}
+
+export interface UpdateAppointmentDetailsInput {
+  appointmentId: string;
+  serviceId: string;
+  /** ISO com offset `-03:00` explícito, já montado pelo chamador (mesmo padrão de `createAppointmentAction`). */
+  scheduledAt: string;
+  notes: string | null;
+  /** `updatedAt` do agendamento no momento em que o formulário foi carregado — token de concorrência otimista (Parte H). */
+  expectedUpdatedAt: string;
+}
+
+/**
+ * Missão 48 (Fase de Edição Segura) — único caminho de edição estrutural de um agendamento
+ * (serviço/data/horário/observações). NUNCA recebe `customerId`/`vehicleId`/duração do cliente
+ * como fonte de verdade — a duração é sempre recalculada a partir de `services.estimated_duration_minutes`
+ * do NOVO serviço (Parte C), e a disponibilidade é sempre revalidada com `excludeAppointmentId`
+ * (Parte E, reaproveita 100% de `checkAvailabilityForRequest` — nenhuma regra de conflito nova).
+ *
+ * Ordem das checagens (a mais fundamental primeiro, mesmo espírito de `updateAppointmentStatus`):
+ * 1) agendamento existe; 2) data ATUAL não é passada; 3) status permite edição estrutural
+ * (agendado/confirmado); 4) NOVA data não é passada; 5) novo serviço existe e está ativo
+ * (Missão 49 — nunca confundido com "sem duração cadastrada"); 6) novo serviço tem duração
+ * cadastrada; 7) candidato cabe inteiro no expediente; 8) disponibilidade real (excluindo o
+ * próprio); 9) UPDATE atômico com CAS em `updatedAt` — só então grava.
+ */
+export async function updateAppointmentDetails(input: UpdateAppointmentDetailsInput): Promise<Appointment> {
+  const repo = getPlanningRepository();
+  const existing = await repo.getAppointment(input.appointmentId);
+  if (!existing) {
+    throw new Error(`Agendamento ${input.appointmentId} não encontrado.`);
+  }
+
+  const todayIso = saoPauloDateISO();
+  const currentDateIso = saoPauloDateISO(new Date(existing.scheduledAt));
+  if (isDatePast(currentDateIso, todayIso)) {
+    throw new AppointmentPastDateError();
+  }
+  if (existing.status !== "agendado" && existing.status !== "confirmado") {
+    throw new AppointmentNotEditableError();
+  }
+
+  const newDateIso = saoPauloDateISO(new Date(input.scheduledAt));
+  if (isDatePast(newDateIso, todayIso)) {
+    throw new AppointmentPastDateError();
+  }
+
+  const service = await repo.getService(input.serviceId);
+  if (!service || !service.active) {
+    throw new ServiceNotFoundError();
+  }
+  const newDurationMinutes = service.estimatedDurationMinutes;
+  if (newDurationMinutes === null) {
+    throw new ServiceDurationMissingError();
+  }
+
+  const config = await repo.getActiveCapacityConfig();
+  if (!config) {
+    throw new Error("Capacidade operacional não configurada.");
+  }
+  const { startMs: expedienteStartMs, endMs: expedienteEndMs } = resolveExpedienteWindow(newDateIso, config.dailyOperatingMinutes);
+  const candidateStartMs = Date.parse(input.scheduledAt);
+  const candidateEndMs = candidateStartMs + newDurationMinutes * 60_000;
+  if (candidateStartMs < expedienteStartMs) {
+    throw new AppointmentOutsideExpedienteError("antes_do_expediente");
+  }
+  if (candidateEndMs > expedienteEndMs) {
+    throw new AppointmentOutsideExpedienteError("termina_apos_expediente");
+  }
+
+  const availability = await checkAvailabilityForRequest({
+    serviceId: input.serviceId,
+    scheduledAt: input.scheduledAt,
+    expectedDurationMinutes: newDurationMinutes,
+    excludeAppointmentId: input.appointmentId,
+  });
+  if (availability.status !== "available") {
+    throw new AppointmentEditConflictError();
+  }
+
+  const normalizedNotes = input.notes && input.notes.trim().length > 0 ? input.notes.trim() : null;
+
+  const updated = await repo.updateAppointmentDetails(
+    input.appointmentId,
+    { serviceId: input.serviceId, scheduledAt: input.scheduledAt, expectedDurationMinutes: newDurationMinutes, notes: normalizedNotes },
+    input.expectedUpdatedAt,
+  );
+  if (!updated) {
+    throw new AppointmentConcurrentUpdateError();
+  }
+  return updated;
+}
+
 export async function fetchActiveCapacityConfig(): Promise<CapacityConfig | null> {
   return getPlanningRepository().getActiveCapacityConfig();
 }
