@@ -1,6 +1,7 @@
 import "server-only";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { generateSetupToken } from "@/lib/auth/setup-token";
 
 /**
  * Hash de senha via scrypt nativo do Node — sem dependência nova (avaliado contra bcrypt/argon2;
@@ -27,7 +28,10 @@ export async function verifyPassword(plainPassword: string, storedHash: string):
   return timingSafeEqual(derivedKey, expected);
 }
 
-/** Token de uso único (definição/redefinição de senha) — nunca a senha em si, só uma credencial de link. */
-export function generateSetupToken(): string {
-  return randomBytes(32).toString("base64url");
-}
+/**
+ * Token de uso único (definição/redefinição de senha) — nunca a senha em si, só uma credencial de
+ * link. Reexportada de `@/lib/auth/setup-token` (Missão 53) para não quebrar nenhum import
+ * existente — a implementação real vive lá, sem `server-only`, porque também é usada por scripts
+ * de linha de comando.
+ */
+export { generateSetupToken };

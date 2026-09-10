@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn() }));
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { assignVehiclePlateAction, createAppointmentAction, updateAppointmentDetailsAction, updateAppointmentStatusAction } from "@/app/planejamento/actions";
+import { assignVehiclePlateAction, createAppointmentAction, setCapacityConfigAction, updateAppointmentDetailsAction, updateAppointmentStatusAction } from "@/app/planejamento/actions";
 import { fetchServiceCatalog, registerQuickCustomerAndVehicle } from "@/lib/attendance/service";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getPlanningRepository } from "@/lib/planning/repository-factory";
 import { MemoryPlanningRepository } from "@/lib/planning/memory-repository";
 import { createAppointment, setCapacityConfig, updateAppointmentStatus } from "@/lib/planning/service";
@@ -19,6 +21,13 @@ import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
  * (`checkAvailabilityForRequest`) roda de fato ANTES de qualquer escrita real, no server, nunca
  * só no client.
  */
+
+// Missão 52 — `null` (sem sessão individual, estado de hoje na maioria dos ambientes) é o padrão
+// para TODOS os testes deste arquivo, preservando exatamente o comportamento de antes desta
+// missão; só os testes que exercitam `assertAdminForAction` explicitamente sobrescrevem isto.
+beforeEach(() => {
+  vi.mocked(getCurrentUser).mockResolvedValue(null);
+});
 
 let counter = 0;
 async function newCustomerAndVehicle(namePrefix: string) {
@@ -452,5 +461,30 @@ describe("assignVehiclePlateAction — Missão 48 (Parte J, Parte P itens 24-27)
     const { vehicle } = await newCustomerAndVehicle("PlacaInvalida");
     const result = await assignVehiclePlateAction(vehicle.id, "??");
     expect(result.error).toBe("Placa inválida.");
+  });
+});
+
+describe("setCapacityConfigAction — bloqueio de papel (Missão 52)", () => {
+  it("sem sessão individual (null) -> continua funcionando exatamente como antes desta missão", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue(null);
+    const result = await setCapacityConfigAction(4, 480);
+    expect(result.error).toBeNull();
+  });
+
+  it("admin -> permitido", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "u-admin", email: "admin@example.com", name: "Admin Teste", role: "admin" });
+    const result = await setCapacityConfigAction(4, 480);
+    expect(result.error).toBeNull();
+  });
+
+  it("operacional -> bloqueado na própria camada de ação (nunca só escondido na UI), mensagem controlada", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "u-operacional", email: "vinicius@example.com", name: "Operacional Teste", role: "operacional" });
+    const before = await import("@/lib/planning/service").then((m) => m.fetchActiveCapacityConfig());
+
+    const result = await setCapacityConfigAction(999, 999);
+
+    expect(result.error).toBe("Sem permissão para esta ação.");
+    const after = await import("@/lib/planning/service").then((m) => m.fetchActiveCapacityConfig());
+    expect(after).toEqual(before); // nada foi escrito
   });
 });

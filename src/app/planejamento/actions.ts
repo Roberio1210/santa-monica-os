@@ -2,8 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { assignPlateToVehicle, registerQuickCustomerAndVehicle, type QuickRegisterInput } from "@/lib/attendance/service";
+import { getCurrentUser } from "@/lib/auth/session";
 import { checkAvailabilityForRequest, createAppointment, setCapacityConfig, updateAppointmentDetails, updateAppointmentStatus } from "@/lib/planning/service";
 import type { AppointmentStatus, ConflictingAppointmentRef } from "@/lib/planning/types";
+
+/**
+ * Missão 52 (login individual/RBAC) — `/planejamento` passou a ser liberado para o papel
+ * `operacional` (agenda do dia a dia), mas a capacidade operacional (`boxesCount`/`dailyOperatingMinutes`)
+ * continua exclusiva do administrador, mesmo padrão já usado em `src/app/estoque/actions.ts`
+ * (`assertAdminForAction`): bloqueio na própria camada de ação, nunca só escondendo o formulário
+ * na UI. `null` (sem sessão individual — estado de hoje, ou ADMIN) sempre passa; só bloqueia quando
+ * existe uma sessão concreta identificando o papel como operacional.
+ */
+async function assertAdminForAction(): Promise<string | null> {
+  const currentUser = await getCurrentUser();
+  if (currentUser && currentUser.role !== "admin") {
+    return "Sem permissão para esta ação.";
+  }
+  return null;
+}
 
 export interface ActionResult {
   error: string | null;
@@ -152,6 +169,8 @@ export async function assignVehiclePlateAction(vehicleId: string, plate: string)
 }
 
 export async function setCapacityConfigAction(boxesCount: number, dailyOperatingMinutes: number): Promise<ActionResult> {
+  const denied = await assertAdminForAction();
+  if (denied) return { error: denied };
   try {
     await setCapacityConfig({ boxesCount, dailyOperatingMinutes });
   } catch (err) {

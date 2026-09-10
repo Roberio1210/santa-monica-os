@@ -152,7 +152,7 @@ describe("resolveModuleLinkHref — respeita OPERATIONAL_ALLOWED_PREFIXES, Miss�
   });
 
   it("OPERACIONAL não tem nenhum acesso a Financeiro/CRM/Marketing/Zézinho/Configurações — módulo fica null (oculto), mesma restrição de antes", () => {
-    for (const id of ["financeiro", "crm", "marketing", "zezinho", "configuracoes", "planejamento"]) {
+    for (const id of ["financeiro", "crm", "marketing", "zezinho", "configuracoes"]) {
       const appModule = APP_MODULES.find((m) => m.id === id)!;
       expect(resolveModuleLinkHref(appModule, "operacional")).toBeNull();
     }
@@ -161,5 +161,10 @@ describe("resolveModuleLinkHref — respeita OPERATIONAL_ALLOWED_PREFIXES, Miss�
   it("OPERACIONAL acessa Atendimento normalmente (href principal permitido)", () => {
     const atendimento = APP_MODULES.find((m) => m.id === "atendimento")!;
     expect(resolveModuleLinkHref(atendimento, "operacional")).toBe("/atendimento");
+  });
+
+  it("Missão 52 — OPERACIONAL acessa Planejamento normalmente (href principal permitido, agenda do dia a dia)", () => {
+    const planejamento = APP_MODULES.find((m) => m.id === "planejamento")!;
+    expect(resolveModuleLinkHref(planejamento, "operacional")).toBe("/planejamento");
   });
 });

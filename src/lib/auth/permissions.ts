@@ -23,6 +23,7 @@ export const OPERATIONAL_ALLOWED_PREFIXES: string[] = [
   "/lavacao",
   "/estacionamento",
   "/agenda",
+  "/planejamento",
   "/estoque/produtos",
   "/estoque/saidas",
   "/estoque/consumos",

@@ -41,7 +41,8 @@ function isAuthFlowPath(pathname: string): boolean {
   return AUTH_FLOW_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-async function enforceIndividualSession(request: NextRequest): Promise<NextResponse | null> {
+/** Exportada (Missão 52) só para ser testável diretamente — mesma função, sem nenhuma mudança de comportamento. */
+export async function enforceIndividualSession(request: NextRequest): Promise<NextResponse | null> {
   const individualAuthEnabled = process.env.INDIVIDUAL_AUTH_ENABLED === "true";
   if (!individualAuthEnabled) return null;
   if (isPublicPath(request.nextUrl.pathname) || isAuthFlowPath(request.nextUrl.pathname)) return null;

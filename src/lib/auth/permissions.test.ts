@@ -33,6 +33,8 @@ const OPERATIONAL_ROUTES = [
   "/lavacao",
   "/estacionamento",
   "/agenda",
+  "/planejamento",
+  "/planejamento/novo",
   "/estoque/produtos",
   "/estoque/produtos/abc-123",
   "/estoque/saidas",
@@ -40,6 +42,9 @@ const OPERATIONAL_ROUTES = [
   "/estoque/pendencias",
   "/estoque/compras-sugeridas",
 ];
+
+/** Missão 52 — deliberadamente NÃO liberadas para operacional (default-deny, sem fonte confiável de escopo por papel dentro delas hoje). */
+const DELIBERATELY_BLOCKED_ROUTES = ["/zezinho", "/marketing", "/crm", "/clientes", "/configuracoes", "/seguranca", "/admin/jumppark-sync", "/admin/diagnostico"];
 
 describe("isPathAllowedForRole — ADMIN", () => {
   it("acessa absolutamente tudo, incluindo rotas financeiras", () => {
@@ -68,6 +73,18 @@ describe("isPathAllowedForRole — OPERACIONAL", () => {
 
   it("bloqueia por padrão qualquer rota nova/desconhecida (default-deny)", () => {
     expect(isPathAllowedForRole("operacional", "/uma-rota-que-nao-existe-ainda")).toBe(false);
+  });
+
+  it("Missão 52 — /planejamento e /planejamento/novo liberados (agenda do dia a dia)", () => {
+    expect(isPathAllowedForRole("operacional", "/planejamento")).toBe(true);
+    expect(isPathAllowedForRole("operacional", "/planejamento/novo")).toBe(true);
+    expect(isPathAllowedForRole("operacional", "/planejamento?range=semana")).toBe(true);
+  });
+
+  it("Missão 52 — bloqueado deliberadamente em Zézinho/Marketing/CRM/Configurações/Admin (sem escopo por papel definido hoje dentro deles)", () => {
+    for (const route of DELIBERATELY_BLOCKED_ROUTES) {
+      expect(isPathAllowedForRole("operacional", route)).toBe(false);
+    }
   });
 
   it("nenhum prefixo liberado para operacional aponta para área financeira", () => {
