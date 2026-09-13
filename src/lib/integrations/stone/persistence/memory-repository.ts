@@ -132,6 +132,17 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     return this.normalizedTransactions.get(externalKey) ?? null;
   }
 
+  async findNormalizedTransactionsByAcquirerKeyAndInstallment(acquirerTransactionKey: string, installmentNumber: number): Promise<StoneNormalizedTransactionRecord[]> {
+    return [...this.normalizedTransactions.values()].filter((r) => r.acquirerTransactionKey === acquirerTransactionKey && r.installmentNumber === installmentNumber);
+  }
+
+  async updateSettlementInfo(externalKey: string, settledPaymentDate: string, settledAmount: number): Promise<boolean> {
+    const existing = this.normalizedTransactions.get(externalKey);
+    if (!existing || existing.settledPaymentDate !== null) return false;
+    this.normalizedTransactions.set(externalKey, { ...existing, settledPaymentDate, settledAmount });
+    return true;
+  }
+
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {
     const now = new Date().toISOString();
     for (const record of records) {

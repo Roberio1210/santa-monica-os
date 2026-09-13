@@ -131,6 +131,51 @@ describe("StoneMemoryRepository — transações normalizadas (Sprint 7.0, Z4)",
     const rows = await repo.listNormalizedTransactionsByCapturedDateRange("2026-07-01", "2026-07-31");
     expect(rows.map((r) => r.externalKey)).toEqual(["b"]);
   });
+
+  describe("Missão 69 — correlação cross-day (findNormalizedTransactionsByAcquirerKeyAndInstallment / updateSettlementInfo)", () => {
+    it("encontra por acquirerTransactionKey + installmentNumber, ignora installment diferente", async () => {
+      const repo = new StoneMemoryRepository();
+      await repo.upsertNormalizedTransactions([
+        transaction({ externalKey: "a", acquirerTransactionKey: "ACQ-1", installmentNumber: 1 }),
+        transaction({ externalKey: "b", acquirerTransactionKey: "ACQ-1", installmentNumber: 2 }),
+        transaction({ externalKey: "c", acquirerTransactionKey: "ACQ-2", installmentNumber: 1 }),
+      ]);
+      const found = await repo.findNormalizedTransactionsByAcquirerKeyAndInstallment("ACQ-1", 1);
+      expect(found.map((r) => r.externalKey)).toEqual(["a"]);
+    });
+
+    it("nenhuma correspondência -> lista vazia, nunca lança", async () => {
+      const repo = new StoneMemoryRepository();
+      const found = await repo.findNormalizedTransactionsByAcquirerKeyAndInstallment("NUNCA-EXISTIU", 1);
+      expect(found).toEqual([]);
+    });
+
+    it("updateSettlementInfo grava só quando settledPaymentDate ainda é null, devolve true", async () => {
+      const repo = new StoneMemoryRepository();
+      await repo.upsertNormalizedTransactions([transaction({ externalKey: "a", settledPaymentDate: null, settledAmount: null })]);
+      const updated = await repo.updateSettlementInfo("a", "2026-07-23", 9.888);
+      expect(updated).toBe(true);
+      const row = await repo.getNormalizedTransactionByExternalKey("a");
+      expect(row?.settledPaymentDate).toBe("2026-07-23");
+      expect(row?.settledAmount).toBe(9.888);
+    });
+
+    it("updateSettlementInfo NUNCA sobrescreve — devolve false quando já havia liquidação", async () => {
+      const repo = new StoneMemoryRepository();
+      await repo.upsertNormalizedTransactions([transaction({ externalKey: "a", settledPaymentDate: "2026-07-01", settledAmount: 50 })]);
+      const updated = await repo.updateSettlementInfo("a", "2026-07-23", 9.888);
+      expect(updated).toBe(false);
+      const row = await repo.getNormalizedTransactionByExternalKey("a");
+      expect(row?.settledPaymentDate).toBe("2026-07-01");
+      expect(row?.settledAmount).toBe(50);
+    });
+
+    it("updateSettlementInfo em externalKey inexistente -> devolve false, nunca lança", async () => {
+      const repo = new StoneMemoryRepository();
+      const updated = await repo.updateSettlementInfo("nunca-existiu", "2026-07-23", 9.888);
+      expect(updated).toBe(false);
+    });
+  });
 });
 
 describe("StoneMemoryRepository — resultados de conciliação (Sprint 7.0, Z4)", () => {

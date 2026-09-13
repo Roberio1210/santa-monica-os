@@ -4,7 +4,10 @@ import { dataAvailableThroughDate, fetchNormalizedConciliations } from "@/lib/in
 import { datesBetween, reconcileStoneWithJumpparkForPeriod } from "@/lib/integrations/stone/jumpparkReconciliationService";
 import { buildNormalizedTransactionRecords, hashNormalizedConciliation } from "@/lib/integrations/stone/persistence/mapping";
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
+import type { StonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository";
+import { resolveCrossDaySettlement } from "@/lib/integrations/stone/persistence/crossDaySettlement";
 import { buildDivergenceNaturalKey, buildReconciliationNaturalKey, type StoneDivergenceRecord, type StoneReconciliationResultRecord } from "@/lib/integrations/stone/persistence/types";
+import type { NormalizedConciliation } from "@/lib/integrations/stone/normalize";
 import type { StoneFinancialEvent } from "@/lib/integrations/stone/types";
 
 /**
@@ -59,6 +62,44 @@ export interface SyncStonePeriodResult {
   divergencesPersisted: number;
   dataAvailableThroughDate: string | null;
   limitations: string[];
+  /** Missão 69 — liquidações de dias anteriores encontradas e preenchidas neste período (nunca inclui o mesmo dia — isso já é feito por `buildNormalizedTransactionRecords`). */
+  crossDaySettlementsResolved: number;
+  /** Missão 69 — identidade bateu mas ficou ambígua (múltiplos candidatos) ou o valor não bateu — nunca gravado, só reportado para investigação humana. */
+  crossDaySettlementConflicts: number;
+}
+
+/**
+ * Missão 69 — para cada liquidação do dia (`day.settlements`), tenta encontrar a venda já
+ * persistida (de qualquer dia, inclusive dias anteriores) pela identidade real da parcela
+ * (`acquirerTransactionKey`+`installmentNumber`) e preenche `settledPaymentDate`/`settledAmount`
+ * só quando ainda estavam vazios. Seguro por construção mesmo para liquidação do MESMO dia (que o
+ * caminho normal de `buildNormalizedTransactionRecords` já tenta resolver primeiro): a guarda
+ * "já liquidado" (`already_settled`) faz este passo virar no-op nesse caso, nunca sobrescreve.
+ * Nunca cria venda nova, nunca cria `cash_movement`, nunca cria conciliação — só atualiza os dois
+ * campos de liquidação de uma linha que já existe.
+ */
+export async function applyCrossDaySettlements(day: NormalizedConciliation, repo: StonePersistenceRepository): Promise<{ resolved: number; conflicts: number }> {
+  let resolved = 0;
+  let conflicts = 0;
+
+  for (const settlement of day.settlements) {
+    const candidates = await repo.findNormalizedTransactionsByAcquirerKeyAndInstallment(settlement.saleExternalReference, settlement.installmentNumber);
+    const resolution = resolveCrossDaySettlement(
+      { saleExternalReference: settlement.saleExternalReference, installmentNumber: settlement.installmentNumber, netAmount: settlement.netAmount, settledPaymentDate: settlement.settledPaymentDate },
+      candidates.map((c) => ({ externalKey: c.externalKey, settledPaymentDate: c.settledPaymentDate, netAmount: c.netAmount })),
+    );
+
+    if (resolution.status === "matched") {
+      const updated = await repo.updateSettlementInfo(resolution.externalKey, resolution.settledPaymentDate, resolution.settledAmount);
+      if (updated) resolved += 1;
+    } else if (resolution.status === "conflict") {
+      conflicts += 1;
+    }
+    // "no_candidate" e "already_settled" não são conflito nem sucesso — são o estado esperado na
+    // maioria das chamadas (a venda ainda não foi sincronizada, ou já foi liquidada antes).
+  }
+
+  return { resolved, conflicts };
 }
 
 /**
@@ -69,7 +110,17 @@ export interface SyncStonePeriodResult {
  */
 export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<SyncStonePeriodResult> {
   if (!isStoneConfigured()) {
-    return { status: "not_configured", days: [], transactionsPersisted: 0, reconciliationResultsPersisted: 0, divergencesPersisted: 0, dataAvailableThroughDate: null, limitations: ["STONE_API_KEY/STONE_ACCOUNT_ID ausentes."] };
+    return {
+      status: "not_configured",
+      days: [],
+      transactionsPersisted: 0,
+      reconciliationResultsPersisted: 0,
+      divergencesPersisted: 0,
+      dataAvailableThroughDate: null,
+      limitations: ["STONE_API_KEY/STONE_ACCOUNT_ID ausentes."],
+      crossDaySettlementsResolved: 0,
+      crossDaySettlementConflicts: 0,
+    };
   }
 
   const repo = getStonePersistenceRepository();
@@ -79,6 +130,8 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
 
   const days: DayImportOutcome[] = [];
   let transactionsPersisted = 0;
+  let crossDaySettlementsResolved = 0;
+  let crossDaySettlementConflicts = 0;
 
   for (const dayResult of dayResults) {
     const run = await repo.startImportRun({
@@ -93,6 +146,15 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
       const records = buildNormalizedTransactionRecords(dayResult.normalized, availableThrough ?? dayResult.referenceDate, run.id);
       await repo.upsertNormalizedTransactions(records);
       transactionsPersisted += records.length;
+
+      // Missão 69 — depois de persistir as vendas/liquidações do PRÓPRIO dia (comportamento já
+      // existente, inalterado acima), tenta resolver liquidações deste arquivo contra vendas já
+      // persistidas de QUALQUER dia anterior — nunca cria linha nova, nunca sobrescreve liquidação
+      // já existente (ver `applyCrossDaySettlements`).
+      const crossDay = await applyCrossDaySettlements(dayResult.normalized, repo);
+      crossDaySettlementsResolved += crossDay.resolved;
+      crossDaySettlementConflicts += crossDay.conflicts;
+
       const { prepaymentFeeAmount, prepaymentDisbursementAmount } = sumPrepaymentEvents(dayResult.normalized.financialEvents);
       await repo.finishImportRun({
         id: run.id,
@@ -162,5 +224,5 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
   const allFailed = days.length > 0 && days.every((d) => d.status === "failed");
   const status: SyncStonePeriodStatus = allFailed ? "no_data" : anyFailed ? "partial" : "ok";
 
-  return { status, days, transactionsPersisted, reconciliationResultsPersisted, divergencesPersisted, dataAvailableThroughDate: availableThrough, limitations };
+  return { status, days, transactionsPersisted, reconciliationResultsPersisted, divergencesPersisted, dataAvailableThroughDate: availableThrough, limitations, crossDaySettlementsResolved, crossDaySettlementConflicts };
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import {
   stoneDivergences as stoneDivergencesTable,
@@ -325,6 +325,26 @@ export class StonePostgresRepository implements StonePersistenceRepository {
   async getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null> {
     const rows = await this.db().select().from(stoneNormalizedTransactionsTable).where(eq(stoneNormalizedTransactionsTable.externalKey, externalKey)).limit(1);
     return rows[0] ? toNormalizedTransaction(rows[0]) : null;
+  }
+
+  async findNormalizedTransactionsByAcquirerKeyAndInstallment(acquirerTransactionKey: string, installmentNumber: number): Promise<StoneNormalizedTransactionRecord[]> {
+    const rows = await this.db()
+      .select()
+      .from(stoneNormalizedTransactionsTable)
+      .where(and(eq(stoneNormalizedTransactionsTable.acquirerTransactionKey, acquirerTransactionKey), eq(stoneNormalizedTransactionsTable.installmentNumber, installmentNumber)));
+    return rows.map(toNormalizedTransaction);
+  }
+
+  async updateSettlementInfo(externalKey: string, settledPaymentDate: string, settledAmount: number): Promise<boolean> {
+    // A guarda `isNull(settledPaymentDate)` vive na própria cláusula WHERE — nunca lê-antes-de-escrever
+    // para decidir (mesmo princípio de idempotência via constraint do resto deste repositório, nunca
+    // condição de corrida entre duas execuções concorrentes tentando liquidar a mesma parcela).
+    const rows = await this.db()
+      .update(stoneNormalizedTransactionsTable)
+      .set({ settledPaymentDate, settledAmount: String(settledAmount), updatedAt: new Date() })
+      .where(and(eq(stoneNormalizedTransactionsTable.externalKey, externalKey), isNull(stoneNormalizedTransactionsTable.settledPaymentDate)))
+      .returning({ externalKey: stoneNormalizedTransactionsTable.externalKey });
+    return rows.length > 0;
   }
 
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {

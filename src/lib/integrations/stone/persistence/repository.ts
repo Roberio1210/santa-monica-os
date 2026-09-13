@@ -36,6 +36,21 @@ export interface StonePersistenceRepository {
   listNormalizedTransactionsByCapturedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]>;
   /** Missão Financeiro V2 — busca pontual pela chave determinística da parcela (Z2, `identity.ts`), usada ao confirmar uma conciliação como recebível. */
   getNormalizedTransactionByExternalKey(externalKey: string): Promise<StoneNormalizedTransactionRecord | null>;
+  /**
+   * Missão 69 — candidatos para correlação de liquidação entre dias diferentes, pela identidade
+   * real da parcela (`acquirerTransactionKey`+`installmentNumber` — nunca a chave externa
+   * completa, que exige dados que só a própria venda já persistida tem). Pode devolver mais de um
+   * resultado; decidir se isso é conflito é responsabilidade de quem chama
+   * (`crossDaySettlement.ts`), nunca deste método.
+   */
+  findNormalizedTransactionsByAcquirerKeyAndInstallment(acquirerTransactionKey: string, installmentNumber: number): Promise<StoneNormalizedTransactionRecord[]>;
+  /**
+   * Missão 69 — grava a liquidação encontrada por correlação cross-day, só nos dois campos de
+   * liquidação (`settledPaymentDate`/`settledAmount`), e só quando a linha ainda não tinha
+   * nenhuma — nunca sobrescreve uma liquidação já registrada. Devolve `false` (sem lançar) quando
+   * a guarda impediu a escrita (linha não encontrada, ou já tinha liquidação).
+   */
+  updateSettlementInfo(externalKey: string, settledPaymentDate: string, settledAmount: number): Promise<boolean>;
 
   /** Upsert em lote por `naturalKey` — reprocessar o mesmo período nunca duplica um resultado. */
   upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void>;
