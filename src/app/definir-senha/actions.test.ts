@@ -14,7 +14,7 @@ import { setPasswordAction } from "@/app/definir-senha/actions";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema/auth";
 import { verifyPassword } from "@/lib/auth/password";
-import { provisionUser } from "@/lib/auth/provisioning";
+import { issueFirstAccessSetupToken, provisionUser } from "@/lib/auth/provisioning";
 
 /**
  * Missão 53 (Parte E/G) — `setPasswordAction` nunca tinha teste antes desta missão. Cobre
@@ -153,5 +153,27 @@ describe.skipIf(!hasRealDb)("setPasswordAction — Missão 53", () => {
       .where(and(eq(users.id, created.userId)))
       .limit(1);
     expect(row.passwordHash).toBeNull();
+  });
+
+  it("Missão 55 — cenário real do Vinicius: usuário inserido manualmente (sem senha) recebe token de primeiro acesso via issueFirstAccessSetupToken e completa o login pelo mesmo /definir-senha", async () => {
+    const db = getDb()!;
+    const [manuallyInserted] = await db
+      .insert(users)
+      .values({ email: testEmail(), name: "Vinicius Anacleto", role: "operacional", active: true, passwordHash: null, source: "manual" })
+      .returning();
+
+    const issued = await issueFirstAccessSetupToken(db, { email: manuallyInserted.email });
+    expect(issued.status).toBe("issued");
+    if (issued.status !== "issued") throw new Error("esperado issued");
+
+    await expect(
+      setPasswordAction({ error: null }, formData({ token: issued.setupToken, password: "primeiroAcesso1", confirmPassword: "primeiroAcesso1" })),
+    ).rejects.toThrow("REDIRECT:/atendimento");
+
+    const [row] = await db.select().from(users).where(eq(users.id, manuallyInserted.id)).limit(1);
+    expect(row.email).toBe(manuallyInserted.email); // identidade preservada
+    expect(row.role).toBe("operacional");
+    expect(await verifyPassword("primeiroAcesso1", row.passwordHash!)).toBe(true);
+    expect(row.passwordSetupToken).toBeNull();
   });
 });

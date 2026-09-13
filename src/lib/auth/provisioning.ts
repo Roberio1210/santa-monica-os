@@ -102,3 +102,58 @@ export async function provisionUser(db: Database, input: ProvisionUserInput): Pr
     }
   });
 }
+
+/**
+ * Missão 55 — "primeiro acesso" de um usuário JÁ existente que nunca definiu senha (ex.: uma linha
+ * criada manualmente no banco, fora de `provisionUser`, como aconteceu com Vinicius). Deliberadamente
+ * mais estreito que um reset administrativo genérico: só emite token para quem `passwordHash` ainda
+ * é `null` — nunca serve para "resetar" a senha de alguém que já fez login (ex.: Robério), que
+ * precisaria de um fluxo diferente e explícito, não implementado aqui.
+ *
+ * Nunca cria usuário, nunca toca `email`/`role`/`name`/`active`/`id` — só substitui
+ * `passwordSetupToken`/`passwordSetupTokenExpiresAt` da MESMA linha (`where(eq(users.id, ...))`,
+ * nunca por e-mail de novo, para nunca arriscar tocar outra linha). Se já havia um token pendente,
+ * ele é substituído atomicamente na mesma escrita — o valor antigo para de bater em qualquer busca
+ * (`/definir-senha` compara o token inteiro), então nunca ficam dois tokens simultaneamente válidos.
+ */
+
+export interface IssueFirstAccessInput {
+  email: string;
+  /** Injetável só para teste determinístico da expiração — fora de teste, sempre `new Date()`. */
+  now?: Date;
+}
+
+export type IssueFirstAccessResult =
+  | { status: "issued"; userId: string; email: string; role: UserRole; setupToken: string; setupTokenExpiresAt: Date; hadPendingToken: boolean }
+  | { status: "not_found" }
+  | { status: "inactive"; userId: string }
+  | { status: "already_has_password"; userId: string };
+
+export async function issueFirstAccessSetupToken(db: Database, input: IssueFirstAccessInput): Promise<IssueFirstAccessResult> {
+  const email = normalizeEmail(input.email);
+
+  return db.transaction(async (tx) => {
+    const [user] = await tx
+      .select({ id: users.id, role: users.role, active: users.active, passwordHash: users.passwordHash, passwordSetupToken: users.passwordSetupToken })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (!user) return { status: "not_found" };
+    if (!user.active) return { status: "inactive", userId: user.id };
+    if (user.passwordHash !== null) return { status: "already_has_password", userId: user.id };
+
+    const hadPendingToken = user.passwordSetupToken !== null;
+    const now = input.now ?? new Date();
+    const setupToken = generateSetupToken();
+    const setupTokenExpiresAt = new Date(now.getTime() + PASSWORD_SETUP_TOKEN_TTL_MS);
+
+    const [updated] = await tx
+      .update(users)
+      .set({ passwordSetupToken: setupToken, passwordSetupTokenExpiresAt: setupTokenExpiresAt, updatedAt: now })
+      .where(eq(users.id, user.id))
+      .returning({ id: users.id, email: users.email, role: users.role });
+
+    return { status: "issued", userId: updated.id, email: updated.email, role: updated.role, setupToken, setupTokenExpiresAt, hadPendingToken };
+  });
+}

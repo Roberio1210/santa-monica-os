@@ -2,8 +2,9 @@ import { eq, like } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema/auth";
+import { hashPassword } from "@/lib/auth/password";
 import { isPathAllowedForRole, ROLE_HOME_PATH } from "@/lib/auth/permissions";
-import { provisionUser } from "@/lib/auth/provisioning";
+import { issueFirstAccessSetupToken, provisionUser } from "@/lib/auth/provisioning";
 
 /**
  * Missão 53 — só roda contra Postgres real de teste (`TEST_DATABASE_URL`, nunca
@@ -138,5 +139,165 @@ describe.skipIf(!hasRealDb)("provisionUser — Missão 53 (Postgres real, planni
     expect(isPathAllowedForRole(result.role, "/configuracoes")).toBe(false);
     expect(isPathAllowedForRole(result.role, "/financeiro")).toBe(false);
     expect(ROLE_HOME_PATH[result.role]).toBe("/atendimento");
+  });
+});
+
+/**
+ * Missão 55 — `issueFirstAccessSetupToken`. Diferente de `provisionUser`, opera sobre linhas que
+ * já existem (o caso real: Vinicius foi criado manualmente no banco, fora deste mecanismo, com
+ * `passwordHash` nulo). Usa um domínio `.invalid` reservado próprio (isolado do bloco acima) e
+ * insere as linhas de teste diretamente via `db.insert(users)`, já que `provisionUser` nunca cria
+ * uma linha com senha já definida.
+ */
+describe.skipIf(!hasRealDb)("issueFirstAccessSetupToken — Missão 55 (Postgres real, planning-tests)", () => {
+  const FIRST_ACCESS_SUFFIX = "@missao55-first-access-test.invalid";
+  let counter = 0;
+
+  function firstAccessEmail(): string {
+    counter++;
+    return `pessoa-${counter}${FIRST_ACCESS_SUFFIX}`;
+  }
+
+  async function insertRawUser(overrides: Partial<{ email: string; name: string; role: "admin" | "operacional"; active: boolean; passwordHash: string | null; passwordSetupToken: string | null }>) {
+    const db = getDb()!;
+    const [row] = await db
+      .insert(users)
+      .values({
+        email: overrides.email ?? firstAccessEmail(),
+        name: overrides.name ?? "Teste",
+        role: overrides.role ?? "operacional",
+        active: overrides.active ?? true,
+        passwordHash: overrides.passwordHash ?? null,
+        passwordSetupToken: overrides.passwordSetupToken ?? null,
+        source: "manual", // mesmo source real do Vinicius/Robério — inserida fora do mecanismo de provisionamento
+      })
+      .returning();
+    return row;
+  }
+
+  afterEach(async () => {
+    const db = getDb()!;
+    await db.delete(users).where(like(users.email, `%${FIRST_ACCESS_SUFFIX}`));
+  });
+
+  it("usuário existente sem senha -> recebe primeiro acesso (token + expiração em 24h)", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({ role: "operacional" });
+    const now = new Date("2026-09-13T12:00:00Z");
+
+    const result = await issueFirstAccessSetupToken(db, { email: user.email, now });
+
+    expect(result.status).toBe("issued");
+    if (result.status !== "issued") throw new Error("esperado issued");
+    expect(result.userId).toBe(user.id);
+    expect(result.hadPendingToken).toBe(false);
+    expect(result.setupTokenExpiresAt.getTime() - now.getTime()).toBe(24 * 60 * 60 * 1000);
+
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(row.passwordSetupToken).toBe(result.setupToken);
+    expect(row.passwordHash).toBeNull(); // nenhuma senha foi definida pelo provisionamento
+  });
+
+  it("usuário inexistente -> bloqueado, nada é criado", async () => {
+    const db = getDb()!;
+    const result = await issueFirstAccessSetupToken(db, { email: firstAccessEmail() });
+    expect(result.status).toBe("not_found");
+  });
+
+  it("usuário inativo -> bloqueado, nada é alterado", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({ active: false });
+
+    const result = await issueFirstAccessSetupToken(db, { email: user.email });
+    expect(result.status).toBe("inactive");
+
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(row.passwordSetupToken).toBeNull(); // continua exatamente como estava
+  });
+
+  it("usuário que já tem senha definida (ex.: Robério) -> bloqueado, NUNCA tratado como reset genérico", async () => {
+    const db = getDb()!;
+    const existingHash = await hashPassword("senhaJaDefinidaAntes123");
+    const user = await insertRawUser({ role: "admin", passwordHash: existingHash });
+
+    const result = await issueFirstAccessSetupToken(db, { email: user.email });
+    expect(result.status).toBe("already_has_password");
+
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(row.passwordHash).toBe(existingHash); // hash original intocado
+    expect(row.passwordSetupToken).toBeNull(); // nenhum token foi emitido
+  });
+
+  it("nunca cria um novo usuário — total de linhas com o e-mail continua sendo 1", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({});
+    await issueFirstAccessSetupToken(db, { email: user.email });
+
+    const rows = await db.select().from(users).where(eq(users.email, user.email));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("preserva userId, email, role e active — só passwordSetupToken/expiração mudam", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({ role: "admin", active: true });
+
+    const result = await issueFirstAccessSetupToken(db, { email: user.email });
+    if (result.status !== "issued") throw new Error("esperado issued");
+
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(row.id).toBe(user.id);
+    expect(row.email).toBe(user.email);
+    expect(row.role).toBe("admin");
+    expect(row.active).toBe(true);
+    expect(row.name).toBe(user.name);
+  });
+
+  it("Robério (outro usuário, já com senha) permanece 100% intocado ao emitir primeiro acesso para o Vinicius", async () => {
+    const db = getDb()!;
+    const roberioHash = await hashPassword("senhaDoRoberioJaDefinida");
+    const roberio = await insertRawUser({ name: "Robério", role: "admin", passwordHash: roberioHash });
+    const vinicius = await insertRawUser({ name: "Vinicius Anacleto", role: "operacional" });
+
+    const before = await db.select().from(users).where(eq(users.id, roberio.id)).limit(1);
+
+    const result = await issueFirstAccessSetupToken(db, { email: vinicius.email });
+    expect(result.status).toBe("issued");
+
+    const after = await db.select().from(users).where(eq(users.id, roberio.id)).limit(1);
+    expect(after[0]).toEqual(before[0]); // byte a byte, nenhum campo do Robério mudou
+  });
+
+  it("token anterior não permanece válido depois de substituído (nunca dois tokens simultaneamente válidos)", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({});
+
+    const first = await issueFirstAccessSetupToken(db, { email: user.email });
+    if (first.status !== "issued") throw new Error("esperado issued");
+    expect(first.hadPendingToken).toBe(false);
+
+    const second = await issueFirstAccessSetupToken(db, { email: user.email });
+    if (second.status !== "issued") throw new Error("esperado issued");
+    expect(second.hadPendingToken).toBe(true); // detectou o token pendente antes de substituir
+    expect(second.setupToken).not.toBe(first.setupToken);
+
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(row.passwordSetupToken).toBe(second.setupToken); // só o token novo bate
+    expect(row.passwordSetupToken).not.toBe(first.setupToken); // o antigo nunca mais bate em nenhuma busca por igualdade
+  });
+
+  it("token expira em exatamente 24h, e é de uso único (via /definir-senha, mesmo mecanismo da Missão 53)", async () => {
+    const db = getDb()!;
+    const user = await insertRawUser({});
+    const now = new Date("2026-09-13T00:00:00Z");
+
+    const result = await issueFirstAccessSetupToken(db, { email: user.email, now });
+    if (result.status !== "issued") throw new Error("esperado issued");
+    expect(result.setupTokenExpiresAt.toISOString()).toBe("2026-09-14T00:00:00.000Z");
+
+    // uso único: reaproveita a MESMA condição que /definir-senha usa para aceitar um token
+    // (token exato + expiresAt no futuro) — simula consumo e confirma que o token para de bater.
+    await db.update(users).set({ passwordHash: "scrypt:simulado:consumido", passwordSetupToken: null, passwordSetupTokenExpiresAt: null }).where(eq(users.id, user.id));
+    const [afterUse] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    expect(afterUse.passwordSetupToken).toBeNull();
   });
 });
