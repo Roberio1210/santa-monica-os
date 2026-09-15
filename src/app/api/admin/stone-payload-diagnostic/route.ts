@@ -51,6 +51,7 @@ interface SanitizedExpectedPayment {
 
 interface SanitizedSettlement {
   acquirerTransactionKeyMasked: string;
+  paymentIdMasked: string;
   installmentNumber: number;
   netAmount: number;
   paymentDate: string;
@@ -83,6 +84,11 @@ function sanitizeSaleInstallment(sale: StoneTransaction, installment: StoneInsta
 function sanitizeSettlementInstallment(accountTx: StoneAccountTransaction, installment: StoneAccountInstallment): SanitizedSettlement {
   return {
     acquirerTransactionKeyMasked: maskKey(accountTx.acquirerTransactionKey)!,
+    // Missão 77 — mesma máscara (SHA-256 truncado) já usada para acquirerTransactionKey, nunca o
+    // valor real. `maskKey` devolve `null` para string vazia (`installment.paymentId` nunca é
+    // `null` em si — ver `xml.ts:str()` — mas pode chegar vazio se o campo faltar no XML), daí o
+    // fallback explícito para nunca confundir "vazio" com um hash real.
+    paymentIdMasked: maskKey(installment.paymentId) ?? "vazio",
     installmentNumber: installment.installmentNumber,
     netAmount: installment.netAmount,
     paymentDate: installment.paymentDate,

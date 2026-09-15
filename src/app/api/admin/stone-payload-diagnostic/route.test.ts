@@ -183,12 +183,17 @@ describe("GET /api/admin/stone-payload-diagnostic — Missão 67", () => {
     const allowedExpectedPaymentKeys = new Set(["acquirerTransactionKeyMasked", "installmentNumber", "grossAmount", "netAmount", "previsionPaymentDate", "originalPaymentDate"]);
     for (const ep of body.expectedPayments) for (const key of Object.keys(ep)) expect(allowedExpectedPaymentKeys.has(key)).toBe(true);
 
-    const allowedSettlementKeys = new Set(["acquirerTransactionKeyMasked", "installmentNumber", "netAmount", "paymentDate", "advanceRateAmount", "advancedReceivableOriginalPaymentDate"]);
+    const allowedSettlementKeys = new Set(["acquirerTransactionKeyMasked", "paymentIdMasked", "installmentNumber", "netAmount", "paymentDate", "advanceRateAmount", "advancedReceivableOriginalPaymentDate"]);
     for (const s of body.settlements) for (const key of Object.keys(s)) expect(allowedSettlementKeys.has(key)).toBe(true);
 
     // identificador mascarado: nunca igual ao valor real, mesmo comprimento curto e determinístico
     expect(body.expectedPayments[0].acquirerTransactionKeyMasked).not.toBe("SALE-SECRET-KEY-0001");
     expect(body.expectedPayments[0].acquirerTransactionKeyMasked).toBe(body.settlements[0].acquirerTransactionKeyMasked); // mesma chave real -> mesmo mascaramento, permite correlação
+
+    // Missão 77 — paymentIdMasked: nunca o valor real, mesma máscara determinística (mesmo paymentId real -> mesmo mascaramento)
+    expect(body.settlements[0].paymentIdMasked).not.toBe("PAY-SECRET-01");
+    expect(typeof body.settlements[0].paymentIdMasked).toBe("string");
+    expect(body.settlements[0].paymentIdMasked.length).toBeGreaterThan(0);
   });
 
   it("11) erro da Stone chega sanitizado (nunca upstreamMessage cru)", async () => {
