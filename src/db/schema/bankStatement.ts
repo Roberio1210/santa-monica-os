@@ -1,6 +1,8 @@
-import { date, integer, jsonb, numeric, pgEnum, pgTable, text, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { date, integer, jsonb, numeric, pgEnum, pgTable, text, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { active, id, notes, source, timestamps } from "./common";
 import { financialAccounts, financialCategories, suppliers, partners, accountsReceivable, accountsPayable, cashMovements, accountTransfers } from "./finance";
+import { stonePaymentGroups } from "./stone";
 
 /**
  * Missão Financeiro V2.1 — extrato bancário real (hoje só Stone, arquitetura genérica por conta
@@ -74,7 +76,9 @@ export const bankStatementLineStatusEnum = pgEnum("bank_statement_line_status", 
   "ignorado",
 ]);
 
-export const bankStatementLines = pgTable("bank_statement_lines", {
+export const bankStatementLines = pgTable(
+  "bank_statement_lines",
+  {
   id: id(),
   importId: uuid("import_id")
     .notNull()
@@ -116,11 +120,21 @@ export const bankStatementLines = pgTable("bank_statement_lines", {
    */
   dedupeKey: text("dedupe_key").notNull().unique(),
 
+  /**
+   * Missão 78/79 (FASE 1 — só estrutura, nenhuma escrita ainda). Um `stone_payment_group`
+   * (identidade real e comprovada, Missão 77) só pode ser reivindicado por, no máximo, uma
+   * linha do extrato — daí o índice único PARCIAL abaixo (nunca `NOT NULL`/UNIQUE simples: a
+   * imensa maioria das linhas não é Stone e precisa continuar `NULL` livremente).
+   */
+  stonePaymentGroupId: uuid("stone_payment_group_id").references(() => stonePaymentGroups.id),
+
   active: active(),
   source: source(),
   notes: notes(),
   ...timestamps,
-});
+  },
+  (table) => [uniqueIndex("bank_statement_lines_stone_payment_group_id_uq").on(table.stonePaymentGroupId).where(sql`${table.stonePaymentGroupId} is not null`)],
+);
 
 /**
  * Missão Financeiro V2.2 (Fase H/V) — "aprendizado controlado": quando o gestor confirma um

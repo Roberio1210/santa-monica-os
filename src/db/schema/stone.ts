@@ -1,4 +1,4 @@
-import { boolean, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { id, timestamps } from "./common";
 
 /**
@@ -107,6 +107,37 @@ export const stoneImportRuns = pgTable(
   (table) => [uniqueIndex("stone_import_runs_reference_date_layout_idx").on(table.referenceDate, table.layout)],
 );
 
+/**
+ * Missão 78/79 — repasse bancário real da Stone (`Payments.Payment`), a identidade correta e
+ * comprovada (Missão 77, dado real) para agrupar N parcelas liquidadas num único crédito
+ * bancário — nunca data+valor sozinhos (provado insuficiente: dois `payment_id` diferentes
+ * podem ter o mesmo valor total no mesmo dia). `payment_id` aqui é o valor REAL da Stone
+ * (`Payments[].Id`) — nunca confundir com `cash_movements.payment_id`, que é uma FK interna
+ * para `payments` (baixa de contas a pagar/receber), domínio completamente diferente.
+ *
+ * Sem coluna de status: todo estado (grupo usado/completo/em conflito) é derivável por junção
+ * com `stone_normalized_transactions.payment_group_id` e `bank_statement_lines.stone_payment_group_id`
+ * — decisão explícita da Missão 78, Parte G, para nunca manter estado duplicado.
+ *
+ * FASE 1 (Missão 79): só estrutura. Nenhum código de runtime grava nesta tabela ainda — isso é
+ * a FASE 2, missão separada.
+ */
+export const stonePaymentGroups = pgTable(
+  "stone_payment_groups",
+  {
+    id: id(),
+    paymentId: text("payment_id").notNull(),
+    paymentDate: date("payment_date").notNull(),
+    /** Valor OFICIAL de `Payments[].TotalAmount` — nunca uma soma calculada por nós (conferência independente). */
+    totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
+    walletTypeId: integer("wallet_type_id"),
+    sourceFile: text("source_file").notNull(),
+    importRunId: uuid("import_run_id").references(() => stoneImportRuns.id),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("stone_payment_groups_payment_id_idx").on(table.paymentId)],
+);
+
 export const stoneTransactionEventTypeEnum = pgEnum("stone_transaction_event_type", ["sale", "cancellation", "chargeback", "chargeback_refund"]);
 
 /** Mesmos 9 valores de `ReceivableState` (`receivableState.ts`) — mirrorado, nunca importado. */
@@ -168,8 +199,16 @@ export const stoneNormalizedTransactions = pgTable(
     advanceFeeAmountStone: numeric("advance_fee_amount_stone", { precision: 14, scale: 2 }),
     sourceFile: text("source_file").notNull(),
     importRunId: uuid("import_run_id").references(() => stoneImportRuns.id),
+    /**
+     * Missão 78/79 (FASE 1 — só estrutura, nenhuma escrita ainda) — N vendas apontam para 1
+     * grupo, nunca o contrário: nunca UNIQUE aqui. `onDelete: "set null"` — apagar um grupo
+     * (não deveria acontecer em uso normal) nunca apaga a venda em si. Nullable: vendas
+     * existentes e futuras (até a FASE 2 popular este campo) permanecem NULL.
+     */
+    paymentGroupId: uuid("payment_group_id").references(() => stonePaymentGroups.id, { onDelete: "set null" }),
     ...timestamps,
   },
+  (table) => [index("stone_normalized_transactions_payment_group_id_idx").on(table.paymentGroupId)],
 );
 
 /** Mesmos 12 valores de `ReconciliationMatchType` (`jumpparkReconciliation.ts`) — mirrorado. */
