@@ -1,6 +1,7 @@
 import "server-only";
-import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { addDaysIso, startOfSaoPauloDayUtc } from "@/lib/utils/timezone";
 import {
   stoneDivergences as stoneDivergencesTable,
   stoneImportRuns as stoneImportRunsTable,
@@ -320,11 +321,19 @@ export class StonePostgresRepository implements StonePersistenceRepository {
     return rows.map(toNormalizedTransaction);
   }
 
+  /**
+   * Missão 80 — fronteira em America/Sao_Paulo, nunca em UTC: `capturedAt` é `timestamptz`, e uma
+   * venda das 21h-23h59 em SP já é o dia seguinte em UTC. Intervalo semiaberto
+   * [início do dia SP de `fromDate`, início do dia SP seguinte a `toDate`) — nunca dupla conta
+   * nem deixa buraco entre dois dias adjacentes.
+   */
   async listNormalizedTransactionsByCapturedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]> {
+    const start = startOfSaoPauloDayUtc(fromDate);
+    const endExclusive = startOfSaoPauloDayUtc(addDaysIso(toDate, 1));
     const rows = await this.db()
       .select()
       .from(stoneNormalizedTransactionsTable)
-      .where(and(gte(stoneNormalizedTransactionsTable.capturedAt, new Date(`${fromDate}T00:00:00.000Z`)), lte(stoneNormalizedTransactionsTable.capturedAt, new Date(`${toDate}T23:59:59.999Z`))));
+      .where(and(gte(stoneNormalizedTransactionsTable.capturedAt, start), lt(stoneNormalizedTransactionsTable.capturedAt, endExclusive)));
     return rows.map(toNormalizedTransaction);
   }
 

@@ -16,6 +16,21 @@ export function saoPauloTimeHM(date: Date = new Date()): string {
 }
 
 /**
+ * Missão 80 — instante UTC correspondente às 00:00:00 de uma data (YYYY-MM-DD) em
+ * America/Sao_Paulo. Existe para transformar fronteiras de "dia comercial" (calendário SP) em
+ * limites de comparação contra colunas `timestamptz` (ex.: `stone_normalized_transactions.captured_at`).
+ * Nunca usar `new Date(`${dateIso}T00:00:00.000Z`)` para isso: seria meia-noite em UTC, não em SP
+ * (mesmo erro descrito no comentário de `saoPauloDateISO` acima, só que na direção contrária —
+ * uma venda das 21h-23h59 em SP já é o dia seguinte em UTC).
+ *
+ * America/Sao_Paulo não observa horário de verão desde 2019 — deslocamento fixo de -03:00 o ano
+ * inteiro, por isso a soma de 3 horas abaixo é segura (nunca precisa de tabela de transição).
+ */
+export function startOfSaoPauloDayUtc(dateIso: string): Date {
+  return new Date(`${dateIso}T03:00:00.000Z`);
+}
+
+/**
  * Soma/subtrai dias a uma data ISO (YYYY-MM-DD) tratada como calendário puro — usa meio-dia UTC
  * como âncora só para evitar problemas de borda de DST/fuso na aritmética, sem reintroduzir
  * dependência do fuso local da máquina.

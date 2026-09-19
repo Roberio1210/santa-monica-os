@@ -132,6 +132,52 @@ describe("StoneMemoryRepository — transações normalizadas (Sprint 7.0, Z4)",
     expect(rows.map((r) => r.externalKey)).toEqual(["b"]);
   });
 
+  describe("Missão 80 — fronteira de dia comercial (America/Sao_Paulo), nunca dia UTC", () => {
+    /**
+     * `capturedAt` é sempre UTC (`.toISOString()`). America/Sao_Paulo é UTC-3 (sem horário de
+     * verão desde 2019) — uma venda das 21h/22h/23h de um dia em SP já é o dia SEGUINTE em UTC.
+     * O dia comercial de uma venda é sempre o dia em America/Sao_Paulo, nunca o dia UTC do
+     * timestamp bruto.
+     */
+    const CAPTURED_AT_SP = {
+      "00:00:00 SP (13/09)": "2026-09-13T03:00:00.000Z",
+      "12:00:00 SP (13/09, meio do dia)": "2026-09-13T15:00:00.000Z",
+      "20:59:59 SP (13/09)": "2026-09-13T23:59:59.000Z",
+      "21:00:00 SP (13/09) — vira 14/09 em UTC": "2026-09-14T00:00:00.000Z",
+      "23:59:59 SP (13/09) — vira 14/09 em UTC": "2026-09-14T02:59:59.000Z",
+      "00:00:00 SP (14/09, dia seguinte)": "2026-09-14T03:00:00.000Z",
+    };
+
+    async function seedBoundaryFixtures(): Promise<StoneMemoryRepository> {
+      const repo = new StoneMemoryRepository();
+      await repo.upsertNormalizedTransactions(Object.entries(CAPTURED_AT_SP).map(([label, capturedAt]) => transaction({ externalKey: label, capturedAt })));
+      return repo;
+    }
+
+    it("dia comercial 13/09 (SP) inclui TODAS as vendas de 00:00 a 23:59:59 em SP, mesmo as que já são 14/09 em UTC", async () => {
+      const repo = await seedBoundaryFixtures();
+      const rows = await repo.listNormalizedTransactionsByCapturedDateRange("2026-09-13", "2026-09-13");
+      expect(rows.map((r) => r.externalKey).sort()).toEqual(
+        ["00:00:00 SP (13/09)", "12:00:00 SP (13/09, meio do dia)", "20:59:59 SP (13/09)", "21:00:00 SP (13/09) — vira 14/09 em UTC", "23:59:59 SP (13/09) — vira 14/09 em UTC"].sort(),
+      );
+    });
+
+    it("dia comercial 14/09 (SP) traz só a venda das 00:00 SP do dia 14 — nunca as de 21h-23h59 SP do dia 13", async () => {
+      const repo = await seedBoundaryFixtures();
+      const rows = await repo.listNormalizedTransactionsByCapturedDateRange("2026-09-14", "2026-09-14");
+      expect(rows.map((r) => r.externalKey)).toEqual(["00:00:00 SP (14/09, dia seguinte)"]);
+    });
+
+    it("nenhuma venda aparece em dois dias comerciais (13/09 e 14/09 são particoes disjuntas e completas)", async () => {
+      const repo = await seedBoundaryFixtures();
+      const day13 = await repo.listNormalizedTransactionsByCapturedDateRange("2026-09-13", "2026-09-13");
+      const day14 = await repo.listNormalizedTransactionsByCapturedDateRange("2026-09-14", "2026-09-14");
+      const combined = [...day13, ...day14].map((r) => r.externalKey);
+      expect(new Set(combined).size).toBe(combined.length);
+      expect(combined.sort()).toEqual(Object.keys(CAPTURED_AT_SP).sort());
+    });
+  });
+
   describe("Missão 69 — correlação cross-day (findNormalizedTransactionsByAcquirerKeyAndInstallment / updateSettlementInfo)", () => {
     it("encontra por acquirerTransactionKey + installmentNumber, ignora installment diferente", async () => {
       const repo = new StoneMemoryRepository();

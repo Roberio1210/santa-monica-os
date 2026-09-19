@@ -2,7 +2,7 @@ import "server-only";
 import { getBankStatementRepository } from "@/lib/finance/bankStatement/repository-factory";
 import { reconcileDailyStoneSettlement, type StoneSettlementReconciliationRow } from "@/lib/finance/bankStatement/stoneSettlementReconciliation";
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
-import { addDaysIso } from "@/lib/utils/timezone";
+import { addDaysIso, saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
  * Missão Financeiro V6.2 (Fases 3/7/8) — orquestra I/O (busca vendas Stone + linhas do extrato já
@@ -22,7 +22,8 @@ export async function fetchStoneSettlementReconciliation(financialAccountId: str
   const salesByDate = new Map<string, { grossCents: number; mdrCents: number; netCents: number }>();
   for (const t of transactions) {
     if (t.eventType !== "sale") continue;
-    const date = t.capturedAt.slice(0, 10);
+    // Missão 80 — dia comercial em America/Sao_Paulo, nunca o dia UTC bruto do ISO string.
+    const date = saoPauloDateISO(new Date(t.capturedAt));
     const acc = salesByDate.get(date) ?? { grossCents: 0, mdrCents: 0, netCents: 0 };
     acc.grossCents += Math.round(t.grossAmount * 100);
     acc.mdrCents += Math.round((t.mdrAmountStone ?? t.feeAmount) * 100);

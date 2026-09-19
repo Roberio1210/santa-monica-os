@@ -1,5 +1,6 @@
 import type { StoneNormalizedTransactionRecord } from "@/lib/integrations/stone/persistence/types";
 import { mapStoneBrandIdToFeeTableBrand, type StoneFeeTableBrand } from "@/lib/integrations/stone/feeTable";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 /**
  * Missão Financeiro V6/V6.1 — custo real Stone por venda (MDR + antecipação D+1 + outras taxas).
@@ -359,12 +360,12 @@ export interface StoneCostDailyRow extends StoneCostFigures {
   date: string;
 }
 
-/** Uma linha por dia de venda (`capturedAt` local, primeiros 10 caracteres do ISO), ordenada cronologicamente. Só considera `eventType === "sale"`. */
+/** Uma linha por dia de venda (dia comercial em America/Sao_Paulo, Missão 80 — `capturedAt` é UTC, nunca local), ordenada cronologicamente. Só considera `eventType === "sale"`. */
 export function buildDailyCostBreakdown(records: StoneNormalizedTransactionRecord[]): StoneCostDailyRow[] {
   const byDate = new Map<string, CostAccumulator>();
   for (const r of records) {
     if (r.eventType !== "sale") continue;
-    const date = r.capturedAt.slice(0, 10);
+    const date = saoPauloDateISO(new Date(r.capturedAt));
     const acc = byDate.get(date) ?? newAccumulator();
     accumulate(acc, r);
     byDate.set(date, acc);

@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { saoPauloDateISO } from "@/lib/utils/timezone";
 import type { StonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository";
 import type {
   AssignPaymentGroupResult,
@@ -130,9 +131,10 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     return [...this.normalizedTransactions.values()].filter((r) => r.settledPaymentDate !== null && r.settledPaymentDate >= fromDate && r.settledPaymentDate <= toDate);
   }
 
+  /** Missão 80 — dia comercial em America/Sao_Paulo, nunca o dia UTC bruto do ISO string (mesmo padrão de `planning/postgres-repository.ts::listAppointmentsInRange`). */
   async listNormalizedTransactionsByCapturedDateRange(fromDate: string, toDate: string): Promise<StoneNormalizedTransactionRecord[]> {
     return [...this.normalizedTransactions.values()].filter((r) => {
-      const capturedDate = r.capturedAt.slice(0, 10);
+      const capturedDate = saoPauloDateISO(new Date(r.capturedAt));
       return capturedDate >= fromDate && capturedDate <= toDate;
     });
   }

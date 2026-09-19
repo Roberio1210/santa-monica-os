@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, comparePeriodValues, isValidIsoDate, parsePeriodParams, previousPeriodOf, resolvePeriod, saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
+import { addDaysIso, comparePeriodValues, isValidIsoDate, parsePeriodParams, previousPeriodOf, resolvePeriod, saoPauloDateISO, saoPauloTimeHM, startOfSaoPauloDayUtc } from "@/lib/utils/timezone";
 
 describe("saoPauloDateISO", () => {
   it("converte um instante UTC tarde da noite (já virado para o dia seguinte em UTC) para a data correta em SP", () => {
@@ -19,6 +19,37 @@ describe("saoPauloTimeHM", () => {
   it("formata HH:mm no fuso de SP", () => {
     const utcInstant = new Date("2026-07-18T23:05:00.000Z");
     expect(saoPauloTimeHM(utcInstant)).toBe("20:05");
+  });
+});
+
+describe("startOfSaoPauloDayUtc — Missão 80", () => {
+  it("00:00:00 em SP corresponde a 03:00:00 UTC do mesmo dia", () => {
+    expect(startOfSaoPauloDayUtc("2026-09-13").toISOString()).toBe("2026-09-13T03:00:00.000Z");
+  });
+
+  it("usado como início de intervalo semiaberto: uma venda das 00:00:00 SP cai dentro do dia (>= início)", () => {
+    const capturedAt = new Date("2026-09-13T03:00:00.000Z"); // 00:00:00 SP
+    expect(capturedAt.getTime()).toBeGreaterThanOrEqual(startOfSaoPauloDayUtc("2026-09-13").getTime());
+  });
+
+  it("usado como fim (exclusivo) de intervalo: uma venda das 20:59:59 SP fica ANTES do início do dia seguinte", () => {
+    const capturedAt = new Date("2026-09-13T23:59:59.000Z"); // 20:59:59 SP
+    expect(capturedAt.getTime()).toBeLessThan(startOfSaoPauloDayUtc("2026-09-14").getTime());
+  });
+
+  it("usado como fim (exclusivo) de intervalo: uma venda das 21:00:00 SP (já 14/09 em UTC) AINDA fica antes do início do dia 14 em SP", () => {
+    const capturedAt = new Date("2026-09-14T00:00:00.000Z"); // 21:00:00 SP do dia 13
+    expect(capturedAt.getTime()).toBeLessThan(startOfSaoPauloDayUtc("2026-09-14").getTime());
+  });
+
+  it("usado como fim (exclusivo) de intervalo: uma venda das 23:59:59 SP (já 14/09 em UTC) AINDA fica antes do início do dia 14 em SP", () => {
+    const capturedAt = new Date("2026-09-14T02:59:59.000Z"); // 23:59:59 SP do dia 13
+    expect(capturedAt.getTime()).toBeLessThan(startOfSaoPauloDayUtc("2026-09-14").getTime());
+  });
+
+  it("uma venda das 00:00:00 SP do dia seguinte NÃO fica antes do início do dia 14 — pertence ao dia 14, não ao 13", () => {
+    const capturedAt = new Date("2026-09-14T03:00:00.000Z"); // 00:00:00 SP do dia 14
+    expect(capturedAt.getTime()).toBeGreaterThanOrEqual(startOfSaoPauloDayUtc("2026-09-14").getTime());
   });
 });
 

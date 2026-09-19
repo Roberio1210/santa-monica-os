@@ -284,6 +284,14 @@ describe("buildDailyCostBreakdown", () => {
     expect(daily[0].installmentRowsCount).toBe(2);
     expect(daily[1].grossAmountTotal).toBe(100);
   });
+
+  it("Missão 80 — agrupa pelo dia comercial em America/Sao_Paulo, nunca pelo dia UTC do timestamp", () => {
+    // 21:00:00 em SP (13/09) já é 00:00:00 do dia 14 em UTC — o dia comercial da venda é 13/09.
+    const records = [makeRecord({ capturedAt: "2026-09-14T00:00:00.000Z", grossAmount: 100, feeAmount: 3 }), makeRecord({ capturedAt: "2026-09-13T15:00:00.000Z", grossAmount: 50, feeAmount: 1.5 })];
+    const daily = buildDailyCostBreakdown(records);
+    expect(daily.map((d) => d.date)).toEqual(["2026-09-13"]);
+    expect(daily[0].grossAmountTotal).toBe(150);
+  });
 });
 
 describe("findWorstCostDay / findBestCostDay", () => {
