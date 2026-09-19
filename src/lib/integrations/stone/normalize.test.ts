@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseConciliationXml } from "@/lib/integrations/stone/xml";
-import { formatStoneDate, normalizeConciliation } from "@/lib/integrations/stone/normalize";
+import { formatStoneDate, normalizeConciliation, normalizePaymentId } from "@/lib/integrations/stone/normalize";
 import { OFFICIAL_SAMPLE_XML } from "@/lib/integrations/stone/__fixtures__/official-sample";
 
 function normalizedSample() {
@@ -19,6 +19,21 @@ describe("formatStoneDate — Sprint 7.0, Z2", () => {
 
   it("formato desconhecido devolve o valor como veio, nunca lança", () => {
     expect(formatStoneDate("abc")).toBe("abc");
+  });
+});
+
+describe("normalizePaymentId — Missão 81", () => {
+  it("preserva a identidade real sem transformar", () => {
+    expect(normalizePaymentId("PAY-REAL-01")).toBe("PAY-REAL-01");
+  });
+
+  it("faz trim de espaços em volta", () => {
+    expect(normalizePaymentId("  PAY-REAL-01  ")).toBe("PAY-REAL-01");
+  });
+
+  it("string vazia após trim = ausência (null), nunca fallback", () => {
+    expect(normalizePaymentId("")).toBeNull();
+    expect(normalizePaymentId("   ")).toBeNull();
   });
 });
 
@@ -84,6 +99,12 @@ describe("normalizeConciliation — teste 1 (arquivo oficial completo, fixture d
     const n = normalizedSample();
     expect(n.advances).toHaveLength(1);
     expect(n.advances[0]).toMatchObject({ saleExternalReference: "NSU-ANON-0003", advanceFeeAmount: 1.5, settledPaymentDate: "2026-07-23" });
+  });
+
+  it("Missão 81 — paymentId é preservado do XML até NormalizedSettlement (antes descartado por settlementsFromAccountTransaction)", () => {
+    const n = normalizedSample();
+    expect(n.settlements).toHaveLength(1);
+    expect(n.settlements[0]).toMatchObject({ saleExternalReference: "NSU-ANON-0003", installmentNumber: 1, netAmount: 95.5, paymentId: "PAY-ANON-01" });
   });
 
   it("teste 13 — pagamento realizado só conta quando Payment.Id está presente", () => {

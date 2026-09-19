@@ -2,18 +2,26 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { StonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository";
 import type {
+  AssignPaymentGroupResult,
   FinishImportRunInput,
+  PaymentGroupConflictField,
   StartImportRunInput,
   StoneDivergenceRecord,
   StoneDivergenceRow,
   StoneFileLayout,
   StoneImportRun,
   StoneNormalizedTransactionRecord,
+  StonePaymentGroupRecord,
   StoneReconciliationResultRecord,
   StoneReconciliationResultRow,
   StoneReviewStatus,
   UpdateDivergenceReviewInput,
+  UpsertPaymentGroupsResult,
 } from "@/lib/integrations/stone/persistence/types";
+
+interface StoredPaymentGroup extends StonePaymentGroupRecord {
+  id: string;
+}
 
 /**
  * Implementação em memória (não persistente entre reinícios do processo) — usada quando
@@ -24,6 +32,7 @@ import type {
 export class StoneMemoryRepository implements StonePersistenceRepository {
   private importRuns = new Map<string, StoneImportRun>();
   private normalizedTransactions = new Map<string, StoneNormalizedTransactionRecord>();
+  private paymentGroups = new Map<string, StoredPaymentGroup>(); // por payment_id
   private reconciliationResults = new Map<string, StoneReconciliationResultRow>();
   private divergences = new Map<string, StoneDivergenceRow>();
 
@@ -141,6 +150,53 @@ export class StoneMemoryRepository implements StonePersistenceRepository {
     if (!existing || existing.settledPaymentDate !== null) return false;
     this.normalizedTransactions.set(externalKey, { ...existing, settledPaymentDate, settledAmount });
     return true;
+  }
+
+  async upsertPaymentGroups(groups: StonePaymentGroupRecord[]): Promise<UpsertPaymentGroupsResult> {
+    const idByPaymentId: Record<string, string> = {};
+    const conflicts: { paymentId: string; fields: PaymentGroupConflictField[] }[] = [];
+
+    for (const group of groups) {
+      const existing = this.paymentGroups.get(group.paymentId);
+      if (!existing) {
+        const id = randomUUID();
+        this.paymentGroups.set(group.paymentId, { ...group, id });
+        idByPaymentId[group.paymentId] = id;
+        continue;
+      }
+
+      const fields: PaymentGroupConflictField[] = [];
+      if (existing.paymentDate !== group.paymentDate) fields.push("payment_date");
+      if (Math.abs(existing.totalAmount - group.totalAmount) > 0.005) fields.push("total_amount");
+      if (existing.walletTypeId !== null && group.walletTypeId !== null && existing.walletTypeId !== group.walletTypeId) fields.push("wallet_type_id");
+
+      if (fields.length > 0) {
+        conflicts.push({ paymentId: group.paymentId, fields });
+        continue;
+      }
+
+      // Compatível — reutiliza o id existente; walletTypeId só é preenchido aditivamente
+      // (nunca sobrescreve um valor já presente); sourceFile/importRunId preservam a origem
+      // original, nunca são trocados por um upsert posterior.
+      if (existing.walletTypeId === null && group.walletTypeId !== null) {
+        this.paymentGroups.set(group.paymentId, { ...existing, walletTypeId: group.walletTypeId });
+      }
+      idByPaymentId[group.paymentId] = existing.id;
+    }
+
+    return { idByPaymentId, conflicts };
+  }
+
+  async assignPaymentGroup(externalKey: string, paymentGroupId: string): Promise<AssignPaymentGroupResult> {
+    const existing = this.normalizedTransactions.get(externalKey);
+    if (!existing) return "conflict"; // venda inexistente — nunca deveria ser chamado assim, tratado como não-atribuível
+    const current = existing.paymentGroupId ?? null;
+    if (current === null) {
+      this.normalizedTransactions.set(externalKey, { ...existing, paymentGroupId });
+      return "assigned";
+    }
+    if (current === paymentGroupId) return "same_group";
+    return "conflict";
   }
 
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {

@@ -27,7 +27,7 @@ function expectedPayment(overrides: Partial<NormalizedExpectedPayment> = {}): No
 }
 
 function settlement(overrides: Partial<NormalizedSettlement> = {}): NormalizedSettlement {
-  return { saleExternalReference: "NSU-1", installmentNumber: 1, netAmount: 97, settledPaymentDate: "2026-07-25", isAdvance: false, ...overrides };
+  return { saleExternalReference: "NSU-1", installmentNumber: 1, netAmount: 97, settledPaymentDate: "2026-07-25", isAdvance: false, paymentId: null, ...overrides };
 }
 
 describe("buildFinancialSchedule — Sprint 7.0, Z3, Agenda Financeira própria (decisão do usuário)", () => {

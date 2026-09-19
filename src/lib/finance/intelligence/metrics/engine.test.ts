@@ -201,7 +201,7 @@ describe("computeFinancialMetrics — integração completa", () => {
         { saleExternalReference: "s2", installmentNumber: 1, grossAmount: 50, amount: 48, expectedPaymentDate: "2026-07-02" }, // vencido, sem liquidação
         { saleExternalReference: "s3", installmentNumber: 1, grossAmount: 30, amount: 29, expectedPaymentDate: "2026-07-01" }, // liquidado
       ],
-      settlements: [{ saleExternalReference: "s3", installmentNumber: 1, netAmount: 29, settledPaymentDate: "2026-07-01", isAdvance: false }],
+      settlements: [{ saleExternalReference: "s3", installmentNumber: 1, netAmount: 29, settledPaymentDate: "2026-07-01", isAdvance: false, paymentId: null }],
     });
     const metrics = computeFinancialMetrics(periodInput([d]));
     expect(metrics.pendingReceivablesAmount).toBe(97);
@@ -218,8 +218,8 @@ describe("computeFinancialMetrics — integração completa", () => {
         { saleExternalReference: "s2", installmentNumber: 1, grossAmount: 50, amount: 48, expectedPaymentDate: "2026-07-01" },
       ],
       settlements: [
-        { saleExternalReference: "s1", installmentNumber: 1, netAmount: 95, settledPaymentDate: "2026-07-02", isAdvance: true },
-        { saleExternalReference: "s2", installmentNumber: 1, netAmount: 48, settledPaymentDate: "2026-07-01", isAdvance: false },
+        { saleExternalReference: "s1", installmentNumber: 1, netAmount: 95, settledPaymentDate: "2026-07-02", isAdvance: true, paymentId: null },
+        { saleExternalReference: "s2", installmentNumber: 1, netAmount: 48, settledPaymentDate: "2026-07-01", isAdvance: false, paymentId: null },
       ],
     });
     const metrics = computeFinancialMetrics(periodInput([d]));

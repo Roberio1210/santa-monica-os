@@ -108,7 +108,45 @@ export interface StoneNormalizedTransactionRecord {
   advanceFeeAmountStone: number | null;
   sourceFile: string;
   importRunId: string | null;
+  /**
+   * Missão 81 — id interno (`stone_payment_groups.id`) do grupo de repasse ao qual esta parcela
+   * pertence, resolvido separadamente por `applyPaymentGroupAssignments` (nunca neste registro
+   * na hora do upsert inicial — o grupo precisa existir primeiro). Opcional para nunca quebrar
+   * fixtures/testes existentes que constroem este tipo sem o campo; `undefined`/ausente é
+   * tratado exatamente como `null` (nenhum grupo atribuído ainda).
+   */
+  paymentGroupId?: string | null;
 }
+
+/**
+ * Missão 81 — grupo de repasse bancário Stone (`stone_payment_groups`), identidade real
+ * comprovada com dado real na Missão 77 (`payment_id` = `Payments[].Id`, único). `totalAmount`
+ * é sempre o valor OFICIAL de `Payments[].TotalAmount` — nunca uma soma calculada por nós.
+ */
+export interface StonePaymentGroupRecord {
+  paymentId: string;
+  paymentDate: string;
+  totalAmount: number;
+  walletTypeId: number | null;
+  sourceFile: string;
+  importRunId: string | null;
+}
+
+/** Campo que impediu o upsert de reutilizar/atualizar um grupo já existente — nunca escolhido arbitrariamente, sempre reportado. */
+export type PaymentGroupConflictField = "payment_date" | "total_amount" | "wallet_type_id";
+
+export interface PaymentGroupUpsertConflict {
+  paymentId: string;
+  fields: PaymentGroupConflictField[];
+}
+
+export interface UpsertPaymentGroupsResult {
+  /** `paymentId` real -> id interno persistido. Nunca inclui `paymentId`s em conflito. */
+  idByPaymentId: Record<string, string>;
+  conflicts: PaymentGroupUpsertConflict[];
+}
+
+export type AssignPaymentGroupResult = "assigned" | "same_group" | "conflict";
 
 export type StoneMatchConfidence = "high" | "medium" | "low";
 

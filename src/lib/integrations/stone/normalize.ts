@@ -114,6 +114,13 @@ export interface NormalizedSettlement {
   netAmount: number;
   settledPaymentDate: string;
   isAdvance: boolean;
+  /**
+   * Missão 81 — `StoneAccountInstallment.paymentId` preservado (Missão 76 encontrou que era
+   * descartado aqui; Missão 77 comprovou com dado real que é a identidade correta do grupo de
+   * liquidação — nunca data+valor). `null` quando ausente no XML — nunca um fallback artificial
+   * (nem hash, nem `saleExternalReference`, nem combinação de data+valor).
+   */
+  paymentId: string | null;
 }
 
 /**
@@ -201,6 +208,12 @@ function advancesFromAccountTransaction(tx: StoneAccountTransaction): Normalized
     }));
 }
 
+/** Missão 81 — `str()` (`xml.ts`) nunca devolve `null` para campo ausente, só `""`; trim + string vazia = ausência, nunca transformado em outra coisa. */
+export function normalizePaymentId(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function settlementsFromAccountTransaction(tx: StoneAccountTransaction): NormalizedSettlement[] {
   return tx.installments.map((i) => ({
     saleExternalReference: tx.acquirerTransactionKey,
@@ -208,6 +221,7 @@ function settlementsFromAccountTransaction(tx: StoneAccountTransaction): Normali
     netAmount: i.netAmount,
     settledPaymentDate: formatStoneDate(i.paymentDate),
     isAdvance: i.advanceRateAmount !== null,
+    paymentId: normalizePaymentId(i.paymentId),
   }));
 }
 

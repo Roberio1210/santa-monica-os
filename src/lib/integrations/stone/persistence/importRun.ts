@@ -6,6 +6,7 @@ import { buildNormalizedTransactionRecords, hashNormalizedConciliation } from "@
 import { getStonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository-factory";
 import type { StonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository";
 import { resolveCrossDaySettlement } from "@/lib/integrations/stone/persistence/crossDaySettlement";
+import { buildPaymentGroupsForDay } from "@/lib/integrations/stone/persistence/paymentGroups";
 import { buildDivergenceNaturalKey, buildReconciliationNaturalKey, type StoneDivergenceRecord, type StoneReconciliationResultRecord } from "@/lib/integrations/stone/persistence/types";
 import type { NormalizedConciliation } from "@/lib/integrations/stone/normalize";
 import type { StoneFinancialEvent } from "@/lib/integrations/stone/types";
@@ -66,6 +67,14 @@ export interface SyncStonePeriodResult {
   crossDaySettlementsResolved: number;
   /** Missão 69 — identidade bateu mas ficou ambígua (múltiplos candidatos) ou o valor não bateu — nunca gravado, só reportado para investigação humana. */
   crossDaySettlementConflicts: number;
+  /** Missão 81 (FASE 2) — grupos de repasse (`stone_payment_groups`) novos ou reutilizados neste período. */
+  paymentGroupsUpserted: number;
+  /** Missão 81 — `paymentId` com metadata incompatível com um grupo já existente, ou sem `Payments[].TotalAmount` correspondente — nunca escrito, só reportado. */
+  paymentGroupConflicts: number;
+  /** Missão 81 — vendas associadas a um `payment_group_id` neste período (novas atribuições, nunca reatribuições). */
+  paymentGroupAssignments: number;
+  /** Missão 81 — venda que já pertencia a outro grupo — nunca reatribuída, só reportada. */
+  paymentGroupAssignmentConflicts: number;
 }
 
 /**
@@ -103,6 +112,41 @@ export async function applyCrossDaySettlements(day: NormalizedConciliation, repo
 }
 
 /**
+ * Missão 81 (FASE 2) — associa vendas já persistidas (deste dia ou de dias anteriores, via a
+ * mesma identidade `acquirerTransactionKey`+`installmentNumber` já usada por
+ * `findNormalizedTransactionsByAcquirerKeyAndInstallment`) aos grupos de repasse (`paymentId`)
+ * já upsertados neste ciclo. Roda depois de `upsertNormalizedTransactions`/
+ * `applyCrossDaySettlements` — a venda precisa existir persistida antes de poder receber a FK.
+ * Nunca cria `cash_movement`, nunca concilia `bank_statement_lines`, nunca sobrescreve um
+ * `payment_group_id` já preenchido (ver `assignPaymentGroup`, guarda `IS NULL`).
+ */
+export async function applyPaymentGroupAssignments(day: NormalizedConciliation, paymentIdToGroupId: Map<string, string>, repo: StonePersistenceRepository): Promise<{ assigned: number; conflicts: number }> {
+  let assigned = 0;
+  let conflicts = 0;
+  const alreadyAttempted = new Set<string>();
+
+  for (const settlement of day.settlements) {
+    if (settlement.paymentId === null) continue; // sem identidade -> nunca associa (nunca fallback)
+    const groupId = paymentIdToGroupId.get(settlement.paymentId);
+    if (!groupId) continue; // grupo não formado neste ciclo (conflito na Parte D) -> nunca associa
+
+    const candidates = await repo.findNormalizedTransactionsByAcquirerKeyAndInstallment(settlement.saleExternalReference, settlement.installmentNumber);
+    if (candidates.length !== 1) continue; // 0 ou >1 candidato -> sem associação determinística
+
+    const externalKey = candidates[0].externalKey;
+    if (alreadyAttempted.has(externalKey)) continue; // mesma venda referenciada por mais de um settlement do dia -> só tenta uma vez
+    alreadyAttempted.add(externalKey);
+
+    const result = await repo.assignPaymentGroup(externalKey, groupId);
+    if (result === "assigned") assigned += 1;
+    else if (result === "conflict") conflicts += 1;
+    // "same_group" é idempotente — nem soma nem conflito, mesmo espírito de "already_settled" em applyCrossDaySettlements.
+  }
+
+  return { assigned, conflicts };
+}
+
+/**
  * Busca, normaliza e persiste o período solicitado (uma `stone_import_runs` por dia), depois
  * calcula e persiste conciliação Stone×JumpPark e divergências para o mesmo período. Nunca lança
  * — todo erro vira um `DayImportOutcome` honesto; uma falha isolada nunca interrompe os demais
@@ -120,6 +164,10 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
       limitations: ["STONE_API_KEY/STONE_ACCOUNT_ID ausentes."],
       crossDaySettlementsResolved: 0,
       crossDaySettlementConflicts: 0,
+      paymentGroupsUpserted: 0,
+      paymentGroupConflicts: 0,
+      paymentGroupAssignments: 0,
+      paymentGroupAssignmentConflicts: 0,
     };
   }
 
@@ -132,6 +180,10 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
   let transactionsPersisted = 0;
   let crossDaySettlementsResolved = 0;
   let crossDaySettlementConflicts = 0;
+  let paymentGroupsUpserted = 0;
+  let paymentGroupConflicts = 0;
+  let paymentGroupAssignments = 0;
+  let paymentGroupAssignmentConflicts = 0;
 
   for (const dayResult of dayResults) {
     const run = await repo.startImportRun({
@@ -154,6 +206,19 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
       const crossDay = await applyCrossDaySettlements(dayResult.normalized, repo);
       crossDaySettlementsResolved += crossDay.resolved;
       crossDaySettlementConflicts += crossDay.conflicts;
+
+      // Missão 81 (FASE 2) — forma e persiste os grupos de repasse (`paymentId`) deste dia, e só
+      // então associa as vendas já persistidas (deste dia ou de dias anteriores) a cada grupo.
+      // Aditivo, nunca concilia `bank_statement_lines`, nunca cria `cash_movement`.
+      const { groups, conflicts: buildConflicts } = buildPaymentGroupsForDay(dayResult.normalized, run.id);
+      const upsertResult = await repo.upsertPaymentGroups(groups);
+      paymentGroupsUpserted += Object.keys(upsertResult.idByPaymentId).length;
+      paymentGroupConflicts += buildConflicts.length + upsertResult.conflicts.length;
+
+      const paymentIdToGroupId = new Map(Object.entries(upsertResult.idByPaymentId));
+      const assignment = await applyPaymentGroupAssignments(dayResult.normalized, paymentIdToGroupId, repo);
+      paymentGroupAssignments += assignment.assigned;
+      paymentGroupAssignmentConflicts += assignment.conflicts;
 
       const { prepaymentFeeAmount, prepaymentDisbursementAmount } = sumPrepaymentEvents(dayResult.normalized.financialEvents);
       await repo.finishImportRun({
@@ -224,5 +289,19 @@ export async function syncStonePeriod(input: SyncStonePeriodInput): Promise<Sync
   const allFailed = days.length > 0 && days.every((d) => d.status === "failed");
   const status: SyncStonePeriodStatus = allFailed ? "no_data" : anyFailed ? "partial" : "ok";
 
-  return { status, days, transactionsPersisted, reconciliationResultsPersisted, divergencesPersisted, dataAvailableThroughDate: availableThrough, limitations, crossDaySettlementsResolved, crossDaySettlementConflicts };
+  return {
+    status,
+    days,
+    transactionsPersisted,
+    reconciliationResultsPersisted,
+    divergencesPersisted,
+    dataAvailableThroughDate: availableThrough,
+    limitations,
+    crossDaySettlementsResolved,
+    crossDaySettlementConflicts,
+    paymentGroupsUpserted,
+    paymentGroupConflicts,
+    paymentGroupAssignments,
+    paymentGroupAssignmentConflicts,
+  };
 }

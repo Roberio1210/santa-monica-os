@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StoneMemoryRepository } from "@/lib/integrations/stone/persistence/memory-repository";
-import type { StoneDivergenceRecord, StoneNormalizedTransactionRecord, StoneReconciliationResultRecord } from "@/lib/integrations/stone/persistence/types";
+import type { StoneDivergenceRecord, StoneNormalizedTransactionRecord, StonePaymentGroupRecord, StoneReconciliationResultRecord } from "@/lib/integrations/stone/persistence/types";
 
 function transaction(overrides: Partial<StoneNormalizedTransactionRecord> = {}): StoneNormalizedTransactionRecord {
   return {
@@ -258,5 +258,75 @@ describe("StoneMemoryRepository — divergências (Sprint 7.0, Z4)", () => {
 
     const resolved = await repo.updateDivergenceReview({ id: row.id, status: "resolved" });
     expect(resolved.resolvedAt).not.toBeNull();
+  });
+});
+
+function paymentGroup(overrides: Partial<StonePaymentGroupRecord> = {}): StonePaymentGroupRecord {
+  return { paymentId: "PAY-1", paymentDate: "2026-09-13", totalAmount: 543.87, walletTypeId: 3, sourceFile: "test.xml", importRunId: "run-1", ...overrides };
+}
+
+describe("StoneMemoryRepository — grupos de repasse Stone (Missão 81, FASE 2)", () => {
+  it("upsertPaymentGroups: grupo novo -> INSERT, devolve id interno", async () => {
+    const repo = new StoneMemoryRepository();
+    const result = await repo.upsertPaymentGroups([paymentGroup()]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.idByPaymentId["PAY-1"]).toBeDefined();
+  });
+
+  it("16) upsert repetido com metadata IDÊNTICA -> reutiliza o id existente, nunca cria outro", async () => {
+    const repo = new StoneMemoryRepository();
+    const first = await repo.upsertPaymentGroups([paymentGroup()]);
+    const second = await repo.upsertPaymentGroups([paymentGroup()]);
+    expect(second.conflicts).toEqual([]);
+    expect(second.idByPaymentId["PAY-1"]).toBe(first.idByPaymentId["PAY-1"]);
+  });
+
+  it("17) upsert com paymentDate divergente do já existente -> conflito, nunca sobrescreve", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertPaymentGroups([paymentGroup({ paymentDate: "2026-09-13" })]);
+    const second = await repo.upsertPaymentGroups([paymentGroup({ paymentDate: "2026-09-14" })]);
+    expect(second.idByPaymentId["PAY-1"]).toBeUndefined();
+    expect(second.conflicts).toEqual([{ paymentId: "PAY-1", fields: ["payment_date"] }]);
+  });
+
+  it("10) upsert com totalAmount divergente do já existente -> conflito, nunca sobrescreve", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertPaymentGroups([paymentGroup({ totalAmount: 100 })]);
+    const second = await repo.upsertPaymentGroups([paymentGroup({ totalAmount: 999 })]);
+    expect(second.conflicts).toEqual([{ paymentId: "PAY-1", fields: ["total_amount"] }]);
+  });
+
+  it("walletTypeId: aditivo quando existente é null, nunca sobrescreve quando ambos preenchidos e diferentes", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertPaymentGroups([paymentGroup({ walletTypeId: null })]);
+    const second = await repo.upsertPaymentGroups([paymentGroup({ walletTypeId: 3 })]);
+    expect(second.conflicts).toEqual([]);
+
+    const third = await repo.upsertPaymentGroups([paymentGroup({ walletTypeId: 7 })]);
+    expect(third.conflicts).toEqual([{ paymentId: "PAY-1", fields: ["wallet_type_id"] }]);
+  });
+
+  it("assignPaymentGroup: venda NULL -> assigned", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertNormalizedTransactions([transaction({ externalKey: "a", paymentGroupId: null })]);
+    const result = await repo.assignPaymentGroup("a", "group-A");
+    expect(result).toBe("assigned");
+    expect((await repo.getNormalizedTransactionByExternalKey("a"))?.paymentGroupId).toBe("group-A");
+  });
+
+  it("assignPaymentGroup: mesma venda, mesmo grupo -> same_group, idempotente", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertNormalizedTransactions([transaction({ externalKey: "a", paymentGroupId: null })]);
+    await repo.assignPaymentGroup("a", "group-A");
+    const result = await repo.assignPaymentGroup("a", "group-A");
+    expect(result).toBe("same_group");
+  });
+
+  it("assignPaymentGroup: venda já em outro grupo -> conflict, nunca reatribuída", async () => {
+    const repo = new StoneMemoryRepository();
+    await repo.upsertNormalizedTransactions([transaction({ externalKey: "a", paymentGroupId: "group-OLD" })]);
+    const result = await repo.assignPaymentGroup("a", "group-NEW");
+    expect(result).toBe("conflict");
+    expect((await repo.getNormalizedTransactionByExternalKey("a"))?.paymentGroupId).toBe("group-OLD");
   });
 });

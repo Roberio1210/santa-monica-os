@@ -33,7 +33,7 @@ function conciliationWithSettlements(settlements: NormalizedSettlement[], refere
 }
 
 function settlement(overrides: Partial<NormalizedSettlement> = {}): NormalizedSettlement {
-  return { saleExternalReference: "ACQ-KEY-0001", installmentNumber: 1, netAmount: 9.888, settledPaymentDate: "2026-07-23", isAdvance: false, ...overrides };
+  return { saleExternalReference: "ACQ-KEY-0001", installmentNumber: 1, netAmount: 9.888, settledPaymentDate: "2026-07-23", isAdvance: false, paymentId: null, ...overrides };
 }
 
 function persistedSale(overrides: Partial<StoneNormalizedTransactionRecord> = {}): StoneNormalizedTransactionRecord {

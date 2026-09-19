@@ -5,21 +5,26 @@ import {
   stoneDivergences as stoneDivergencesTable,
   stoneImportRuns as stoneImportRunsTable,
   stoneNormalizedTransactions as stoneNormalizedTransactionsTable,
+  stonePaymentGroups as stonePaymentGroupsTable,
   stoneReconciliationResults as stoneReconciliationResultsTable,
 } from "@/db/schema/stone";
 import type { StonePersistenceRepository } from "@/lib/integrations/stone/persistence/repository";
 import type {
+  AssignPaymentGroupResult,
   FinishImportRunInput,
+  PaymentGroupConflictField,
   StartImportRunInput,
   StoneDivergenceRecord,
   StoneDivergenceRow,
   StoneFileLayout,
   StoneImportRun,
   StoneNormalizedTransactionRecord,
+  StonePaymentGroupRecord,
   StoneReconciliationResultRecord,
   StoneReconciliationResultRow,
   StoneReviewStatus,
   UpdateDivergenceReviewInput,
+  UpsertPaymentGroupsResult,
 } from "@/lib/integrations/stone/persistence/types";
 
 type ImportRunRow = typeof stoneImportRunsTable.$inferSelect;
@@ -83,6 +88,7 @@ function toNormalizedTransaction(row: NormalizedTransactionRow): StoneNormalized
     advanceFeeAmountStone: row.advanceFeeAmountStone !== null ? Number(row.advanceFeeAmountStone) : null,
     sourceFile: row.sourceFile,
     importRunId: row.importRunId,
+    paymentGroupId: row.paymentGroupId,
   };
 }
 
@@ -345,6 +351,83 @@ export class StonePostgresRepository implements StonePersistenceRepository {
       .where(and(eq(stoneNormalizedTransactionsTable.externalKey, externalKey), isNull(stoneNormalizedTransactionsTable.settledPaymentDate)))
       .returning({ externalKey: stoneNormalizedTransactionsTable.externalKey });
     return rows.length > 0;
+  }
+
+  async upsertPaymentGroups(groups: StonePaymentGroupRecord[]): Promise<UpsertPaymentGroupsResult> {
+    const idByPaymentId: Record<string, string> = {};
+    const conflicts: { paymentId: string; fields: PaymentGroupConflictField[] }[] = [];
+    if (groups.length === 0) return { idByPaymentId, conflicts };
+
+    const db = this.db();
+    for (const group of groups) {
+      // ON CONFLICT (payment_id) DO UPDATE ... WHERE — só atualiza (e devolve linha) quando
+      // payment_date/total_amount/wallet_type_id do que já existe são compatíveis com o novo
+      // dado; se a WHERE falhar, a linha existente fica intocada e nada é devolvido (nunca um
+      // erro) — exatamente o comportamento nativo do Postgres para essa cláusula.
+      const [row] = await db
+        .insert(stonePaymentGroupsTable)
+        .values({
+          paymentId: group.paymentId,
+          paymentDate: group.paymentDate,
+          totalAmount: String(group.totalAmount),
+          walletTypeId: group.walletTypeId,
+          sourceFile: group.sourceFile,
+          importRunId: group.importRunId,
+        })
+        .onConflictDoUpdate({
+          target: stonePaymentGroupsTable.paymentId,
+          set: {
+            walletTypeId: group.walletTypeId !== null ? sql`coalesce(${stonePaymentGroupsTable.walletTypeId}, ${group.walletTypeId})` : sql`${stonePaymentGroupsTable.walletTypeId}`,
+            updatedAt: new Date(),
+          },
+          // Passar um `null` como parâmetro numa comparação (`$n is null`) deixa o Postgres sem
+          // como inferir o tipo do parâmetro numa prepared statement ("could not determine data
+          // type of parameter") — por isso a cláusula do wallet_type_id só entra no SQL quando o
+          // valor recebido é realmente um número; quando é `null`, a condição já é sempre
+          // verdadeira (nunca bloqueia por causa de um campo que nem chegou preenchido).
+          setWhere:
+            group.walletTypeId !== null
+              ? sql`${stonePaymentGroupsTable.paymentDate} = ${group.paymentDate}
+                and ${stonePaymentGroupsTable.totalAmount} = ${String(group.totalAmount)}
+                and (${stonePaymentGroupsTable.walletTypeId} is null or ${stonePaymentGroupsTable.walletTypeId} = ${group.walletTypeId})`
+              : sql`${stonePaymentGroupsTable.paymentDate} = ${group.paymentDate}
+                and ${stonePaymentGroupsTable.totalAmount} = ${String(group.totalAmount)}`,
+        })
+        .returning({ id: stonePaymentGroupsTable.id });
+
+      if (row) {
+        idByPaymentId[group.paymentId] = row.id;
+        continue;
+      }
+
+      // WHERE não bateu -> grupo já existe com metadata incompatível. Busca o existente só para
+      // relatar exatamente quais campos divergem (nunca para decidir sobrescrever).
+      const [existing] = await db.select().from(stonePaymentGroupsTable).where(eq(stonePaymentGroupsTable.paymentId, group.paymentId)).limit(1);
+      const fields: PaymentGroupConflictField[] = [];
+      if (existing) {
+        if (existing.paymentDate !== group.paymentDate) fields.push("payment_date");
+        if (Math.abs(Number(existing.totalAmount) - group.totalAmount) > 0.005) fields.push("total_amount");
+        if (existing.walletTypeId !== null && group.walletTypeId !== null && existing.walletTypeId !== group.walletTypeId) fields.push("wallet_type_id");
+      }
+      conflicts.push({ paymentId: group.paymentId, fields });
+    }
+
+    return { idByPaymentId, conflicts };
+  }
+
+  async assignPaymentGroup(externalKey: string, paymentGroupId: string): Promise<AssignPaymentGroupResult> {
+    const db = this.db();
+    const [updated] = await db
+      .update(stoneNormalizedTransactionsTable)
+      .set({ paymentGroupId, updatedAt: new Date() })
+      .where(and(eq(stoneNormalizedTransactionsTable.externalKey, externalKey), isNull(stoneNormalizedTransactionsTable.paymentGroupId)))
+      .returning({ externalKey: stoneNormalizedTransactionsTable.externalKey });
+
+    if (updated) return "assigned";
+
+    const [row] = await db.select({ paymentGroupId: stoneNormalizedTransactionsTable.paymentGroupId }).from(stoneNormalizedTransactionsTable).where(eq(stoneNormalizedTransactionsTable.externalKey, externalKey)).limit(1);
+    if (row?.paymentGroupId === paymentGroupId) return "same_group";
+    return "conflict";
   }
 
   async upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void> {

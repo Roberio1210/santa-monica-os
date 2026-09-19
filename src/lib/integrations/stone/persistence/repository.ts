@@ -1,4 +1,5 @@
 import type {
+  AssignPaymentGroupResult,
   FinishImportRunInput,
   StartImportRunInput,
   StoneDivergenceRecord,
@@ -6,10 +7,12 @@ import type {
   StoneFileLayout,
   StoneImportRun,
   StoneNormalizedTransactionRecord,
+  StonePaymentGroupRecord,
   StoneReconciliationResultRecord,
   StoneReconciliationResultRow,
   StoneReviewStatus,
   UpdateDivergenceReviewInput,
+  UpsertPaymentGroupsResult,
 } from "@/lib/integrations/stone/persistence/types";
 
 /**
@@ -51,6 +54,22 @@ export interface StonePersistenceRepository {
    * a guarda impediu a escrita (linha não encontrada, ou já tinha liquidação).
    */
   updateSettlementInfo(externalKey: string, settledPaymentDate: string, settledAmount: number): Promise<boolean>;
+
+  /**
+   * Missão 81 — upsert de grupos de repasse Stone por `paymentId` (identidade real, Missão 77).
+   * Nunca sobrescreve `paymentDate`/`totalAmount` incompatíveis com o que já existe para o mesmo
+   * `paymentId` (vira conflito, reportado, nunca escolhido arbitrariamente); `walletTypeId` só é
+   * preenchido de forma aditiva quando o existente é `null`. `sourceFile`/`importRunId` nunca são
+   * atualizados num grupo já existente — preservam a origem real de quando o grupo nasceu.
+   */
+  upsertPaymentGroups(groups: StonePaymentGroupRecord[]): Promise<UpsertPaymentGroupsResult>;
+  /**
+   * Missão 81 — associa uma venda já persistida (`externalKey`) a um grupo de repasse, só quando
+   * `paymentGroupId` ainda está `null`. Devolve `"assigned"` (associação nova), `"same_group"`
+   * (idempotente — já era esse grupo) ou `"conflict"` (já pertencia a outro grupo — nunca
+   * reatribuído).
+   */
+  assignPaymentGroup(externalKey: string, paymentGroupId: string): Promise<AssignPaymentGroupResult>;
 
   /** Upsert em lote por `naturalKey` — reprocessar o mesmo período nunca duplica um resultado. */
   upsertReconciliationResults(records: StoneReconciliationResultRecord[]): Promise<void>;
