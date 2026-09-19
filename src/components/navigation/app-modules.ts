@@ -44,6 +44,7 @@ import {
   FileText,
   GitMerge,
   Zap,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { isPathAllowedForRole } from "@/lib/auth/permissions";
@@ -156,6 +157,17 @@ export const APP_MODULES: AppModule[] = [
       { href: "/financeiro/stone-conciliacao", label: "Stone Conciliação", icon: Landmark },
       { href: "/financeiro/conta-stone", label: "Conta Stone (extrato)", icon: Wallet },
     ],
+  },
+  {
+    // Missão 86 — separado do Financeiro no menu (colaboradores/folha têm regras e sensibilidade
+    // de acesso diferentes de contas a pagar/receber), mas integrado aos dados financeiros: cada
+    // pagamento de pessoal referencia o cash_movement real, nunca duplica o lançamento.
+    id: "departamento-pessoal",
+    label: "Departamento Pessoal",
+    icon: Users,
+    href: "/departamento-pessoal",
+    matchPrefixes: [],
+    shortcuts: [],
   },
   {
     id: "estoque",

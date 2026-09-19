@@ -59,6 +59,11 @@ describe("isPathAllowedForRole — OPERACIONAL", () => {
     expect(isPathAllowedForRole("operacional", "/visao-geral")).toBe(false);
   });
 
+  it("16) Missão 86 (Departamento Pessoal) — /departamento-pessoal é BLOQUEADO por padrão (dados de folha/salário são sensíveis, nunca liberado sem decisão explícita)", () => {
+    expect(isPathAllowedForRole("operacional", "/departamento-pessoal")).toBe(false);
+    expect(isPathAllowedForRole("operacional", "/departamento-pessoal/colaboradores")).toBe(false);
+  });
+
   it("é BLOQUEADO em todas as rotas financeiras/administrativas listadas na missão", () => {
     for (const route of FINANCIAL_ROUTES) {
       expect(isPathAllowedForRole("operacional", route)).toBe(false);
