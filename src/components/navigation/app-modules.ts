@@ -1,4 +1,5 @@
 import {
+  Home,
   LayoutDashboard,
   Wrench,
   Gauge,
@@ -90,6 +91,17 @@ export interface AppModule {
  * importado por `sidebar.tsx`). Nenhuma rota antiga foi apagada ou renomeada — só reagrupada.
  */
 export const APP_MODULES: AppModule[] = [
+  {
+    // Missão 82 (VG1) — nova central operacional, ainda em paralelo com "Central de Operações"
+    // (/dashboard): esta missão não remove nem redireciona a home para cá, só disponibiliza a
+    // nova página para validação separada.
+    id: "visao-geral",
+    label: "Visão Geral",
+    icon: Home,
+    href: "/visao-geral",
+    matchPrefixes: [],
+    shortcuts: [],
+  },
   {
     id: "central-operacoes",
     label: "Central de Operações",

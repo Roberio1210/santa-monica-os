@@ -55,6 +55,10 @@ describe("isPathAllowedForRole — ADMIN", () => {
 });
 
 describe("isPathAllowedForRole — OPERACIONAL", () => {
+  it("Missão 82 (VG1) — /visao-geral é BLOQUEADO por padrão (default-deny), nunca liberado sem decisão explícita", () => {
+    expect(isPathAllowedForRole("operacional", "/visao-geral")).toBe(false);
+  });
+
   it("é BLOQUEADO em todas as rotas financeiras/administrativas listadas na missão", () => {
     for (const route of FINANCIAL_ROUTES) {
       expect(isPathAllowedForRole("operacional", route)).toBe(false);
