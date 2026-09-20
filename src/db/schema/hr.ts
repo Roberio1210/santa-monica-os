@@ -174,6 +174,12 @@ export const employeeAdvances = pgTable("employee_advances", {
   compensatedAt: date("compensated_at"),
   cashMovementId: uuid("cash_movement_id").references(() => cashMovements.id),
   employeePaymentId: uuid("employee_payment_id").references(() => employeePayments.id),
+  /**
+   * Fase 6 do Departamento Pessoal (20/09/2026) — mesma garantia real de idempotência no banco já
+   * usada em `employee_payments.idempotency_key` (Fase 4): nullable (histórico nunca alterado,
+   * `NULL` múltiplos nunca colidem numa constraint UNIQUE), calculada no servidor, determinística.
+   */
+  idempotencyKey: text("idempotency_key").unique(),
   active: active(),
   source: source(),
   externalId: externalId(),

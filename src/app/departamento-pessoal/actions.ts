@@ -8,6 +8,7 @@ import {
   updateEmployee,
   updateContractor,
   recordEmployeePayment,
+  recordEmployeeAdvance,
   createEmployeeRecord,
   createContractorRecord,
   ConcurrencyConflictError,
@@ -258,6 +259,59 @@ export async function registerEmployeePaymentAction(_prevState: FormActionState,
   revalidatePath("/departamento-pessoal");
   revalidatePath(`/departamento-pessoal/${subjectId}`);
   return { error: null, success: result.created ? "Pagamento registrado." : "Este pagamento já havia sido registrado — nenhum novo lançamento foi criado." };
+}
+
+/**
+ * Fase 6 (20/09/2026) — "Registrar adiantamento". Mesmo raciocínio de determinismo/servidor de
+ * `computePaymentIdempotencyKey`, mas sem `category` (adiantamento não tem categoria de pagamento)
+ * nem `description` (não existe campo de descrição livre no formulário — só valor/data/observação).
+ */
+function computeAdvanceIdempotencyKey(input: { subjectId: string; amount: number; date: string; reason: string | null }): string {
+  const raw = [input.subjectId, input.amount.toFixed(2), input.date, input.reason ?? ""].join("|");
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+/**
+ * Registra um adiantamento novo (nunca edita um existente, nunca compensa — compensação é fluxo
+ * separado de `compensateEmployeeAdvance`). Grava em `employee_advances`, nunca em
+ * `employee_payments` — não altera nenhuma remuneração/pagamento já registrado. Colaborador sempre
+ * vem da ficha (campos ocultos), mesmo padrão de `registerEmployeePaymentAction`.
+ */
+export async function registerEmployeeAdvanceAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const auth = await requireAdmin();
+  if (auth.error !== null) return { error: auth.error, success: null };
+
+  const subjectId = String(formData.get("subjectId") ?? "");
+  const subjectTypeRaw = String(formData.get("subjectType") ?? "");
+  const subjectType = subjectTypeRaw === "employee" || subjectTypeRaw === "contractor" ? subjectTypeRaw : null;
+  if (!subjectId || !subjectType) return { error: "Colaborador não identificado.", success: null };
+
+  const amountResult = parseOptionalMoney(formData.get("amount"));
+  if (!amountResult.ok || amountResult.value === null || amountResult.value <= 0) return { error: "Valor deve ser numérico e maior que zero.", success: null };
+
+  const date = parseOptionalString(formData.get("date"));
+  if (!date) return { error: "Data do adiantamento é obrigatória.", success: null };
+
+  const reason = parseOptionalString(formData.get("reason"));
+
+  const financialAccountId = String(formData.get("financialAccountId") ?? "");
+  if (!financialAccountId) return { error: "Origem/conta do adiantamento é obrigatória.", success: null };
+
+  const idempotencyKey = computeAdvanceIdempotencyKey({ subjectId, amount: amountResult.value, date, reason });
+
+  let result;
+  try {
+    result = await recordEmployeeAdvance({ subjectType, subjectId, amount: amountResult.value, date, reason, financialAccountId, idempotencyKey }, auth.user.id);
+  } catch (err) {
+    if (err instanceof NotFoundError) return { error: "Colaborador não encontrado.", success: null };
+    if (err instanceof InvalidFinancialAccountError) return { error: "Conta/origem do adiantamento inválida.", success: null };
+    if (err instanceof InvalidAmountError) return { error: err.message, success: null };
+    return { error: "Falha ao registrar o adiantamento. Tente novamente.", success: null };
+  }
+
+  revalidatePath("/departamento-pessoal");
+  revalidatePath(`/departamento-pessoal/${subjectId}`);
+  return { error: null, success: result.created ? "Adiantamento registrado." : "Este adiantamento já havia sido registrado — nenhum novo lançamento foi criado." };
 }
 
 /**

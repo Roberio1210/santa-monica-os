@@ -10,11 +10,15 @@ import { StatCard } from "@/components/cards/stat-card";
 import { getCollaboratorProfile } from "@/lib/hr/service";
 import { CATEGORY_LABELS, outrosTotal } from "@/lib/hr/costSummary";
 import { computeAdvanceOutstanding, type EmployeeAdvanceStatus } from "@/lib/hr/advances";
-import { parsePeriodParams } from "@/lib/utils/timezone";
+import { getCollaboratorEarningsSummary, getCollaboratorMonthlyEarnings } from "@/lib/hr/earnings";
+import { EARNINGS_CATEGORIES, EARNINGS_CATEGORY_LABELS, type EarningsCategory } from "@/lib/hr/earningsCategories";
+import { parsePeriodParams, saoPauloDateISO } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { getCurrentUser } from "@/lib/auth/session";
 import { CollaboratorEditForm } from "@/components/hr/collaborator-edit-form";
 import { CollaboratorPaymentForm } from "@/components/hr/collaborator-payment-form";
+import { CollaboratorAdvanceForm } from "@/components/hr/collaborator-advance-form";
+import { EarningsCategoryFilter } from "@/components/hr/earnings-category-filter";
 import { listFinancialAccountOptions } from "@/lib/hr/repository";
 
 // Ficha individual (Fase 1, 20/09/2026) — mesmo padrão de /departamento-pessoal: consulta dados
@@ -33,11 +37,27 @@ const ADVANCE_STATUS_VARIANT: Record<EmployeeAdvanceStatus, "warning" | "info" |
   compensado: "positive",
 };
 
-export default async function ColaboradorPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ period?: string; from?: string; to?: string }> }) {
+function parseEarningsCategory(value: string | undefined): EarningsCategory | null {
+  return (EARNINGS_CATEGORIES as readonly string[]).includes(value ?? "") ? (value as EarningsCategory) : null;
+}
+
+export default async function ColaboradorPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string; month?: string; year?: string; category?: string }>;
+}) {
   const { id } = await params;
   const searchParamsValue = await searchParams;
   const period = parsePeriodParams(searchParamsValue);
-  const [profile, financialAccounts] = await Promise.all([getCollaboratorProfile(id, { from: period.from, to: period.to }), listFinancialAccountOptions()]);
+  const earningsCategory = parseEarningsCategory(searchParamsValue.category);
+  const [profile, financialAccounts, earnings, monthlyEarnings] = await Promise.all([
+    getCollaboratorProfile(id, { from: period.from, to: period.to }),
+    listFinancialAccountOptions(),
+    getCollaboratorEarningsSummary({ subjectId: id, from: period.from, to: period.to, category: earningsCategory ?? undefined }),
+    getCollaboratorMonthlyEarnings(id, saoPauloDateISO()),
+  ]);
 
   if (!profile) notFound();
 
@@ -79,6 +99,86 @@ export default async function ColaboradorPage({ params, searchParams }: { params
         <StatCard label="Encargos/impostos" icon={Landmark} value={formatCurrency(profile.costSummary.porCategoria.encargo)} hint="Só aparece aqui quando o encargo está vinculado diretamente a esta pessoa" />
         <StatCard label="Outros pagamentos" icon={MoreHorizontal} value={formatCurrency(outrosTotal(profile.costSummary.porCategoria))} />
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>Resumo de Ganhos</CardTitle>
+          <EarningsCategoryFilter category={earningsCategory} />
+        </CardHeader>
+        <CardContent className="space-y-4 pb-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="Total de pagamentos" icon={Wallet} value={formatCurrency(earnings.paymentsTotal)} hint="Soma dos 5 baldes abaixo — nunca inclui adiantamentos" />
+            <StatCard label="Salário/fixo" icon={Wallet} value={formatCurrency(earnings.salaryTotal)} />
+            <StatCard label="Comissão" icon={TrendingUp} value={formatCurrency(earnings.commissionTotal)} />
+            <StatCard label="Meta/bônus" icon={Gift} value={formatCurrency(earnings.bonusOrGoalTotal)} />
+            <StatCard label="Benefícios/auxílios" icon={Heart} value={formatCurrency(earnings.benefitsTotal)} />
+            <StatCard label="Outros" icon={MoreHorizontal} value={formatCurrency(earnings.otherTotal)} />
+            <StatCard label="Adiantamentos" icon={HandCoins} value={formatCurrency(earnings.advancesTotal)} hint="Sempre separado — nunca somado ao total de pagamentos" />
+            <StatCard label="Total de saídas" icon={Landmark} value={formatCurrency(earnings.outflowTotal)} hint="Pagamentos + adiantamentos — métrica distinta, não confundir com 'Total de pagamentos'" />
+          </div>
+
+          {earnings.items.length === 0 ? (
+            <EmptyState title="Nenhum lançamento neste período/categoria" description="Troque o período ou a categoria acima para ver o histórico completo." />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-background-elevated text-xs text-foreground-muted">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Data</th>
+                    <th className="px-3 py-2 text-left font-medium">Tipo</th>
+                    <th className="px-3 py-2 text-left font-medium">Categoria</th>
+                    <th className="px-3 py-2 text-left font-medium">Descrição</th>
+                    <th className="px-3 py-2 text-left font-medium">Valor</th>
+                    <th className="px-3 py-2 text-left font-medium">Competência</th>
+                    <th className="px-3 py-2 text-left font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {earnings.items.map((item) => (
+                    <tr key={`${item.kind}-${item.id}`}>
+                      <td className="px-3 py-2">{formatDateBR(item.date)}</td>
+                      <td className="px-3 py-2">
+                        <Badge variant={item.kind === "adiantamento" ? "warning" : "outline"}>{item.kind === "adiantamento" ? "Adiantamento" : "Pagamento"}</Badge>
+                      </td>
+                      <td className="px-3 py-2">{EARNINGS_CATEGORY_LABELS[item.category]}</td>
+                      <td className="px-3 py-2">{item.description}</td>
+                      <td className="px-3 py-2">{formatCurrency(item.amount)}</td>
+                      <td className="px-3 py-2">{item.competenceDate ? formatDateBR(item.competenceDate) : <span className="italic text-foreground-subtle">—</span>}</td>
+                      <td className="px-3 py-2">{item.status ? ADVANCE_STATUS_LABEL[item.status as EmployeeAdvanceStatus] : <span className="italic text-foreground-subtle">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-foreground">Histórico mensal</h3>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-background-elevated text-xs text-foreground-muted">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Mês</th>
+                    <th className="px-3 py-2 text-left font-medium">Pagamentos</th>
+                    <th className="px-3 py-2 text-left font-medium">Adiantamentos</th>
+                    <th className="px-3 py-2 text-left font-medium">Total de saídas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {monthlyEarnings.map((m) => (
+                    <tr key={m.monthKey}>
+                      <td className="px-3 py-2">{m.label}</td>
+                      <td className="px-3 py-2">{formatCurrency(m.paymentsTotal)}</td>
+                      <td className="px-3 py-2">{formatCurrency(m.advancesTotal)}</td>
+                      <td className="px-3 py-2 font-medium">{formatCurrency(m.outflowTotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -125,6 +225,8 @@ export default async function ColaboradorPage({ params, searchParams }: { params
       <CollaboratorEditForm profile={profile} canEdit={canEdit} />
 
       <CollaboratorPaymentForm profile={profile} financialAccounts={financialAccounts} canEdit={canEdit} />
+
+      <CollaboratorAdvanceForm profile={profile} financialAccounts={financialAccounts} canEdit={canEdit} />
 
       <Card>
         <CardHeader>

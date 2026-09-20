@@ -53,14 +53,26 @@ function startOfWeekIso(dateIso: string): string {
   return addDaysIso(dateIso, -offsetFromMonday);
 }
 
-function startOfMonthIso(dateIso: string): string {
+export function startOfMonthIso(dateIso: string): string {
   return `${dateIso.slice(0, 7)}-01`;
 }
 
-function endOfMonthIso(dateIso: string): string {
+export function endOfMonthIso(dateIso: string): string {
   const [year, month] = dateIso.slice(0, 7).split("-").map(Number);
   const last = new Date(Date.UTC(year, month, 0));
   return last.toISOString().slice(0, 10);
+}
+
+/**
+ * Resumo de Ganhos / Histórico mensal (Fase 6 do Departamento Pessoal, 20/09/2026) — soma/subtrai
+ * meses a uma data ISO tratada como calendário puro (mesmo raciocínio de `addDaysIso`: âncora em
+ * UTC só para aritmética, nunca reintroduz fuso local da máquina). Sempre retorna o dia 1 do mês
+ * resultante — quem quiser o mês inteiro combina com `startOfMonthIso`/`endOfMonthIso`.
+ */
+export function addMonthsIso(dateIso: string, months: number): string {
+  const [year, month] = dateIso.slice(0, 7).split("-").map(Number);
+  const d = new Date(Date.UTC(year, month - 1 + months, 1));
+  return d.toISOString().slice(0, 10);
 }
 
 function startOfPreviousMonthIso(dateIso: string): string {

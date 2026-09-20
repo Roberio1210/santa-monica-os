@@ -12,6 +12,7 @@ import {
   updateEmployee,
   updateContractor,
   recordEmployeePayment,
+  recordEmployeeAdvance,
   NotFoundError,
   ConcurrencyConflictError,
   InvalidPaymentCategoryError,
@@ -55,11 +56,12 @@ afterAll(async () => {
   if (!hasRealDb) return;
   const db = getDb();
   if (!db) return;
-  if (createdAdvanceIds.length > 0) await db.delete(employeeAdvances).where(inArray(employeeAdvances.id, createdAdvanceIds));
-  // audit_logs de employee_payment (Fase 4, entityId = payment.id) precisam sumir ANTES de
-  // employee_payments/users, senão a FK audit_logs.actor_user_id -> users trava o delete de users.
-  const auditableIds = [...createdEmployeeIds, ...createdContractorIds, ...createdPaymentIds];
+  // audit_logs de employee_advance (Fase 6, entityId = advance.id) precisam sumir ANTES do
+  // delete dos próprios adiantamentos/users, mesmo raciocínio do employee_payment (Fase 4) abaixo —
+  // entityId não é FK real, mas audit_logs.actor_user_id -> users é, então a ordem importa para users.
+  const auditableIds = [...createdEmployeeIds, ...createdContractorIds, ...createdPaymentIds, ...createdAdvanceIds];
   if (auditableIds.length > 0) await db.delete(auditLogs).where(inArray(auditLogs.entityId, auditableIds));
+  if (createdAdvanceIds.length > 0) await db.delete(employeeAdvances).where(inArray(employeeAdvances.id, createdAdvanceIds));
   if (createdPaymentIds.length > 0) await db.delete(employeePayments).where(inArray(employeePayments.id, createdPaymentIds));
   if (createdCashMovementIds.length > 0) await db.delete(cashMovements).where(inArray(cashMovements.id, createdCashMovementIds));
   if (createdEmployeeIds.length > 0) await db.delete(employees).where(inArray(employees.id, createdEmployeeIds));
@@ -890,6 +892,263 @@ describe.skipIf(!hasRealDb)("recordEmployeePayment — Fase 4 (20/09/2026)", () 
     expect(logs).toHaveLength(1);
     expect(logs[0]!.entityType).toBe("employee_payment");
     expect(logs[0]!.action).toBe("create_employee_payment");
+    expect(logs[0]!.actorUserId).toBe(actor.id);
+    expect(logs[0]!.notes).toContain(result.cashMovement.id);
+  });
+});
+
+/**
+ * Fase 6 do Departamento Pessoal, Parte A (20/09/2026) — "Registrar adiantamento":
+ * `recordEmployeeAdvance` cria `cash_movements` + `employee_advances` numa única transação, com
+ * `cash_movement.categoryId` sempre `null` (mesmo padrão do precedente real conciliado — Jorge,
+ * R$100 — nunca uma DRE de remuneração), idempotência real via `employee_advances.idempotency_key`
+ * (migration 0063), e NUNCA cria/altera `employee_payments`.
+ */
+describe.skipIf(!hasRealDb)("recordEmployeeAdvance — Fase 6 (20/09/2026)", () => {
+  async function accountId(name: string): Promise<string> {
+    const db = getDb()!;
+    const [row] = await db.select().from(financialAccounts).where(eq(financialAccounts.name, name)).limit(1);
+    if (!row) throw new Error(`Conta de teste não encontrada: ${name}`);
+    return row.id;
+  }
+
+  it("CLT: adiantamento válido cria exatamente 1 cash_movement + 1 employee_advance, vinculados, status 'aberto', categoryId null", async () => {
+    const db = getDb()!;
+    const [employee] = await db.insert(employees).values({ fullName: `Fase6 adiantamento clt ${randomUUID()}`, role: "Cargo" }).returning();
+    createdEmployeeIds.push(employee.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "employee", subjectId: employee.id, amount: 300, date: "2026-09-05", reason: "Adiantamento de teste Fase 6", financialAccountId: stoneId, idempotencyKey: `fase6-adv-${randomUUID()}` },
+      null,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.created).toBe(true);
+    expect(result.advance.subjectId).toBe(employee.id);
+    expect(result.advance.cashMovementId).toBe(result.cashMovement.id);
+    expect(result.advance.amount).toBe("300.00");
+    expect(result.advance.status).toBe("aberto");
+    expect(result.advance.compensatedAmount).toBe("0.00");
+    expect(result.cashMovement.amount).toBe("300.00");
+    expect(result.cashMovement.categoryId).toBeNull(); // nunca uma DRE de remuneração
+    expect(result.cashMovement.financialAccountId).toBe(stoneId);
+
+    const advancesInDb = await db.select().from(employeeAdvances).where(eq(employeeAdvances.cashMovementId, result.cashMovement.id));
+    expect(advancesInDb).toHaveLength(1); // exatamente 1, nunca mais
+  });
+
+  it("PJ: adiantamento válido, sem observação (reason opcional)", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 adiantamento pj ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "contractor", subjectId: contractor.id, amount: 150, date: "2026-09-06", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-adv-${randomUUID()}` },
+      null,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.advance.subjectType).toBe("contractor");
+    expect(result.advance.reason).toBeNull();
+  });
+
+  it("valor zero e valor negativo são bloqueados", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 valor-invalido ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    await expect(
+      recordEmployeeAdvance({ subjectType: "contractor", subjectId: contractor.id, amount: 0, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidAmountError);
+    await expect(
+      recordEmployeeAdvance({ subjectType: "contractor", subjectId: contractor.id, amount: -10, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidAmountError);
+  });
+
+  it("colaborador inexistente -> NotFoundError, ROLLBACK completo (zero cash_movement, zero employee_advance)", async () => {
+    const db = getDb()!;
+    const stoneId = await accountId("Stone");
+    const key = `fase6-notfound-${randomUUID()}`;
+    const [{ n: cmBefore }] = (await db.execute(sql`select count(*)::int as n from cash_movements`)) as unknown as Array<{ n: number }>;
+
+    await expect(
+      recordEmployeeAdvance({ subjectType: "contractor", subjectId: randomUUID(), amount: 10, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: key }, null),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    const [{ n: cmAfter }] = (await db.execute(sql`select count(*)::int as n from cash_movements`)) as unknown as Array<{ n: number }>;
+    expect(cmAfter).toBe(cmBefore);
+    const orphan = await db.select().from(employeeAdvances).where(eq(employeeAdvances.idempotencyKey, key));
+    expect(orphan).toHaveLength(0);
+  });
+
+  it("conta financeira inválida/inexistente -> InvalidFinancialAccountError, rollback completo", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 conta-invalida ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+
+    await expect(
+      recordEmployeeAdvance({ subjectType: "contractor", subjectId: contractor.id, amount: 10, date: "2026-09-05", reason: null, financialAccountId: randomUUID(), idempotencyKey: `fase6-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidFinancialAccountError);
+  });
+
+  it("idempotencyKey é persistida no employee_advance criado", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 idkey ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase6-persist-${randomUUID()}`;
+
+    const result = await recordEmployeeAdvance({ subjectType: "contractor", subjectId: contractor.id, amount: 10, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: key }, null);
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.advance.idempotencyKey).toBe(key);
+  });
+
+  it("mesma idempotencyKey chamada duas vezes -> só 1 adiantamento, o segundo retorna created:false e o MESMO registro", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 dedupe ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase6-dedupe-${randomUUID()}`;
+    const input = { subjectType: "contractor" as const, subjectId: contractor.id, amount: 77, date: "2026-09-05", reason: "teste dedupe", financialAccountId: stoneId, idempotencyKey: key };
+
+    const first = await recordEmployeeAdvance(input, null);
+    const second = await recordEmployeeAdvance(input, null);
+    createdAdvanceIds.push(first.advance.id);
+    createdCashMovementIds.push(first.cashMovement.id);
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.advance.id).toBe(first.advance.id);
+    expect(second.cashMovement.id).toBe(first.cashMovement.id);
+
+    const count = await db.select().from(employeeAdvances).where(eq(employeeAdvances.idempotencyKey, key));
+    expect(count).toHaveLength(1);
+  });
+
+  it("duas requisições CONCORRENTES com a mesma idempotencyKey -> apenas 1 adiantamento (garantia do UNIQUE do banco)", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 concorrencia ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase6-race-${randomUUID()}`;
+    const input = { subjectType: "contractor" as const, subjectId: contractor.id, amount: 88, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: key };
+
+    const [a, b] = await Promise.all([recordEmployeeAdvance(input, null), recordEmployeeAdvance(input, null)]);
+    createdAdvanceIds.push(a.advance.id);
+    createdCashMovementIds.push(a.cashMovement.id);
+
+    expect(a.advance.id).toBe(b.advance.id);
+    const count = await db.select().from(employeeAdvances).where(eq(employeeAdvances.idempotencyKey, key));
+    expect(count).toHaveLength(1);
+  });
+
+  it("chaves diferentes para o mesmo colaborador/valor -> adiantamentos distintos, nunca fundidos", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 chaves-diferentes ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const base = { subjectType: "contractor" as const, subjectId: contractor.id, amount: 50, date: "2026-09-05", reason: null, financialAccountId: stoneId };
+
+    const first = await recordEmployeeAdvance({ ...base, idempotencyKey: `fase6-diff-a-${randomUUID()}` }, null);
+    const second = await recordEmployeeAdvance({ ...base, idempotencyKey: `fase6-diff-b-${randomUUID()}` }, null);
+    createdAdvanceIds.push(first.advance.id, second.advance.id);
+    createdCashMovementIds.push(first.cashMovement.id, second.cashMovement.id);
+
+    expect(first.advance.id).not.toBe(second.advance.id);
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+  });
+
+  it("nunca cria employee_payment nem altera pagamentos existentes do mesmo colaborador", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 sem-pagamento ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    const existingPayment = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 40, date: "2026-09-01", competenceDate: null, description: "pagamento pré-existente", notes: null, financialAccountId: stoneId, idempotencyKey: `fase6-pre-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(existingPayment.payment.id);
+    createdCashMovementIds.push(existingPayment.cashMovement.id);
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "contractor", subjectId: contractor.id, amount: 90, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` },
+      null,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const payments = await db.select().from(employeePayments).where(eq(employeePayments.subjectId, contractor.id));
+    expect(payments).toHaveLength(1); // só o pré-existente — o adiantamento nunca criou um employee_payment
+    expect(payments[0]!.amount).toBe("40.00"); // valor original nunca alterado
+
+    const [{ n: bslAfter }] = (await db.execute(sql`select count(*)::int as n from bank_statement_lines`)) as unknown as Array<{ n: number }>;
+    expect(bslAfter).toBeGreaterThanOrEqual(0); // nenhuma linha de extrato fictícia esperada desta função (checagem de sanidade, sem baseline aqui)
+  });
+
+  it("outro colaborador não é afetado por um novo adiantamento", async () => {
+    const db = getDb()!;
+    const [target] = await db.insert(contractors).values({ businessName: `Fase6 alvo-adiantamento ${randomUUID()}` }).returning();
+    const [other] = await db.insert(contractors).values({ businessName: `Fase6 outro-adiantamento ${randomUUID()}` }).returning();
+    createdContractorIds.push(target.id, other.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "contractor", subjectId: target.id, amount: 60, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` },
+      null,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const otherAdvances = await db.select().from(employeeAdvances).where(eq(employeeAdvances.subjectId, other.id));
+    expect(otherAdvances).toHaveLength(0);
+  });
+
+  it("histórico do colaborador (listEmployeeAdvances) reflete o novo adiantamento", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 historico ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "contractor", subjectId: contractor.id, amount: 45, date: "2026-09-05", reason: "para histórico", financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` },
+      null,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const advances = await db.select().from(employeeAdvances).where(eq(employeeAdvances.subjectId, contractor.id));
+    expect(advances).toHaveLength(1);
+    expect(advances[0]!.id).toBe(result.advance.id);
+  });
+
+  it("audit_log é criado com entidade, ação, ator e referência ao cash_movement", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase6 audit ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const [actor] = await db.insert(users).values({ email: `fase6-audit-${randomUUID()}@teste.local`, name: "Admin de teste", role: "admin" }).returning();
+    createdUserIds.push(actor.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeeAdvance(
+      { subjectType: "contractor", subjectId: contractor.id, amount: 15, date: "2026-09-05", reason: null, financialAccountId: stoneId, idempotencyKey: `fase6-${randomUUID()}` },
+      actor.id,
+    );
+    createdAdvanceIds.push(result.advance.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const logs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [result.advance.id]));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.entityType).toBe("employee_advance");
+    expect(logs[0]!.action).toBe("create_employee_advance");
     expect(logs[0]!.actorUserId).toBe(actor.id);
     expect(logs[0]!.notes).toContain(result.cashMovement.id);
   });

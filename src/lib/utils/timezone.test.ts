@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, comparePeriodValues, isValidIsoDate, parsePeriodParams, previousPeriodOf, resolvePeriod, saoPauloDateISO, saoPauloTimeHM, startOfSaoPauloDayUtc } from "@/lib/utils/timezone";
+import { addDaysIso, addMonthsIso, comparePeriodValues, isValidIsoDate, parsePeriodParams, previousPeriodOf, resolvePeriod, saoPauloDateISO, saoPauloTimeHM, startOfSaoPauloDayUtc } from "@/lib/utils/timezone";
 
 describe("saoPauloDateISO", () => {
   it("converte um instante UTC tarde da noite (já virado para o dia seguinte em UTC) para a data correta em SP", () => {
@@ -57,6 +57,19 @@ describe("addDaysIso", () => {
   it("soma dias sem cair em problema de fuso", () => {
     expect(addDaysIso("2026-07-18", 1)).toBe("2026-07-19");
     expect(addDaysIso("2026-07-01", -1)).toBe("2026-06-30");
+  });
+});
+
+describe("addMonthsIso — Fase 6 do Departamento Pessoal, Parte B (20/09/2026)", () => {
+  it("soma/subtrai meses, sempre retornando o dia 1 do mês resultante", () => {
+    expect(addMonthsIso("2026-09-20", 0)).toBe("2026-09-01");
+    expect(addMonthsIso("2026-09-20", -1)).toBe("2026-08-01");
+    expect(addMonthsIso("2026-09-20", 1)).toBe("2026-10-01");
+  });
+
+  it("atravessa virada de ano nos dois sentidos", () => {
+    expect(addMonthsIso("2026-01-15", -1)).toBe("2025-12-01");
+    expect(addMonthsIso("2026-12-15", 1)).toBe("2027-01-01");
   });
 });
 

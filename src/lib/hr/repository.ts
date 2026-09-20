@@ -661,3 +661,117 @@ export async function recordEmployeePayment(input: RecordEmployeePaymentInput, a
     throw err;
   }
 }
+
+export interface RecordEmployeeAdvanceInput {
+  subjectType: "employee" | "contractor";
+  subjectId: string;
+  amount: number;
+  date: string;
+  reason: string | null;
+  financialAccountId: string;
+  /** Determinística, calculada pelo chamador a partir dos campos normalizados — nunca um valor confiado sem checagem. */
+  idempotencyKey: string;
+}
+
+export interface RecordEmployeeAdvanceResult {
+  advance: EmployeeAdvanceRow;
+  cashMovement: CashMovementRow;
+  /** `false` quando a `idempotencyKey` já existia — o adiantamento retornado é o ORIGINAL, nenhum novo foi criado. */
+  created: boolean;
+}
+
+async function findAdvanceByIdempotencyKey(idempotencyKey: string): Promise<RecordEmployeeAdvanceResult | null> {
+  const [existing] = await db().select().from(employeeAdvances).where(eq(employeeAdvances.idempotencyKey, idempotencyKey)).limit(1);
+  if (!existing || !existing.cashMovementId) return null;
+  const [movement] = await db().select().from(cashMovements).where(eq(cashMovements.id, existing.cashMovementId)).limit(1);
+  if (!movement) return null;
+  return { advance: existing, cashMovement: movement, created: false };
+}
+
+/**
+ * Fase 6 do Departamento Pessoal (20/09/2026) — "Registrar adiantamento": mesmo padrão transacional
+ * e de idempotência de `recordEmployeePayment` (Fase 4), mas grava em `employee_advances`, NUNCA em
+ * `employee_payments` — adiantamento é entidade própria (estado aberto/parcialmente_compensado/
+ * compensado), não um pagamento categorizado. `cash_movement.categoryId` fica sempre `null` — mesmo
+ * padrão já observado no precedente real (adiantamento de R$100 do Jorge, conciliado do extrato,
+ * também tem `category_id = null`): um adiantamento não é uma despesa definitiva na DRE até ser
+ * compensado ou virar de fato um pagamento categorizado.
+ *
+ * `cash_movements.description` é `NOT NULL` mas o formulário não pede um campo de descrição livre
+ * (a missão pede só valor/data/observação/colaborador) — sintetizada aqui a partir do nome do
+ * colaborador, nunca do texto de `reason` (que fica só em `employee_advances.reason`, sem duplicar
+ * dado nem arriscar inconsistência se um for editado e o outro não).
+ */
+export async function recordEmployeeAdvance(input: RecordEmployeeAdvanceInput, actorUserId: string | null): Promise<RecordEmployeeAdvanceResult> {
+  const existingByKey = await findAdvanceByIdempotencyKey(input.idempotencyKey);
+  if (existingByKey) return existingByKey;
+
+  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new InvalidAmountError("Valor deve ser maior que zero.");
+
+  try {
+    return await db().transaction(async (tx) => {
+      let subjectName: string;
+      if (input.subjectType === "employee") {
+        const [subject] = await tx.select().from(employees).where(eq(employees.id, input.subjectId)).limit(1);
+        if (!subject) throw new NotFoundError(`Colaborador (CLT) não encontrado: ${input.subjectId}`);
+        subjectName = subject.fullName;
+      } else {
+        const [subject] = await tx.select().from(contractors).where(eq(contractors.id, input.subjectId)).limit(1);
+        if (!subject) throw new NotFoundError(`Prestador (PJ) não encontrado: ${input.subjectId}`);
+        subjectName = subject.businessName;
+      }
+
+      const [account] = await tx.select().from(financialAccounts).where(and(eq(financialAccounts.id, input.financialAccountId), eq(financialAccounts.active, true))).limit(1);
+      if (!account) throw new InvalidFinancialAccountError(`Conta financeira inválida ou inativa: ${input.financialAccountId}`);
+
+      const label = input.subjectType === "employee" ? "colaborador" : "prestador";
+      const [movement] = await tx
+        .insert(cashMovements)
+        .values({
+          date: input.date,
+          type: "saida",
+          amount: String(input.amount),
+          description: `Adiantamento — ${label} ${subjectName}`,
+          categoryId: null,
+          financialAccountId: input.financialAccountId,
+          source: "manual",
+          notes: input.reason,
+        })
+        .returning();
+
+      const [advance] = await tx
+        .insert(employeeAdvances)
+        .values({
+          subjectType: input.subjectType,
+          subjectId: input.subjectId,
+          amount: String(input.amount),
+          date: input.date,
+          reason: input.reason,
+          status: "aberto",
+          compensatedAmount: "0",
+          cashMovementId: movement.id,
+          idempotencyKey: input.idempotencyKey,
+        })
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        actorUserId,
+        action: "create_employee_advance",
+        entityType: "employee_advance",
+        entityId: advance.id,
+        beforeState: null,
+        afterState: { ...advance, cashMovementId: movement.id },
+        source: "manual",
+        notes: `cash_movement_id: ${movement.id}`,
+      });
+
+      return { advance, cashMovement: movement, created: true };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err, "employee_advances_idempotency_key_unique")) {
+      const resolved = await findAdvanceByIdempotencyKey(input.idempotencyKey);
+      if (resolved) return resolved;
+    }
+    throw err;
+  }
+}
