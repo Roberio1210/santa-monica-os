@@ -1,0 +1,1 @@
+ALTER TYPE "public"."employee_payment_category" ADD VALUE 'beneficio_auxilio' BEFORE 'reembolso';

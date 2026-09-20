@@ -135,11 +135,24 @@ export async function createEmployeePayment(input: CreateEmployeePaymentInput): 
   return row;
 }
 
-export async function listEmployeePayments(filter?: { subjectId?: string; dateFrom?: string; dateTo?: string }): Promise<EmployeePaymentRow[]> {
+/**
+ * `dateFrom`/`dateTo` filtram pela data de CAIXA (`date`) — é o que `/departamento-pessoal` usa
+ * por padrão (mesma lógica do Livro Caixa: agrupa pelo mês em que o dinheiro efetivamente saiu).
+ * `competenceDateFrom`/`competenceDateTo` filtram pela COMPETÊNCIA (`competenceDate`) — uso
+ * separado e explícito para quando a pergunta é "quanto pertence economicamente a este mês",
+ * nunca misturado com o filtro de caixa na mesma chamada (Missão DP, 20/09/2026: um pagamento de
+ * R$450 com `date=2026-08-31` e `competenceDate=2026-09-01` deve aparecer em agosto pelo caixa e
+ * em setembro pela competência — os dois filtros respondem perguntas diferentes, nunca a mesma).
+ * Um registro sem `competenceDate` nunca aparece num filtro de competência (não há como assumir a
+ * qual mês ele pertenceria).
+ */
+export async function listEmployeePayments(filter?: { subjectId?: string; dateFrom?: string; dateTo?: string; competenceDateFrom?: string; competenceDateTo?: string }): Promise<EmployeePaymentRow[]> {
   const conditions = [eq(employeePayments.active, true)];
   if (filter?.subjectId) conditions.push(eq(employeePayments.subjectId, filter.subjectId));
   if (filter?.dateFrom) conditions.push(gte(employeePayments.date, filter.dateFrom));
   if (filter?.dateTo) conditions.push(lte(employeePayments.date, filter.dateTo));
+  if (filter?.competenceDateFrom) conditions.push(gte(employeePayments.competenceDate, filter.competenceDateFrom));
+  if (filter?.competenceDateTo) conditions.push(lte(employeePayments.competenceDate, filter.competenceDateTo));
   return db()
     .select()
     .from(employeePayments)

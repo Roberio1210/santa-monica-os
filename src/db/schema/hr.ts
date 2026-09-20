@@ -85,12 +85,28 @@ export const employeeDocuments = pgTable("employee_documents", {
  * (nota fiscal/discriminação por CPF) — nesse caso o registro fica sem `subjectId`, visível só no
  * agregado de "Encargos" do DP, nunca no histórico individual de alguém.
  */
+/**
+ * `comissao`/`bonus` — regra de timing (não é coluna, é regra de negócio observada manualmente):
+ * histórico (julho/agosto/2026 e antes) pagas por volta do dia 10 do mês seguinte à competência;
+ * a partir do próximo ciclo passam a ser pagas no dia 15 (mudança só prospectiva — nunca reabre
+ * competências já fechadas). Ver também `docs/hr-module-architecture.md`.
+ *
+ * `beneficio_auxilio` (Missão DP — categoria de benefício, 20/09/2026) — vale-transporte,
+ * vale-alimentação/lanche e benefícios semelhantes, sempre que EXPLICITAMENTE confirmados como
+ * tal. Nunca inferido automaticamente por proximidade de valor: um pagamento só migra para esta
+ * categoria por decisão explícita registrada (ex.: R$450 de Paulo/Jorge Cauã, parte fixa de
+ * transporte+lanche dentro do ciclo mensal de R$2.600,00). Deliberadamente distinto de
+ * `salario_fixo` (remuneração-base) e de `reembolso` (devolução de gasto que o próprio
+ * colaborador adiantou) — misturar os três impediria a análise gerencial de quanto do custo de
+ * pessoal é remuneração pura vs. benefício vs. devolução de despesa.
+ */
 export const employeePaymentCategoryEnum = pgEnum("employee_payment_category", [
   "salario_fixo",
   "comissao",
   "bonus",
   "diaria_freelancer",
   "adiantamento",
+  "beneficio_auxilio",
   "reembolso",
   "desconto_compensacao",
   "rescisao",

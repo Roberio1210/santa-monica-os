@@ -95,6 +95,34 @@ não um esquecimento (ver `docs/database-architecture.md`).
   desta fundação técnica; quando implementado, deve ser revisado por um contador/departamento
   pessoal, não inferido pelo sistema.
 
+## `employee_payments` — categorias e regras de negócio (Missão 86 + Missão DP, 20/09/2026)
+
+Implementado depois desta fundação técnica: `employee_payments`/`employee_advances` (ver
+`src/db/schema/hr.ts`) nunca duplicam o financeiro — `cashMovementId` sempre aponta para o
+`cash_movements` real quando existe. A categoria (`employeePaymentCategoryEnum`) separa
+conceitualmente: `salario_fixo`, `comissao`, `bonus`, `diaria_freelancer`, `adiantamento`,
+`beneficio_auxilio`, `reembolso`, `desconto_compensacao`, `rescisao`, `ferias`,
+`decimo_terceiro`, `encargo`, `outro` — nunca somadas cegamente (ver `src/lib/hr/costSummary.ts`).
+
+`beneficio_auxilio` existe para vale-transporte/vale-alimentação e benefícios semelhantes,
+deliberadamente distinto de `salario_fixo` (remuneração-base) — nunca atribuído por inferência de
+valor, só por decisão explícita registrada.
+
+**Regra de timing de comissão/meta**: histórico (até o ciclo de agosto/2026) pago por volta do dia
+10 do mês seguinte à competência; a partir do próximo ciclo passa a ser pago no dia 15 — mudança
+só prospectiva, nunca reabre competências já fechadas. Não há automação de pagamento nem conta a
+pagar automática para isso — é regra observada manualmente até que exista demanda real de
+automatizar.
+
+**Data de pagamento x competência**: `date` é sempre a data de caixa (quando o dinheiro saiu de
+verdade); `competenceDate` é a competência econômica quando diferente. `/departamento-pessoal`
+(`getDpOverview`) filtra por `date` por padrão (mesma lógica do Livro Caixa) — um pagamento de
+R$450 feito em 31/08 com competência setembro aparece no card de "agosto" da tela (foi pago em
+agosto), nunca some do caixa por causa da competência. `listEmployeePayments` também aceita
+`competenceDateFrom`/`competenceDateTo` para quem precisa responder "quanto pertence
+economicamente a este mês" em vez de "quanto saiu do caixa este mês" — os dois filtros nunca devem
+ser combinados na mesma chamada (respondem perguntas diferentes).
+
 ## Papéis de acesso relacionados
 
 O papel `hr` (ver `docs/privacy-and-access-control.md` e a Fase 1 do roadmap) deve ser o único com

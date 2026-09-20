@@ -1,4 +1,4 @@
-import { Users, Wallet, TrendingUp, Gift, CalendarClock, HandCoins, Landmark, MoreHorizontal } from "lucide-react";
+import { Users, Wallet, TrendingUp, Gift, CalendarClock, HandCoins, Landmark, MoreHorizontal, Heart } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   bonus: "Bônus",
   diaria_freelancer: "Diárias/freelas",
   adiantamento: "Adiantamentos",
+  beneficio_auxilio: "Benefícios/auxílios",
   reembolso: "Reembolsos",
   desconto_compensacao: "Descontos/compensação",
   rescisao: "Rescisões",
@@ -50,6 +51,7 @@ export default async function DepartamentoPessoalPage({ searchParams }: { search
         <StatCard label="Bônus" icon={Gift} value={formatCurrency(overview.costSummary.porCategoria.bonus)} />
         <StatCard label="Diárias/freelas" icon={CalendarClock} value={formatCurrency(overview.costSummary.porCategoria.diaria_freelancer)} />
         <StatCard label="Adiantamentos" icon={HandCoins} value={formatCurrency(overview.costSummary.porCategoria.adiantamento)} hint={`${overview.openAdvances.length} em aberto`} />
+        <StatCard label="Benefícios/auxílios" icon={Heart} value={formatCurrency(overview.costSummary.porCategoria.beneficio_auxilio)} hint="Transporte, lanche/alimentação — nunca somado a salário/fixo" />
         <StatCard label="Encargos/impostos" icon={Landmark} value={formatCurrency(overview.costSummary.porCategoria.encargo)} />
         <StatCard label="Outros pagamentos" icon={MoreHorizontal} value={formatCurrency(overview.costSummary.porCategoria.outro + overview.costSummary.porCategoria.reembolso + overview.costSummary.porCategoria.desconto_compensacao + overview.costSummary.porCategoria.rescisao + overview.costSummary.porCategoria.ferias + overview.costSummary.porCategoria.decimo_terceiro)} />
       </div>

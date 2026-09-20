@@ -10,6 +10,7 @@ export type EmployeePaymentCategory =
   | "bonus"
   | "diaria_freelancer"
   | "adiantamento"
+  | "beneficio_auxilio"
   | "reembolso"
   | "desconto_compensacao"
   | "rescisao"
@@ -31,6 +32,7 @@ const ZERO_BY_CATEGORY: PersonnelCostByCategory = {
   bonus: 0,
   diaria_freelancer: 0,
   adiantamento: 0,
+  beneficio_auxilio: 0,
   reembolso: 0,
   desconto_compensacao: 0,
   rescisao: 0,

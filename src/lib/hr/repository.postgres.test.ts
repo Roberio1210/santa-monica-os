@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { cashMovements, employeeAdvances, employeePayments } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { createEmployeeAdvance, createEmployeePayment } from "@/lib/hr/repository";
+import { createEmployeeAdvance, createEmployeePayment, listEmployeePayments } from "@/lib/hr/repository";
 
 /** Cria um `cash_movement` mínimo real, só para satisfazer a FK real de `employee_payments`/`employee_advances` — nunca um valor fictício sem lastro. */
 async function createTestCashMovement(amount: number): Promise<string> {
@@ -70,5 +70,54 @@ describe.skipIf(!hasRealDb)("createEmployeePayment / createEmployeeAdvance — i
     const db = getDb();
     const rows = await db!.select().from(employeeAdvances).where(inArray(employeeAdvances.cashMovementId, [cashMovementId]));
     expect(rows).toHaveLength(1);
+  });
+});
+
+/**
+ * Missão DP (20/09/2026) — `beneficio_auxilio` é uma categoria real do enum (prova contra
+ * Postgres real, não só o tipo TypeScript) e `listEmployeePayments` filtra corretamente por
+ * `competenceDate` quando a competência diverge da data de caixa (ex.: R$450 pago em 31/08 com
+ * competência setembro — deve aparecer no filtro de competência de setembro e NÃO no de agosto,
+ * mesmo com `date` em agosto).
+ */
+describe.skipIf(!hasRealDb)("beneficio_auxilio + filtro por competência (Missão DP, 20/09/2026)", () => {
+  it("11) beneficio_auxilio é aceito pelo enum real do banco", async () => {
+    const cashMovementId = await createTestCashMovement(450);
+    createdCashMovementIds.push(cashMovementId);
+    const payment = await createEmployeePayment({
+      category: "beneficio_auxilio",
+      amount: 450,
+      date: "2026-08-31",
+      competenceDate: "2026-09-01",
+      description: "teste beneficio_auxilio",
+      cashMovementId,
+    });
+    createdPaymentIds.push(payment.id);
+    expect(payment.category).toBe("beneficio_auxilio");
+    expect(payment.competenceDate).toBe("2026-09-01");
+  });
+
+  it("12) filtro por competenceDateFrom/To encontra o pagamento pela competência de setembro, mesmo com date em agosto", async () => {
+    const cashMovementId = await createTestCashMovement(450);
+    createdCashMovementIds.push(cashMovementId);
+    const payment = await createEmployeePayment({
+      category: "beneficio_auxilio",
+      amount: 450,
+      date: "2026-08-31",
+      competenceDate: "2026-09-01",
+      description: "teste filtro competência",
+      cashMovementId,
+    });
+    createdPaymentIds.push(payment.id);
+
+    const bySeptCompetence = await listEmployeePayments({ competenceDateFrom: "2026-09-01", competenceDateTo: "2026-09-30" });
+    expect(bySeptCompetence.some((p) => p.id === payment.id)).toBe(true);
+
+    const byAugustCompetence = await listEmployeePayments({ competenceDateFrom: "2026-08-01", competenceDateTo: "2026-08-31" });
+    expect(byAugustCompetence.some((p) => p.id === payment.id)).toBe(false);
+
+    // pelo filtro de CAIXA (date), continua aparecendo em agosto — os dois filtros respondem perguntas diferentes.
+    const byAugustCashDate = await listEmployeePayments({ dateFrom: "2026-08-01", dateTo: "2026-08-31" });
+    expect(byAugustCashDate.some((p) => p.id === payment.id)).toBe(true);
   });
 });
