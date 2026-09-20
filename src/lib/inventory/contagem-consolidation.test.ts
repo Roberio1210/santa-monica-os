@@ -64,8 +64,18 @@ describe("Convergência entre contagem rápida e lote — Missão de Consolidaç
   });
 
   it("lote seguido de contagem rápida — getLastTwoReliableCounts reconhece as duas, na ordem certa", async () => {
+    // `confirmStocktake` sempre carimba a data REAL de hoje internamente (não aceita data
+    // customizada — é o comportamento correto de produção: a confirmação em lote acontece agora).
+    // Por isso a contagem rápida seguinte precisa de uma data calculada relativa a "hoje" (nunca
+    // um literal fixo como "2026-08-20") para garantir que ela sempre fique cronologicamente
+    // DEPOIS do lote, não importa em que dia real este teste rodar. Um literal fixo funcionava
+    // apenas enquanto "hoje" não tivesse ultrapassado aquela data — quebrou em 20/09/2026 quando
+    // o relógio do sistema avançou além de 2026-08-20 (bug só do teste, nunca de produção; ver
+    // `pickLastTwoReliableCounts`, que ordena por data corretamente).
+    const amanha = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
     await confirmStocktake("TESTE-CONSOLIDACAO-7", "Teste lote", [{ itemId: "glaco-soft99", physicalQuantity: 200, notFound: false, measurementPending: false, observation: null }]);
-    await registerPhysicalInventoryCount({ itemId: "glaco-soft99", countedQuantity: 150, countedAt: "2026-08-20", source: "Teste rápida" });
+    await registerPhysicalInventoryCount({ itemId: "glaco-soft99", countedQuantity: 150, countedAt: amanha, source: "Teste rápida" });
 
     const counts = await getLastTwoReliableCounts("glaco-soft99");
     expect(counts.latest?.quantity).toBe(150);
