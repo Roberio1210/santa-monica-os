@@ -249,6 +249,114 @@ export async function getOrCreateContractor(input: CreateContractorInput): Promi
   return row;
 }
 
+/**
+ * Fase 5 do Departamento Pessoal (20/09/2026) — cadastro de colaborador NOVO pela interface.
+ * Deliberadamente NÃO reaproveita `getOrCreateEmployee`/`getOrCreateContractor` (que "mesclam"
+ * silenciosamente por `fullName`/`businessName` — comportamento certo para scripts internos de
+ * backfill, errado aqui: o gestor pediu explicitamente "bloquear e informar... nunca mesclar
+ * automaticamente" quando houver possível conflito). Sempre INSERT; a única checagem de
+ * duplicidade é por identificador confiável — nunca por nome sozinho.
+ */
+export class DuplicateCollaboratorError extends Error {}
+
+export interface CreateEmployeeRecordInput {
+  fullName: string;
+  role: string;
+  admissionDate?: string | null;
+  workSchedule?: string | null;
+  baseSalary?: number | null;
+  notes?: string | null;
+}
+
+/**
+ * `employees` não tem nenhuma coluna de identificador confiável (CPF, matrícula) — só `fullName`,
+ * que o gestor explicitamente pediu para NUNCA tratar como prova de duplicidade. Por isso não há
+ * checagem de conflito aqui: é uma limitação real do schema atual, documentada, não um
+ * esquecimento. Sempre cria um registro novo.
+ */
+export async function createEmployeeRecord(input: CreateEmployeeRecordInput, actorUserId: string | null): Promise<EmployeeRow> {
+  return db().transaction(async (tx) => {
+    const [row] = await tx
+      .insert(employees)
+      .values({
+        fullName: input.fullName,
+        role: input.role,
+        admissionDate: input.admissionDate ?? null,
+        workSchedule: input.workSchedule ?? null,
+        baseSalary: input.baseSalary !== null && input.baseSalary !== undefined ? String(input.baseSalary) : null,
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorUserId,
+      action: "create_employee",
+      entityType: "employee",
+      entityId: row.id,
+      beforeState: null,
+      afterState: row,
+      source: "manual",
+    });
+
+    return row;
+  });
+}
+
+export interface CreateContractorRecordInput {
+  businessName: string;
+  type: "pessoa_fisica" | "pessoa_juridica";
+  taxId?: string | null;
+  contactPhone?: string | null;
+  scope?: string | null;
+  agreedValue?: number | null;
+  contractStart?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * `contractors.taxId` (CPF/CNPJ) é o único identificador confiável do schema — checado dentro da
+ * MESMA transação do INSERT (janela de corrida estreita e aceita: esta ferramenta tem um único
+ * operador administrador por vez, nunca cadastro concorrente de verdade; uma garantia formal via
+ * `UNIQUE` exigiria migration, avaliada e não considerada indispensável para o cadastro básico).
+ * Sem `taxId` informado, não há identificador nenhum para checar — cria normalmente, nunca bloqueia
+ * por semelhança de nome.
+ */
+export async function createContractorRecord(input: CreateContractorRecordInput, actorUserId: string | null): Promise<ContractorRow> {
+  return db().transaction(async (tx) => {
+    if (input.taxId) {
+      const [existing] = await tx.select().from(contractors).where(eq(contractors.taxId, input.taxId)).limit(1);
+      if (existing) throw new DuplicateCollaboratorError(`Já existe um prestador cadastrado com este CPF/CNPJ: "${existing.businessName}".`);
+    }
+
+    const [row] = await tx
+      .insert(contractors)
+      .values({
+        businessName: input.businessName,
+        type: input.type,
+        taxId: input.taxId ?? null,
+        contactPhone: input.contactPhone ?? null,
+        scope: input.scope ?? null,
+        agreedValue: input.agreedValue !== null && input.agreedValue !== undefined ? String(input.agreedValue) : null,
+        contractStart: input.contractStart ?? null,
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorUserId,
+      action: "create_contractor",
+      entityType: "contractor",
+      entityId: row.id,
+      beforeState: null,
+      afterState: redactContractorForAudit(row),
+      source: "manual",
+      notes: input.taxId ? "cpf_cnpj: informado no cadastro" : null,
+    });
+
+    return row;
+  });
+}
+
 export interface CreateEmployeePaymentInput {
   subjectType?: "employee" | "contractor" | null;
   subjectId?: string | null;

@@ -1,23 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn((path: string) => {
+    throw new Error(`REDIRECT:${path}`);
+  }),
+}));
 vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn() }));
 vi.mock("@/lib/hr/repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hr/repository")>();
-  return { ...actual, updateEmployee: vi.fn(), updateContractor: vi.fn(), recordEmployeePayment: vi.fn() };
+  return { ...actual, updateEmployee: vi.fn(), updateContractor: vi.fn(), recordEmployeePayment: vi.fn(), createEmployeeRecord: vi.fn(), createContractorRecord: vi.fn() };
 });
 
-import { updateEmployeeAction, updateContractorAction, toggleCollaboratorActiveAction, registerEmployeePaymentAction } from "@/app/departamento-pessoal/actions";
+import { updateEmployeeAction, updateContractorAction, toggleCollaboratorActiveAction, registerEmployeePaymentAction, createEmployeeAction, createContractorAction } from "@/app/departamento-pessoal/actions";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   updateEmployee,
   updateContractor,
   recordEmployeePayment,
+  createEmployeeRecord,
+  createContractorRecord,
   NotFoundError,
   ConcurrencyConflictError,
   InvalidPaymentCategoryError,
   InvalidFinancialAccountError,
   InvalidAmountError,
+  DuplicateCollaboratorError,
 } from "@/lib/hr/repository";
 
 /**
@@ -42,6 +50,8 @@ beforeEach(() => {
   vi.mocked(updateEmployee).mockReset();
   vi.mocked(updateContractor).mockReset();
   vi.mocked(recordEmployeePayment).mockReset();
+  vi.mocked(createEmployeeRecord).mockReset();
+  vi.mocked(createContractorRecord).mockReset();
 });
 
 describe("updateEmployeeAction / updateContractorAction — RBAC fail-closed (Fase 3, 20/09/2026)", () => {
@@ -319,5 +329,136 @@ describe("registerEmployeePaymentAction — Fase 4 (20/09/2026)", () => {
 
     expect(result.error).toBeNull();
     expect(result.success).toMatch(/já havia sido registrado/i);
+  });
+});
+
+const validEmployeeCreatePayload = { fullName: "Novo CLT Teste", role: "Cargo teste" };
+const validContractorCreatePayload = { businessName: "Novo PJ Teste", type: "pessoa_fisica" };
+
+describe("createEmployeeAction — Fase 5 (20/09/2026)", () => {
+  it("30) sem sessão -> erro, createEmployeeRecord NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue(null);
+    const result = await createEmployeeAction({ error: null, success: null }, formData(validEmployeeCreatePayload));
+    expect(result.error).toMatch(/não autorizado/i);
+    expect(createEmployeeRecord).not.toHaveBeenCalled();
+  });
+
+  it("31) sessão operacional -> erro, createEmployeeRecord NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "u1", email: "op@example.com", name: "Operacional", role: "operacional" });
+    const result = await createEmployeeAction({ error: null, success: null }, formData(validEmployeeCreatePayload));
+    expect(result.error).toMatch(/administradores/i);
+    expect(createEmployeeRecord).not.toHaveBeenCalled();
+  });
+
+  it("32) admin autorizado -> createEmployeeRecord chamado com os campos certos e REDIRECT para a ficha do novo colaborador", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(createEmployeeRecord).mockResolvedValue({ id: "novo-emp-id" } as never);
+
+    await expect(createEmployeeAction({ error: null, success: null }, formData(validEmployeeCreatePayload))).rejects.toThrow("REDIRECT:/departamento-pessoal/novo-emp-id");
+
+    expect(createEmployeeRecord).toHaveBeenCalledWith({ fullName: "Novo CLT Teste", role: "Cargo teste", admissionDate: null, workSchedule: null, baseSalary: null, notes: null }, "admin-1");
+  });
+
+  it("33) campos opcionais em branco -> enviados como null, ainda cria normalmente", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(createEmployeeRecord).mockResolvedValue({ id: "novo-emp-id-2" } as never);
+
+    await expect(
+      createEmployeeAction({ error: null, success: null }, formData({ ...validEmployeeCreatePayload, admissionDate: "", workSchedule: "", baseSalary: "", notes: "" })),
+    ).rejects.toThrow("REDIRECT:/departamento-pessoal/novo-emp-id-2");
+
+    const input = vi.mocked(createEmployeeRecord).mock.calls[0]![0];
+    expect(input.admissionDate).toBeNull();
+    expect(input.workSchedule).toBeNull();
+    expect(input.baseSalary).toBeNull();
+    expect(input.notes).toBeNull();
+  });
+
+  it("34) nome ausente é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createEmployeeAction({ error: null, success: null }, formData({ ...validEmployeeCreatePayload, fullName: "" }));
+    expect(result.error).toMatch(/nome/i);
+    expect(createEmployeeRecord).not.toHaveBeenCalled();
+  });
+
+  it("35) função ausente é bloqueada antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createEmployeeAction({ error: null, success: null }, formData({ ...validEmployeeCreatePayload, role: "" }));
+    expect(result.error).toMatch(/função/i);
+    expect(createEmployeeRecord).not.toHaveBeenCalled();
+  });
+
+  it("36) salário base negativo é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createEmployeeAction({ error: null, success: null }, formData({ ...validEmployeeCreatePayload, baseSalary: "-100" }));
+    expect(result.error).toMatch(/salário/i);
+    expect(createEmployeeRecord).not.toHaveBeenCalled();
+  });
+
+  it("37) erro inesperado do repositório vira mensagem amigável, nunca stack trace/SQL", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(createEmployeeRecord).mockRejectedValue(new Error("Failed query: insert into employees..."));
+    const result = await createEmployeeAction({ error: null, success: null }, formData(validEmployeeCreatePayload));
+    expect(result.error).toBe("Falha ao cadastrar colaborador. Tente novamente.");
+    expect(result.error).not.toMatch(/select|insert|SQL/i);
+  });
+});
+
+describe("createContractorAction — Fase 5 (20/09/2026)", () => {
+  it("38) sem sessão -> erro, createContractorRecord NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue(null);
+    const result = await createContractorAction({ error: null, success: null }, formData(validContractorCreatePayload));
+    expect(result.error).toMatch(/não autorizado/i);
+    expect(createContractorRecord).not.toHaveBeenCalled();
+  });
+
+  it("39) sessão operacional -> erro, createContractorRecord NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "u1", email: "op@example.com", name: "Operacional", role: "operacional" });
+    const result = await createContractorAction({ error: null, success: null }, formData(validContractorCreatePayload));
+    expect(result.error).toMatch(/administradores/i);
+    expect(createContractorRecord).not.toHaveBeenCalled();
+  });
+
+  it("40) admin autorizado -> createContractorRecord chamado com os campos certos e REDIRECT para a ficha do novo colaborador", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(createContractorRecord).mockResolvedValue({ id: "novo-con-id" } as never);
+
+    await expect(createContractorAction({ error: null, success: null }, formData(validContractorCreatePayload))).rejects.toThrow("REDIRECT:/departamento-pessoal/novo-con-id");
+
+    expect(createContractorRecord).toHaveBeenCalledWith(
+      { businessName: "Novo PJ Teste", type: "pessoa_fisica", taxId: null, contactPhone: null, scope: null, agreedValue: null, contractStart: null, notes: null },
+      "admin-1",
+    );
+  });
+
+  it("41) nome/razão social ausente é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createContractorAction({ error: null, success: null }, formData({ ...validContractorCreatePayload, businessName: "" }));
+    expect(result.error).toMatch(/nome|razão social/i);
+    expect(createContractorRecord).not.toHaveBeenCalled();
+  });
+
+  it("42) tipo ausente/inválido é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createContractorAction({ error: null, success: null }, formData({ ...validContractorCreatePayload, type: "invalido" }));
+    expect(result.error).toMatch(/tipo/i);
+    expect(createContractorRecord).not.toHaveBeenCalled();
+  });
+
+  it("43) valor combinado negativo é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await createContractorAction({ error: null, success: null }, formData({ ...validContractorCreatePayload, agreedValue: "-50" }));
+    expect(result.error).toMatch(/valor/i);
+    expect(createContractorRecord).not.toHaveBeenCalled();
+  });
+
+  it("44) DuplicateCollaboratorError vira mensagem amigável, sem redirect, sem stack trace/SQL", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(createContractorRecord).mockRejectedValue(new DuplicateCollaboratorError('Já existe um prestador cadastrado com este CPF/CNPJ: "Fulano".'));
+
+    const result = await createContractorAction({ error: null, success: null }, formData({ ...validContractorCreatePayload, taxId: "123.456.789-00" }));
+
+    expect(result.error).toMatch(/já existe um prestador/i);
+    expect(result.error).not.toMatch(/select|insert|SQL/i);
   });
 });

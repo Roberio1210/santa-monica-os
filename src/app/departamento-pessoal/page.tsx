@@ -9,6 +9,8 @@ import { getDpOverview } from "@/lib/hr/service";
 import { CATEGORY_LABELS, outrosTotal } from "@/lib/hr/costSummary";
 import { parsePeriodParams } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
+import { getCurrentUser } from "@/lib/auth/session";
+import { NewCollaboratorForm } from "@/components/hr/new-collaborator-form";
 
 // Missão 86 — consulta dados reais a cada acesso, mesmo padrão de /visao-geral e /painel-gerencial.
 export const dynamic = "force-dynamic";
@@ -20,9 +22,16 @@ export default async function DepartamentoPessoalPage({ searchParams }: { search
 
   const totalPago = overview.recentPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
+  // Só controla se o botão aparece — a segurança de verdade é o requireAdmin (fail-closed) dentro
+  // das próprias server actions createEmployeeAction/createContractorAction.
+  const currentUser = await getCurrentUser();
+  const canEdit = currentUser?.role === "admin";
+
   return (
     <div className="space-y-6">
       <PageHeader title="Departamento Pessoal" description="Folha, diárias, adiantamentos e encargos — sempre com vínculo rastreável ao financeiro real." />
+
+      <NewCollaboratorForm canEdit={canEdit} />
 
       <div className="flex flex-col gap-2">
         <PeriodSelector period={period} />

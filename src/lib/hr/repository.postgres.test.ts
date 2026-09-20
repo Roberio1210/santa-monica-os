@@ -17,6 +17,9 @@ import {
   InvalidPaymentCategoryError,
   InvalidFinancialAccountError,
   InvalidAmountError,
+  createEmployeeRecord,
+  createContractorRecord,
+  DuplicateCollaboratorError,
 } from "@/lib/hr/repository";
 import { getCollaboratorProfile } from "@/lib/hr/service";
 
@@ -889,5 +892,121 @@ describe.skipIf(!hasRealDb)("recordEmployeePayment — Fase 4 (20/09/2026)", () 
     expect(logs[0]!.action).toBe("create_employee_payment");
     expect(logs[0]!.actorUserId).toBe(actor.id);
     expect(logs[0]!.notes).toContain(result.cashMovement.id);
+  });
+});
+
+/**
+ * Fase 5 do Departamento Pessoal (20/09/2026) — cadastro de colaborador novo.
+ * `createEmployeeRecord`/`createContractorRecord` nunca reaproveitam `getOrCreateEmployee`/
+ * `getOrCreateContractor` (que mesclam por nome) — sempre `INSERT`, com bloqueio explícito por
+ * `taxId` duplicado para PJ (única checagem de duplicidade confiável que o schema permite).
+ */
+describe.skipIf(!hasRealDb)("createEmployeeRecord / createContractorRecord — Fase 5 (20/09/2026)", () => {
+  it("cria um CLT novo com todos os campos", async () => {
+    const [actor] = await getDb()!.insert(users).values({ email: `fase5-emp-${randomUUID()}@teste.local`, name: "Admin de teste", role: "admin" }).returning();
+    createdUserIds.push(actor.id);
+
+    const row = await createEmployeeRecord({ fullName: `Fase5 CLT ${randomUUID()}`, role: "Cargo teste", admissionDate: "2026-09-01", workSchedule: "08h-17h", baseSalary: 3000, notes: "nota" }, actor.id);
+    createdEmployeeIds.push(row.id);
+
+    expect(row.role).toBe("Cargo teste");
+    expect(row.admissionDate).toBe("2026-09-01");
+    expect(row.workSchedule).toBe("08h-17h");
+    expect(row.baseSalary).toBe("3000.00");
+    expect(row.active).toBe(true);
+  });
+
+  it("cria um CLT novo com campos opcionais em branco -> ficam NULL, nunca inventados", async () => {
+    const row = await createEmployeeRecord({ fullName: `Fase5 CLT minimo ${randomUUID()}`, role: "Cargo" }, null);
+    createdEmployeeIds.push(row.id);
+
+    expect(row.admissionDate).toBeNull();
+    expect(row.workSchedule).toBeNull();
+    expect(row.baseSalary).toBeNull();
+    expect(row.notes).toBeNull();
+  });
+
+  it("cria um PJ novo com todos os campos", async () => {
+    const row = await createContractorRecord(
+      { businessName: `Fase5 PJ ${randomUUID()}`, type: "pessoa_fisica", taxId: `${randomUUID()}`, contactPhone: "47999999999", scope: "Lavação", agreedValue: 2600, contractStart: "2026-09-01", notes: "nota" },
+      null,
+    );
+    createdContractorIds.push(row.id);
+
+    expect(row.type).toBe("pessoa_fisica");
+    expect(row.contactPhone).toBe("47999999999");
+    expect(row.scope).toBe("Lavação");
+    expect(row.agreedValue).toBe("2600.00");
+    expect(row.active).toBe(true);
+  });
+
+  it("cria um PJ novo sem taxId (campo opcional) -> fica NULL, sem checagem de duplicidade", async () => {
+    const row = await createContractorRecord({ businessName: `Fase5 PJ sem-cpf ${randomUUID()}`, type: "pessoa_juridica" }, null);
+    createdContractorIds.push(row.id);
+
+    expect(row.taxId).toBeNull();
+    expect(row.contactPhone).toBeNull();
+    expect(row.agreedValue).toBeNull();
+  });
+
+  it("duas pessoas com o MESMO nome mas SEM taxId são ambas cadastradas — nome sozinho nunca é prova de duplicidade", async () => {
+    const sameName = `Fase5 Nome Repetido ${randomUUID()}`;
+    const first = await createContractorRecord({ businessName: sameName, type: "pessoa_fisica" }, null);
+    const second = await createContractorRecord({ businessName: sameName, type: "pessoa_fisica" }, null);
+    createdContractorIds.push(first.id, second.id);
+
+    expect(first.id).not.toBe(second.id); // duas pessoas, dois registros — nunca mesclado
+  });
+
+  it("PJ com taxId já cadastrado é BLOQUEADO — nunca mesclado silenciosamente", async () => {
+    const taxId = `cpf-teste-${randomUUID()}`;
+    const first = await createContractorRecord({ businessName: `Fase5 original ${randomUUID()}`, type: "pessoa_fisica", taxId }, null);
+    createdContractorIds.push(first.id);
+
+    await expect(createContractorRecord({ businessName: `Fase5 tentativa duplicada ${randomUUID()}`, type: "pessoa_fisica", taxId }, null)).rejects.toBeInstanceOf(DuplicateCollaboratorError);
+
+    const db = getDb()!;
+    const matches = await db.select().from(contractors).where(eq(contractors.taxId, taxId));
+    expect(matches).toHaveLength(1); // continua só o original, nunca um segundo
+  });
+
+  it("audit_log é criado na criação do CLT e do PJ (CPF/CNPJ nunca em texto completo)", async () => {
+    const db = getDb()!;
+    const emp = await createEmployeeRecord({ fullName: `Fase5 audit emp ${randomUUID()}`, role: "Cargo" }, null);
+    createdEmployeeIds.push(emp.id);
+    const empLogs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [emp.id]));
+    expect(empLogs).toHaveLength(1);
+    expect(empLogs[0]!.action).toBe("create_employee");
+    expect(empLogs[0]!.beforeState).toBeNull();
+
+    const taxId = `cpf-audit-${randomUUID()}`;
+    const con = await createContractorRecord({ businessName: `Fase5 audit con ${randomUUID()}`, type: "pessoa_fisica", taxId }, null);
+    createdContractorIds.push(con.id);
+    const conLogs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [con.id]));
+    expect(conLogs).toHaveLength(1);
+    expect(conLogs[0]!.action).toBe("create_contractor");
+    const serialized = JSON.stringify(conLogs[0]!.afterState);
+    expect(serialized).not.toContain(taxId); // CPF/CNPJ nunca em texto completo, mesma política da Fase 3
+    expect((conLogs[0]!.afterState as { taxId: string }).taxId).toBe("[presente]");
+  });
+
+  it("cadastro de colaborador NÃO tem nenhum efeito financeiro colateral (employee_payments/cash_movements/employee_advances/bank_statement_lines inalterados)", async () => {
+    const db = getDb()!;
+    const countsQuery = sql<{ employee_payments: number; cash_movements: number; employee_advances: number; bank_statement_lines: number }>`
+      select
+        (select count(*)::int from employee_payments) as employee_payments,
+        (select count(*)::int from cash_movements) as cash_movements,
+        (select count(*)::int from employee_advances) as employee_advances,
+        (select count(*)::int from bank_statement_lines) as bank_statement_lines
+    `;
+    const [before] = (await db.execute(countsQuery)) as unknown as Array<{ employee_payments: number; cash_movements: number; employee_advances: number; bank_statement_lines: number }>;
+
+    const emp = await createEmployeeRecord({ fullName: `Fase5 sem-efeito ${randomUUID()}`, role: "Cargo", baseSalary: 5000 }, null);
+    createdEmployeeIds.push(emp.id);
+    const con = await createContractorRecord({ businessName: `Fase5 sem-efeito PJ ${randomUUID()}`, type: "pessoa_fisica", agreedValue: 2600 }, null);
+    createdContractorIds.push(con.id);
+
+    const [after] = (await db.execute(countsQuery)) as unknown as Array<{ employee_payments: number; cash_movements: number; employee_advances: number; bank_statement_lines: number }>;
+    expect(after).toEqual(before); // mesmo informando salário/valor combinado, nenhum pagamento é gerado
   });
 });

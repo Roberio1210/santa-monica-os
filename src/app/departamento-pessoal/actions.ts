@@ -2,16 +2,20 @@
 
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/session";
 import {
   updateEmployee,
   updateContractor,
   recordEmployeePayment,
+  createEmployeeRecord,
+  createContractorRecord,
   ConcurrencyConflictError,
   NotFoundError,
   InvalidPaymentCategoryError,
   InvalidFinancialAccountError,
   InvalidAmountError,
+  DuplicateCollaboratorError,
   RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES,
   type RecordableEmployeePaymentCategory,
 } from "@/lib/hr/repository";
@@ -254,4 +258,69 @@ export async function registerEmployeePaymentAction(_prevState: FormActionState,
   revalidatePath("/departamento-pessoal");
   revalidatePath(`/departamento-pessoal/${subjectId}`);
   return { error: null, success: result.created ? "Pagamento registrado." : "Este pagamento já havia sido registrado — nenhum novo lançamento foi criado." };
+}
+
+/**
+ * Fase 5 (20/09/2026) — cadastro de colaborador CLT novo. Nunca cria pagamento/adiantamento/
+ * cash_movement — só `employees` + `audit_logs`. Redireciona para a ficha individual em caso de
+ * sucesso (`redirect` lança internamente — nunca deve ser capturado pelo `catch` abaixo, por isso
+ * fica fora do bloco `try`).
+ */
+export async function createEmployeeAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const auth = await requireAdmin();
+  if (auth.error !== null) return { error: auth.error, success: null };
+
+  const fullName = parseOptionalString(formData.get("fullName"));
+  if (!fullName) return { error: "Nome é obrigatório.", success: null };
+  const role = parseOptionalString(formData.get("role"));
+  if (!role) return { error: "Função é obrigatória.", success: null };
+  const admissionDate = parseOptionalString(formData.get("admissionDate"));
+  const workSchedule = parseOptionalString(formData.get("workSchedule"));
+  const baseSalaryResult = parseOptionalMoney(formData.get("baseSalary"));
+  if (!baseSalaryResult.ok) return { error: "Salário base inválido — informe um valor numérico não negativo.", success: null };
+  const notes = parseOptionalString(formData.get("notes"));
+
+  let created;
+  try {
+    created = await createEmployeeRecord({ fullName, role, admissionDate, workSchedule, baseSalary: baseSalaryResult.value, notes }, auth.user.id);
+  } catch {
+    return { error: "Falha ao cadastrar colaborador. Tente novamente.", success: null };
+  }
+
+  revalidatePath("/departamento-pessoal");
+  redirect(`/departamento-pessoal/${created.id}`);
+}
+
+/**
+ * Fase 5 (20/09/2026) — cadastro de prestador PJ novo. Único identificador confiável do schema é
+ * `taxId` (CPF/CNPJ) — quando informado e já existente, bloqueia e informa (nunca mescla
+ * silenciosamente). Sem `taxId`, não há como checar duplicidade (nome sozinho nunca é prova).
+ */
+export async function createContractorAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const auth = await requireAdmin();
+  if (auth.error !== null) return { error: auth.error, success: null };
+
+  const businessName = parseOptionalString(formData.get("businessName"));
+  if (!businessName) return { error: "Nome/razão social é obrigatório.", success: null };
+  const typeRaw = String(formData.get("type") ?? "");
+  const type = typeRaw === "pessoa_fisica" || typeRaw === "pessoa_juridica" ? typeRaw : null;
+  if (!type) return { error: "Tipo é obrigatório.", success: null };
+  const taxId = parseOptionalString(formData.get("taxId"));
+  const contactPhone = parseOptionalString(formData.get("contactPhone"));
+  const scope = parseOptionalString(formData.get("scope"));
+  const agreedValueResult = parseOptionalMoney(formData.get("agreedValue"));
+  if (!agreedValueResult.ok) return { error: "Valor combinado inválido — informe um valor numérico não negativo.", success: null };
+  const contractStart = parseOptionalString(formData.get("contractStart"));
+  const notes = parseOptionalString(formData.get("notes"));
+
+  let created;
+  try {
+    created = await createContractorRecord({ businessName, type, taxId, contactPhone, scope, agreedValue: agreedValueResult.value, contractStart, notes }, auth.user.id);
+  } catch (err) {
+    if (err instanceof DuplicateCollaboratorError) return { error: err.message, success: null };
+    return { error: "Falha ao cadastrar colaborador. Tente novamente.", success: null };
+  }
+
+  revalidatePath("/departamento-pessoal");
+  redirect(`/departamento-pessoal/${created.id}`);
 }
