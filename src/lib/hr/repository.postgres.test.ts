@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { cashMovements, employeeAdvances, employeePayments, employees, contractors } from "@/db/schema";
+import { cashMovements, employeeAdvances, employeePayments, employees, contractors, auditLogs, users } from "@/db/schema";
 import { inArray, sql } from "drizzle-orm";
 import {
   createEmployeeAdvance,
@@ -9,6 +9,10 @@ import {
   listEmployeePayments,
   getEmployeeById,
   getContractorById,
+  updateEmployee,
+  updateContractor,
+  NotFoundError,
+  ConcurrencyConflictError,
 } from "@/lib/hr/repository";
 import { getCollaboratorProfile } from "@/lib/hr/service";
 
@@ -38,6 +42,7 @@ const createdAdvanceIds: string[] = [];
 const createdCashMovementIds: string[] = [];
 const createdEmployeeIds: string[] = [];
 const createdContractorIds: string[] = [];
+const createdUserIds: string[] = [];
 
 afterAll(async () => {
   if (!hasRealDb) return;
@@ -46,8 +51,11 @@ afterAll(async () => {
   if (createdAdvanceIds.length > 0) await db.delete(employeeAdvances).where(inArray(employeeAdvances.id, createdAdvanceIds));
   if (createdPaymentIds.length > 0) await db.delete(employeePayments).where(inArray(employeePayments.id, createdPaymentIds));
   if (createdCashMovementIds.length > 0) await db.delete(cashMovements).where(inArray(cashMovements.id, createdCashMovementIds));
+  const auditableIds = [...createdEmployeeIds, ...createdContractorIds];
+  if (auditableIds.length > 0) await db.delete(auditLogs).where(inArray(auditLogs.entityId, auditableIds));
   if (createdEmployeeIds.length > 0) await db.delete(employees).where(inArray(employees.id, createdEmployeeIds));
   if (createdContractorIds.length > 0) await db.delete(contractors).where(inArray(contractors.id, createdContractorIds));
+  if (createdUserIds.length > 0) await db.delete(users).where(inArray(users.id, createdUserIds));
 });
 
 describe.skipIf(!hasRealDb)("createEmployeePayment / createEmployeeAdvance — idempotência real (Missão 86)", () => {
@@ -354,6 +362,199 @@ describe.skipIf(!hasRealDb)("Ficha individual — getEmployeeById/getContractorB
 
     const [after] = (await db.execute(countsQuery)) as unknown as Array<{ employees: number; contractors: number; employee_payments: number; employee_advances: number }>;
 
+    expect(after).toEqual(before);
+  });
+});
+
+/**
+ * Fase 3 do Departamento Pessoal (20/09/2026) — `updateEmployee`/`updateContractor`: whitelist
+ * explícita, concorrência otimista via `updated_at` (sem migration), audit log, e prova de que
+ * NENHUMA tabela financeira é tocada por uma edição cadastral.
+ */
+describe.skipIf(!hasRealDb)("updateEmployee / updateContractor — Fase 3 (20/09/2026)", () => {
+  it("atualiza os campos enviados e preserva os não enviados (employee)", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(employees).values({ fullName: `Fase3 CLT ${randomUUID()}`, role: "Cargo original", admissionDate: "2026-01-01", workSchedule: "manhã", baseSalary: "1000.00", notes: "nota original" }).returning();
+    createdEmployeeIds.push(created.id);
+
+    const updated = await updateEmployee(created.id, { role: "Cargo novo" }, created.updatedAt, null);
+
+    expect(updated.role).toBe("Cargo novo");
+    // não enviados continuam exatamente como estavam
+    expect(updated.fullName).toBe(created.fullName);
+    expect(updated.admissionDate).toBe("2026-01-01");
+    expect(updated.workSchedule).toBe("manhã");
+    expect(updated.baseSalary).toBe("1000.00");
+    expect(updated.notes).toBe("nota original");
+  });
+
+  it("atualiza os campos enviados e preserva os não enviados (contractor)", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(contractors).values({ businessName: `Fase3 PJ ${randomUUID()}`, taxId: "222.222.222-22", scope: "Escopo original", agreedValue: "2600.00" }).returning();
+    createdContractorIds.push(created.id);
+
+    const updated = await updateContractor(created.id, { agreedValue: 2150 }, created.updatedAt, null);
+
+    expect(updated.agreedValue).toBe("2150.00");
+    expect(updated.businessName).toBe(created.businessName);
+    expect(updated.taxId).toBe("222.222.222-22");
+    expect(updated.scope).toBe("Escopo original");
+  });
+
+  it("outro colaborador permanece 100% intacto", async () => {
+    const db = getDb()!;
+    const [target] = await db.insert(employees).values({ fullName: `Fase3 alvo ${randomUUID()}`, role: "Cargo A" }).returning();
+    const [other] = await db.insert(employees).values({ fullName: `Fase3 outro ${randomUUID()}`, role: "Cargo B" }).returning();
+    createdEmployeeIds.push(target.id, other.id);
+
+    await updateEmployee(target.id, { role: "Cargo A alterado" }, target.updatedAt, null);
+
+    const untouched = await getEmployeeById(other.id);
+    expect(untouched).toEqual(other);
+  });
+
+  it("ID inexistente lança NotFoundError, nunca cria registro novo", async () => {
+    const db = getDb()!;
+    const [{ n: before }] = (await db.execute(sql`select count(*)::int as n from employees`)) as unknown as Array<{ n: number }>;
+
+    await expect(updateEmployee(randomUUID(), { role: "x" }, new Date(), null)).rejects.toBeInstanceOf(NotFoundError);
+
+    const [{ n: after }] = (await db.execute(sql`select count(*)::int as n from employees`)) as unknown as Array<{ n: number }>;
+    expect(after).toBe(before);
+  });
+
+  it("concorrência: updatedAt divergente rejeita a escrita com ConcurrencyConflictError, nunca sobrescreve silenciosamente", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(employees).values({ fullName: `Fase3 concorrencia ${randomUUID()}`, role: "Original" }).returning();
+    createdEmployeeIds.push(created.id);
+
+    // simula outra sessão salvando primeiro
+    await updateEmployee(created.id, { role: "Alterado por outra sessão" }, created.updatedAt, null);
+
+    // esta chamada ainda usa o updatedAt ANTIGO (de antes da outra sessão salvar)
+    await expect(updateEmployee(created.id, { role: "Tentativa desatualizada" }, created.updatedAt, null)).rejects.toBeInstanceOf(ConcurrencyConflictError);
+
+    const current = await getEmployeeById(created.id);
+    expect(current!.role).toBe("Alterado por outra sessão"); // nunca sobrescrito pela tentativa desatualizada
+  });
+
+  it("update repetido com o mesmo patch e updatedAt sempre atualizado é idempotente no resultado final", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(employees).values({ fullName: `Fase3 idempotente ${randomUUID()}`, role: "Original" }).returning();
+    createdEmployeeIds.push(created.id);
+
+    const first = await updateEmployee(created.id, { role: "Mesmo valor" }, created.updatedAt, null);
+    const second = await updateEmployee(created.id, { role: "Mesmo valor" }, first.updatedAt, null);
+
+    expect(first.role).toBe("Mesmo valor");
+    expect(second.role).toBe("Mesmo valor");
+    expect(second.id).toBe(created.id);
+  });
+
+  it("active true -> false e false -> true funcionam e preservam o histórico associado", async () => {
+    const db = getDb()!;
+    const [employee] = await db.insert(employees).values({ fullName: `Fase3 ativo ${randomUUID()}`, role: "Cargo" }).returning();
+    createdEmployeeIds.push(employee.id);
+    const cashMovementId = await createTestCashMovement(500);
+    createdCashMovementIds.push(cashMovementId);
+    const payment = await createEmployeePayment({ subjectType: "employee", subjectId: employee.id, category: "salario_fixo", amount: 500, date: "2026-06-01", description: "pagamento de teste", cashMovementId });
+    createdPaymentIds.push(payment.id);
+
+    const deactivated = await updateEmployee(employee.id, { active: false }, employee.updatedAt, null);
+    expect(deactivated.active).toBe(false);
+    const paymentsAfterDeactivate = await listEmployeePayments({ subjectId: employee.id });
+    expect(paymentsAfterDeactivate.some((p) => p.id === payment.id)).toBe(true); // histórico preservado
+
+    const reactivated = await updateEmployee(employee.id, { active: true }, deactivated.updatedAt, null);
+    expect(reactivated.active).toBe(true);
+  });
+
+  it("mass assignment: chaves fora da whitelist (id, createdAt) injetadas no patch são ignoradas", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(employees).values({ fullName: `Fase3 mass-assign ${randomUUID()}`, role: "Original" }).returning();
+    createdEmployeeIds.push(created.id);
+    const [victim] = await db.insert(employees).values({ fullName: `Fase3 vitima ${randomUUID()}`, role: "Vítima" }).returning();
+    createdEmployeeIds.push(victim.id);
+
+    // simula um payload adulterado (bypassando o TypeScript de propósito, como um atacante faria via fetch manual)
+    const maliciousPatch = { role: "Cargo legítimo", id: victim.id, createdAt: new Date(0), active: true } as unknown as Parameters<typeof updateEmployee>[1];
+    const updated = await updateEmployee(created.id, maliciousPatch, created.updatedAt, null);
+
+    expect(updated.id).toBe(created.id); // nunca vira o ID injetado
+    expect(updated.createdAt).toEqual(created.createdAt); // createdAt nunca é sobrescrito
+    expect(updated.role).toBe("Cargo legítimo"); // o campo legítimo foi aplicado normalmente
+
+    const victimUntouched = await getEmployeeById(victim.id);
+    expect(victimUntouched).toEqual(victim); // a "vítima" nunca foi tocada
+  });
+
+  it("audit_logs registra a alteração com entidade, ação, ator e before/after state", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(contractors).values({ businessName: `Fase3 audit ${randomUUID()}`, scope: "Antes" }).returning();
+    createdContractorIds.push(created.id);
+    const [actor] = await db.insert(users).values({ email: `fase3-audit-${randomUUID()}@teste.local`, name: "Admin de teste", role: "admin" }).returning();
+    createdUserIds.push(actor.id);
+    const actorId = actor.id;
+
+    await updateContractor(created.id, { scope: "Depois" }, created.updatedAt, actorId);
+
+    const logs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [created.id]));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.entityType).toBe("contractor");
+    expect(logs[0]!.actorUserId).toBe(actorId);
+    expect((logs[0]!.beforeState as { scope: string }).scope).toBe("Antes");
+    expect((logs[0]!.afterState as { scope: string }).scope).toBe("Depois");
+  });
+
+  it("CPF/CNPJ NUNCA aparece completo no audit_logs — nem no valor anterior, nem no novo — quando o campo muda", async () => {
+    const db = getDb()!;
+    const cpfOriginal = "123.456.789-00";
+    const cpfNovo = "987.654.321-00";
+    const [created] = await db.insert(contractors).values({ businessName: `Fase3 cpf ${randomUUID()}`, taxId: cpfOriginal }).returning();
+    createdContractorIds.push(created.id);
+
+    await updateContractor(created.id, { taxId: cpfNovo }, created.updatedAt, null);
+
+    const logs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [created.id]));
+    expect(logs).toHaveLength(1);
+    const serialized = JSON.stringify(logs[0]!.beforeState) + JSON.stringify(logs[0]!.afterState) + (logs[0]!.notes ?? "");
+    expect(serialized).not.toContain(cpfOriginal);
+    expect(serialized).not.toContain(cpfNovo);
+    expect((logs[0]!.beforeState as { taxId: string }).taxId).toBe("[presente]");
+    expect((logs[0]!.afterState as { taxId: string }).taxId).toBe("[presente]");
+    expect(logs[0]!.notes).toBe("cpf_cnpj: alterado"); // indica QUE mudou, nunca o valor
+  });
+
+  it("CPF/CNPJ continua redigido no audit_logs mesmo quando NÃO muda (outro campo é editado)", async () => {
+    const db = getDb()!;
+    const cpf = "111.222.333-44";
+    const [created] = await db.insert(contractors).values({ businessName: `Fase3 cpf-inalterado ${randomUUID()}`, taxId: cpf, scope: "Antes" }).returning();
+    createdContractorIds.push(created.id);
+
+    await updateContractor(created.id, { scope: "Depois" }, created.updatedAt, null);
+
+    const logs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [created.id]));
+    const serialized = JSON.stringify(logs[0]!.beforeState) + JSON.stringify(logs[0]!.afterState);
+    expect(serialized).not.toContain(cpf);
+    expect(logs[0]!.notes).toBeNull(); // CPF não mudou, então nem a nota "alterado" aparece
+  });
+
+  it("editar o valor combinado NÃO cria employee_payment, cash_movement nem employee_advance", async () => {
+    const db = getDb()!;
+    const [created] = await db.insert(contractors).values({ businessName: `Fase3 sem-efeito-financeiro ${randomUUID()}`, agreedValue: "1000.00" }).returning();
+    createdContractorIds.push(created.id);
+
+    const countsQuery = sql<{ employee_payments: number; employee_advances: number; cash_movements: number }>`
+      select
+        (select count(*)::int from employee_payments) as employee_payments,
+        (select count(*)::int from employee_advances) as employee_advances,
+        (select count(*)::int from cash_movements) as cash_movements
+    `;
+    const [before] = (await db.execute(countsQuery)) as unknown as Array<{ employee_payments: number; employee_advances: number; cash_movements: number }>;
+
+    await updateContractor(created.id, { agreedValue: 2600 }, created.updatedAt, null);
+
+    const [after] = (await db.execute(countsQuery)) as unknown as Array<{ employee_payments: number; employee_advances: number; cash_movements: number }>;
     expect(after).toEqual(before);
   });
 });

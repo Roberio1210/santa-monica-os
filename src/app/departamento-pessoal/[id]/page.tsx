@@ -12,6 +12,8 @@ import { CATEGORY_LABELS, outrosTotal } from "@/lib/hr/costSummary";
 import { computeAdvanceOutstanding, type EmployeeAdvanceStatus } from "@/lib/hr/advances";
 import { parsePeriodParams } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
+import { getCurrentUser } from "@/lib/auth/session";
+import { CollaboratorEditForm } from "@/components/hr/collaborator-edit-form";
 
 // Ficha individual (Fase 1, 20/09/2026) — mesmo padrão de /departamento-pessoal: consulta dados
 // reais a cada acesso, nunca cacheada (a folha muda a qualquer momento).
@@ -36,6 +38,12 @@ export default async function ColaboradorPage({ params, searchParams }: { params
   const profile = await getCollaboratorProfile(id, { from: period.from, to: period.to });
 
   if (!profile) notFound();
+
+  // Só controla se o BOTÃO aparece — a segurança de verdade é a checagem fail-closed dentro das
+  // próprias server actions (requireAdmin, em departamento-pessoal/actions.ts), que roda de novo
+  // mesmo que alguém chame a action diretamente sem passar por esta página.
+  const currentUser = await getCurrentUser();
+  const canEdit = currentUser?.role === "admin";
 
   return (
     <div className="space-y-6">
@@ -111,6 +119,8 @@ export default async function ColaboradorPage({ params, searchParams }: { params
           </dl>
         </CardContent>
       </Card>
+
+      <CollaboratorEditForm profile={profile} canEdit={canEdit} />
 
       <Card>
         <CardHeader>

@@ -1,7 +1,7 @@
 import "server-only";
-import { and, desc, eq, gte, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { employees, contractors, employeeDocuments, employeePayments, employeeAdvances } from "@/db/schema";
+import { employees, contractors, employeeDocuments, employeePayments, employeeAdvances, auditLogs } from "@/db/schema";
 import { applyAdvanceCompensation, type EmployeeAdvanceState } from "@/lib/hr/advances";
 
 /**
@@ -48,6 +48,142 @@ export async function getEmployeeById(id: string): Promise<EmployeeRow | null> {
 export async function getContractorById(id: string): Promise<ContractorRow | null> {
   const [row] = await db().select().from(contractors).where(eq(contractors.id, id)).limit(1);
   return row ?? null;
+}
+
+/** Colaborador não encontrado pelo ID exato informado — nunca um fallback silencioso. */
+export class NotFoundError extends Error {}
+
+/**
+ * Update concorrente: outra sessão salvou o mesmo cadastro entre a leitura e esta escrita.
+ * Nunca sobrescrita silenciosa — o chamador deve pedir para o usuário recarregar e tentar de novo.
+ */
+export class ConcurrencyConflictError extends Error {}
+
+/**
+ * Whitelist explícita dos campos editáveis de `employees` (Fase 3, 20/09/2026) — nunca um spread
+ * de objeto arbitrário. Cada campo só é incluído no `UPDATE` se estiver presente em `patch`
+ * (`in` check, não `!== undefined`, para permitir setar explicitamente `null` num campo nullable
+ * sem confundir com "não enviado"); os demais permanecem exatamente como estavam. Nunca inclui
+ * `id`/`createdAt`/`source`/`externalId` — mesmo que um chamador malicioso os injete no objeto
+ * `patch` (`as any`), esta função nunca os lê.
+ */
+export interface UpdateEmployeeInput {
+  fullName?: string;
+  role?: string;
+  admissionDate?: string | null;
+  workSchedule?: string | null;
+  baseSalary?: number | null;
+  notes?: string | null;
+  active?: boolean;
+}
+
+/**
+ * `expectedUpdatedAt` implementa concorrência otimista SEM migration: a escrita só é aplicada se
+ * `updated_at` no banco ainda for exatamente o valor lido pelo formulário (truncado a
+ * milissegundos — `now()` do Postgres tem precisão de microssegundos, uma comparação exata
+ * quebraria sempre). Zero linhas afetadas => outra sessão alterou o registro nesse meio tempo =>
+ * `ConcurrencyConflictError`, nunca uma sobrescrita silenciosa. `actorUserId` vai para o
+ * `audit_logs` — `null` quando não há sessão individual real (nunca inventado).
+ */
+export async function updateEmployee(id: string, patch: UpdateEmployeeInput, expectedUpdatedAt: Date, actorUserId: string | null): Promise<EmployeeRow> {
+  return db().transaction(async (tx) => {
+    const [existing] = await tx.select().from(employees).where(eq(employees.id, id)).limit(1);
+    if (!existing) throw new NotFoundError(`Colaborador (CLT) não encontrado: ${id}`);
+
+    const setValues: Record<string, unknown> = { updatedAt: new Date() };
+    if ("fullName" in patch) setValues.fullName = patch.fullName;
+    if ("role" in patch) setValues.role = patch.role;
+    if ("admissionDate" in patch) setValues.admissionDate = patch.admissionDate;
+    if ("workSchedule" in patch) setValues.workSchedule = patch.workSchedule;
+    if ("baseSalary" in patch) setValues.baseSalary = patch.baseSalary === null || patch.baseSalary === undefined ? null : String(patch.baseSalary);
+    if ("notes" in patch) setValues.notes = patch.notes;
+    if ("active" in patch) setValues.active = patch.active;
+
+    const [updated] = await tx
+      .update(employees)
+      .set(setValues)
+      .where(and(eq(employees.id, id), sql`date_trunc('milliseconds', ${employees.updatedAt}) = date_trunc('milliseconds', ${expectedUpdatedAt.toISOString()}::timestamptz)`))
+      .returning();
+
+    if (!updated) throw new ConcurrencyConflictError("Este cadastro foi alterado por outra sessão — recarregue a página antes de salvar novamente.");
+
+    await tx.insert(auditLogs).values({
+      actorUserId,
+      action: "update_employee_cadastro",
+      entityType: "employee",
+      entityId: id,
+      beforeState: existing,
+      afterState: updated,
+      source: "manual",
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Fase 3 (revisão final, 20/09/2026) — `audit_logs` nunca grava CPF/CNPJ completo (decisão
+ * explícita do gestor), nem no valor anterior nem no novo: `taxId` vira `"[presente]"`/`null`,
+ * nunca o documento em si. `employees` não tem coluna de CPF (ver schema), então só `contractors`
+ * precisa desta redação.
+ */
+function redactContractorForAudit(row: ContractorRow): Record<string, unknown> {
+  const { taxId, ...rest } = row;
+  return { ...rest, taxId: taxId ? "[presente]" : null };
+}
+
+/** Mesma whitelist explícita e a mesma disciplina de `updateEmployee`, para `contractors` (PJ). */
+export interface UpdateContractorInput {
+  businessName?: string;
+  type?: "pessoa_fisica" | "pessoa_juridica";
+  taxId?: string | null;
+  contactPhone?: string | null;
+  scope?: string | null;
+  agreedValue?: number | null;
+  contractStart?: string | null;
+  contractEnd?: string | null;
+  notes?: string | null;
+  active?: boolean;
+}
+
+export async function updateContractor(id: string, patch: UpdateContractorInput, expectedUpdatedAt: Date, actorUserId: string | null): Promise<ContractorRow> {
+  return db().transaction(async (tx) => {
+    const [existing] = await tx.select().from(contractors).where(eq(contractors.id, id)).limit(1);
+    if (!existing) throw new NotFoundError(`Prestador (PJ) não encontrado: ${id}`);
+
+    const setValues: Record<string, unknown> = { updatedAt: new Date() };
+    if ("businessName" in patch) setValues.businessName = patch.businessName;
+    if ("type" in patch) setValues.type = patch.type;
+    if ("taxId" in patch) setValues.taxId = patch.taxId;
+    if ("contactPhone" in patch) setValues.contactPhone = patch.contactPhone;
+    if ("scope" in patch) setValues.scope = patch.scope;
+    if ("agreedValue" in patch) setValues.agreedValue = patch.agreedValue === null || patch.agreedValue === undefined ? null : String(patch.agreedValue);
+    if ("contractStart" in patch) setValues.contractStart = patch.contractStart;
+    if ("contractEnd" in patch) setValues.contractEnd = patch.contractEnd;
+    if ("notes" in patch) setValues.notes = patch.notes;
+    if ("active" in patch) setValues.active = patch.active;
+
+    const [updated] = await tx
+      .update(contractors)
+      .set(setValues)
+      .where(and(eq(contractors.id, id), sql`date_trunc('milliseconds', ${contractors.updatedAt}) = date_trunc('milliseconds', ${expectedUpdatedAt.toISOString()}::timestamptz)`))
+      .returning();
+
+    if (!updated) throw new ConcurrencyConflictError("Este cadastro foi alterado por outra sessão — recarregue a página antes de salvar novamente.");
+
+    await tx.insert(auditLogs).values({
+      actorUserId,
+      action: "update_contractor_cadastro",
+      entityType: "contractor",
+      entityId: id,
+      beforeState: redactContractorForAudit(existing),
+      afterState: redactContractorForAudit(updated),
+      source: "manual",
+      notes: existing.taxId !== updated.taxId ? "cpf_cnpj: alterado" : null,
+    });
+
+    return updated;
+  });
 }
 
 export interface CreateEmployeeInput {

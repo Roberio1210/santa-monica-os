@@ -108,6 +108,15 @@ export interface CollaboratorProfile {
   /** Só existe estruturalmente para `employee` — PJ não tem jornada registrada. */
   workSchedule: string | null;
   agreedValueOrBaseSalary: number | null;
+  /** Só existe estruturalmente para `contractor`. Fase 3, 20/09/2026 — necessário para o formulário de edição PJ. */
+  contractorType: "pessoa_fisica" | "pessoa_juridica" | null;
+  /** Só existe estruturalmente para `contractor`. */
+  contactPhone: string | null;
+  /** Só existe estruturalmente para `contractor` (fim de vigência) — `admissionOrStart` já cobre o início de ambos. */
+  contractEnd: string | null;
+  notes: string | null;
+  /** Token de concorrência otimista da Fase 3 — o formulário de edição envia de volta exatamente este valor; se o registro mudou nesse meio tempo, o `UPDATE` não encontra a linha e falha com `ConcurrencyConflictError`. */
+  updatedAt: Date;
   period: { from: string; to: string };
   costSummary: PersonnelCostSummary;
   payments: EmployeePaymentRow[];
@@ -140,6 +149,11 @@ export async function getCollaboratorProfile(id: string, period: { from: string;
     taxId: employee ? null : contractor!.taxId,
     workSchedule: employee ? employee.workSchedule : null,
     agreedValueOrBaseSalary: employee ? (employee.baseSalary !== null ? Number(employee.baseSalary) : null) : contractor!.agreedValue !== null ? Number(contractor!.agreedValue) : null,
+    contractorType: employee ? null : contractor!.type,
+    contactPhone: employee ? null : contractor!.contactPhone,
+    contractEnd: employee ? null : contractor!.contractEnd,
+    notes: employee ? employee.notes : contractor!.notes,
+    updatedAt: employee ? employee.updatedAt : contractor!.updatedAt,
     period,
     costSummary: summarizePersonnelCost(forSummary),
     payments,
