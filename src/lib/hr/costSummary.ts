@@ -42,6 +42,29 @@ const ZERO_BY_CATEGORY: PersonnelCostByCategory = {
   outro: 0,
 };
 
+/**
+ * Rótulo de exibição de cada categoria — `Record<EmployeePaymentCategory, string>` (não
+ * `Record<string, string>`) de propósito: se uma categoria nova entrar no enum e este objeto não
+ * for atualizado, o typecheck quebra em vez de a tela mostrar a chave técnica. Fase 1 da ficha
+ * individual (20/09/2026) — movido para cá para `/departamento-pessoal` e
+ * `/departamento-pessoal/[id]` usarem o mesmo texto, nunca duplicado.
+ */
+export const CATEGORY_LABELS: Record<EmployeePaymentCategory, string> = {
+  salario_fixo: "Salários/fixos",
+  comissao: "Comissões",
+  bonus: "Bônus",
+  diaria_freelancer: "Diárias/freelas",
+  adiantamento: "Adiantamentos",
+  beneficio_auxilio: "Benefícios/auxílios",
+  reembolso: "Reembolsos",
+  desconto_compensacao: "Descontos/compensação",
+  rescisao: "Rescisões",
+  ferias: "Férias",
+  decimo_terceiro: "13º salário",
+  encargo: "Encargos/impostos",
+  outro: "Outros",
+};
+
 export interface PersonnelCostSummary {
   totalGeral: number;
   porCategoria: PersonnelCostByCategory;
@@ -55,6 +78,16 @@ export function summarizePersonnelCost(payments: EmployeePaymentForSummary[]): P
   }
   const totalGeral = Math.round(Object.values(porCategoria).reduce((sum, v) => sum + v, 0) * 100) / 100;
   return { totalGeral, porCategoria };
+}
+
+/**
+ * Ficha individual (Fase 1, 20/09/2026) — mesmo agrupamento "Outros pagamentos" já usado no card
+ * de `/departamento-pessoal` (categorias residuais, nenhuma delas granular o bastante para ter
+ * card própria ainda). Extraído para cá para a ficha do colaborador reutilizar em vez de repetir
+ * a mesma soma dentro do componente React.
+ */
+export function outrosTotal(porCategoria: PersonnelCostByCategory): number {
+  return Math.round((porCategoria.outro + porCategoria.reembolso + porCategoria.desconto_compensacao + porCategoria.rescisao + porCategoria.ferias + porCategoria.decimo_terceiro) * 100) / 100;
 }
 
 /** Histórico de UM colaborador, agrupado por categoria — nunca uma soma cega de tudo. */

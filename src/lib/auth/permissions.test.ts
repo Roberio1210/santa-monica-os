@@ -64,6 +64,11 @@ describe("isPathAllowedForRole — OPERACIONAL", () => {
     expect(isPathAllowedForRole("operacional", "/departamento-pessoal/colaboradores")).toBe(false);
   });
 
+  it("Fase 1 da ficha individual (20/09/2026) — /departamento-pessoal/[id] herda o mesmo bloqueio, mesma regra de prefixo, sem exceção nenhuma para a rota dinâmica", () => {
+    expect(isPathAllowedForRole("operacional", "/departamento-pessoal/f5f75537-1a84-43df-a63a-f87264ecdbca")).toBe(false);
+    expect(isPathAllowedForRole("admin", "/departamento-pessoal/f5f75537-1a84-43df-a63a-f87264ecdbca")).toBe(true);
+  });
+
   it("é BLOQUEADO em todas as rotas financeiras/administrativas listadas na missão", () => {
     for (const route of FINANCIAL_ROUTES) {
       expect(isPathAllowedForRole("operacional", route)).toBe(false);

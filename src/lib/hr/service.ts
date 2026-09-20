@@ -1,5 +1,19 @@
 import "server-only";
-import { listContractors, listEmployeeAdvances, listEmployeePayments, listEmployees, listOpenEmployeeAdvances, type ContractorRow, type EmployeeAdvanceRow, type EmployeePaymentRow, type EmployeeRow } from "@/lib/hr/repository";
+import {
+  listContractors,
+  listEmployeeAdvances,
+  listEmployeePayments,
+  listEmployees,
+  listOpenEmployeeAdvances,
+  getEmployeeById,
+  getContractorById,
+  listEmployeeDocuments,
+  type ContractorRow,
+  type EmployeeAdvanceRow,
+  type EmployeeDocumentRow,
+  type EmployeePaymentRow,
+  type EmployeeRow,
+} from "@/lib/hr/repository";
 import { summarizePersonnelCost, type EmployeePaymentForSummary, type PersonnelCostSummary } from "@/lib/hr/costSummary";
 
 /**
@@ -72,4 +86,64 @@ export async function getCollaboratorHistory(subjectId: string): Promise<Employe
 
 export async function listAllAdvances(): Promise<EmployeeAdvanceRow[]> {
   return listEmployeeAdvances();
+}
+
+/**
+ * Ficha individual (`/departamento-pessoal/[id]`, Fase 1, 20/09/2026) — dados cadastrais
+ * genéricos (nome/vínculo/função/CPF-CNPJ/valor combinado) NUNCA vêm do histórico financeiro,
+ * só das colunas estruturadas de `employees`/`contractors` (que hoje, para os 5 colaboradores
+ * reais, estão quase todas `null` — a ficha mostra "Não informado" nesses casos, nunca infere a
+ * partir de `employee_payments`/notas). `payments`/`costSummary` já vêm filtrados por
+ * `subjectId` — nunca incluem um encargo genérico (ex.: FGTS com `subjectId=null`) por engano.
+ */
+export interface CollaboratorProfile {
+  id: string;
+  type: "employee" | "contractor";
+  name: string;
+  active: boolean;
+  role: string | null;
+  admissionOrStart: string | null;
+  /** Só existe estruturalmente para `contractor` — `employees` não tem essa coluna (ver docs/hr-module-architecture.md). */
+  taxId: string | null;
+  /** Só existe estruturalmente para `employee` — PJ não tem jornada registrada. */
+  workSchedule: string | null;
+  agreedValueOrBaseSalary: number | null;
+  period: { from: string; to: string };
+  costSummary: PersonnelCostSummary;
+  payments: EmployeePaymentRow[];
+  advances: EmployeeAdvanceRow[];
+  documents: EmployeeDocumentRow[];
+}
+
+export async function getCollaboratorProfile(id: string, period: { from: string; to: string }): Promise<CollaboratorProfile | null> {
+  const employee = await getEmployeeById(id);
+  const contractor = employee ? null : await getContractorById(id);
+  if (!employee && !contractor) return null;
+
+  const subjectType: "employee" | "contractor" = employee ? "employee" : "contractor";
+
+  const [payments, advances, documents] = await Promise.all([
+    listEmployeePayments({ subjectId: id, dateFrom: period.from, dateTo: period.to }),
+    listEmployeeAdvances(id),
+    listEmployeeDocuments(subjectType, id),
+  ]);
+
+  const forSummary: EmployeePaymentForSummary[] = payments.map((p) => ({ category: p.category, amount: Number(p.amount) }));
+
+  return {
+    id,
+    type: subjectType,
+    name: employee ? employee.fullName : contractor!.businessName,
+    active: employee ? employee.active : contractor!.active,
+    role: employee ? employee.role : contractor!.scope,
+    admissionOrStart: employee ? employee.admissionDate : contractor!.contractStart,
+    taxId: employee ? null : contractor!.taxId,
+    workSchedule: employee ? employee.workSchedule : null,
+    agreedValueOrBaseSalary: employee ? (employee.baseSalary !== null ? Number(employee.baseSalary) : null) : contractor!.agreedValue !== null ? Number(contractor!.agreedValue) : null,
+    period,
+    costSummary: summarizePersonnelCost(forSummary),
+    payments,
+    advances,
+    documents,
+  };
 }

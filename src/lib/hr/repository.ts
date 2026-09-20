@@ -18,6 +18,7 @@ export type EmployeeRow = typeof employees.$inferSelect;
 export type ContractorRow = typeof contractors.$inferSelect;
 export type EmployeePaymentRow = typeof employeePayments.$inferSelect;
 export type EmployeeAdvanceRow = typeof employeeAdvances.$inferSelect;
+export type EmployeeDocumentRow = typeof employeeDocuments.$inferSelect;
 
 function db() {
   const instance = getDb();
@@ -31,6 +32,22 @@ export async function listEmployees(): Promise<EmployeeRow[]> {
 
 export async function listContractors(): Promise<ContractorRow[]> {
   return db().select().from(contractors).where(eq(contractors.active, true));
+}
+
+/**
+ * Ficha individual (Fase 1, 20/09/2026) — busca por ID SEM filtrar por `active`: um colaborador
+ * desligado continua acessível pela ficha (histórico não desaparece), só deixa de aparecer na
+ * listagem principal de `/departamento-pessoal`. `null` quando o ID não existe (ou pertence ao
+ * outro tipo — a página resolve tentando `getEmployeeById` e, se null, `getContractorById`).
+ */
+export async function getEmployeeById(id: string): Promise<EmployeeRow | null> {
+  const [row] = await db().select().from(employees).where(eq(employees.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getContractorById(id: string): Promise<ContractorRow | null> {
+  const [row] = await db().select().from(contractors).where(eq(contractors.id, id)).limit(1);
+  return row ?? null;
 }
 
 export interface CreateEmployeeInput {
@@ -227,7 +244,7 @@ export async function compensateEmployeeAdvance(advanceId: string, compensationA
   return updated;
 }
 
-export async function listEmployeeDocuments(subjectType: "employee" | "contractor", subjectId: string) {
+export async function listEmployeeDocuments(subjectType: "employee" | "contractor", subjectId: string): Promise<EmployeeDocumentRow[]> {
   return db()
     .select()
     .from(employeeDocuments)

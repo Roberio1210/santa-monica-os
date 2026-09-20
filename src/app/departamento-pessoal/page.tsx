@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Users, Wallet, TrendingUp, Gift, CalendarClock, HandCoins, Landmark, MoreHorizontal, Heart } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -5,27 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { PeriodSelector } from "@/components/operations/period-selector";
 import { StatCard } from "@/components/cards/stat-card";
 import { getDpOverview } from "@/lib/hr/service";
+import { CATEGORY_LABELS, outrosTotal } from "@/lib/hr/costSummary";
 import { parsePeriodParams } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 
 // Missão 86 — consulta dados reais a cada acesso, mesmo padrão de /visao-geral e /painel-gerencial.
 export const dynamic = "force-dynamic";
-
-const CATEGORY_LABELS: Record<string, string> = {
-  salario_fixo: "Salários/fixos",
-  comissao: "Comissões",
-  bonus: "Bônus",
-  diaria_freelancer: "Diárias/freelas",
-  adiantamento: "Adiantamentos",
-  beneficio_auxilio: "Benefícios/auxílios",
-  reembolso: "Reembolsos",
-  desconto_compensacao: "Descontos/compensação",
-  rescisao: "Rescisões",
-  ferias: "Férias",
-  decimo_terceiro: "13º salário",
-  encargo: "Encargos/impostos",
-  outro: "Outros",
-};
 
 export default async function DepartamentoPessoalPage({ searchParams }: { searchParams: Promise<{ period?: string; from?: string; to?: string }> }) {
   const params = await searchParams;
@@ -53,7 +39,7 @@ export default async function DepartamentoPessoalPage({ searchParams }: { search
         <StatCard label="Adiantamentos" icon={HandCoins} value={formatCurrency(overview.costSummary.porCategoria.adiantamento)} hint={`${overview.openAdvances.length} em aberto`} />
         <StatCard label="Benefícios/auxílios" icon={Heart} value={formatCurrency(overview.costSummary.porCategoria.beneficio_auxilio)} hint="Transporte, lanche/alimentação — nunca somado a salário/fixo" />
         <StatCard label="Encargos/impostos" icon={Landmark} value={formatCurrency(overview.costSummary.porCategoria.encargo)} />
-        <StatCard label="Outros pagamentos" icon={MoreHorizontal} value={formatCurrency(overview.costSummary.porCategoria.outro + overview.costSummary.porCategoria.reembolso + overview.costSummary.porCategoria.desconto_compensacao + overview.costSummary.porCategoria.rescisao + overview.costSummary.porCategoria.ferias + overview.costSummary.porCategoria.decimo_terceiro)} />
+        <StatCard label="Outros pagamentos" icon={MoreHorizontal} value={formatCurrency(outrosTotal(overview.costSummary.porCategoria))} />
       </div>
 
       <Card>
@@ -79,7 +65,11 @@ export default async function DepartamentoPessoalPage({ searchParams }: { search
                 <tbody className="divide-y divide-border">
                   {overview.collaborators.map((c) => (
                     <tr key={c.id}>
-                      <td className="px-3 py-2">{c.name}</td>
+                      <td className="px-3 py-2">
+                        <Link href={`/departamento-pessoal/${c.id}`} className="font-medium text-accent hover:underline">
+                          {c.name}
+                        </Link>
+                      </td>
                       <td className="px-3 py-2">{c.type === "employee" ? "CLT" : "PJ"}</td>
                       <td className="px-3 py-2">{c.role ?? <span className="italic text-foreground-subtle">Não informado</span>}</td>
                       <td className="px-3 py-2">{c.admissionOrStart ? formatDateBR(c.admissionOrStart) : <span className="italic text-foreground-subtle">Não informado</span>}</td>
