@@ -139,6 +139,98 @@ describe.skipIf(!hasRealDb)("beneficio_auxilio + filtro por competência (Missã
  * um prestador PJ de teste (nunca reaproveita os 5 colaboradores reais), com pagamentos e um
  * adiantamento vinculados, para provar isolamento entre pessoas — nunca dado real de produção.
  */
+/**
+ * Fase 2 do Departamento Pessoal (20/09/2026) — testes DIRETOS de `getEmployeeById`/
+ * `getContractorById`, isolados de `getCollaboratorProfile` (que já os exercita indiretamente
+ * desde a Fase 1). Prova, na função em si: busca por ID exato (nunca por nome aproximado),
+ * ausência de fallback cruzado entre as duas tabelas, preservação de todos os campos e leitura
+ * pura (chamadas repetidas nunca criam/alteram linha nenhuma).
+ */
+describe.skipIf(!hasRealDb)("getEmployeeById / getContractorById — Fase 2 (20/09/2026)", () => {
+  it("getEmployeeById encontra um employee existente e preserva TODOS os campos, não só alguns", async () => {
+    const db = getDb()!;
+    const [created] = await db
+      .insert(employees)
+      .values({ fullName: `Fase2 CLT ${randomUUID()}`, role: "Cargo de teste", admissionDate: "2026-02-01", workSchedule: "08h-17h", baseSalary: "3000.00", notes: "nota de teste" })
+      .returning();
+    createdEmployeeIds.push(created.id);
+
+    const found = await getEmployeeById(created.id);
+    expect(found).toEqual(created);
+  });
+
+  it("getContractorById encontra um contractor existente e preserva TODOS os campos, não só alguns", async () => {
+    const db = getDb()!;
+    const [created] = await db
+      .insert(contractors)
+      .values({ businessName: `Fase2 PJ ${randomUUID()}`, taxId: "111.111.111-11", scope: "Lavação", agreedValue: "2600.00", contractStart: "2026-03-01" })
+      .returning();
+    createdContractorIds.push(created.id);
+
+    const found = await getContractorById(created.id);
+    expect(found).toEqual(created);
+  });
+
+  it("não confunde dois employees diferentes — cada ID retorna exatamente a pessoa certa", async () => {
+    const db = getDb()!;
+    const [a] = await db.insert(employees).values({ fullName: `Fase2 A ${randomUUID()}`, role: "Cargo A" }).returning();
+    const [b] = await db.insert(employees).values({ fullName: `Fase2 B ${randomUUID()}`, role: "Cargo B" }).returning();
+    createdEmployeeIds.push(a.id, b.id);
+
+    expect((await getEmployeeById(a.id))!.id).toBe(a.id);
+    expect((await getEmployeeById(a.id))!.role).toBe("Cargo A");
+    expect((await getEmployeeById(b.id))!.id).toBe(b.id);
+    expect((await getEmployeeById(b.id))!.role).toBe("Cargo B");
+  });
+
+  it("não confunde dois contractors diferentes — cada ID retorna exatamente a pessoa certa", async () => {
+    const db = getDb()!;
+    const [a] = await db.insert(contractors).values({ businessName: `Fase2 PJ A ${randomUUID()}` }).returning();
+    const [b] = await db.insert(contractors).values({ businessName: `Fase2 PJ B ${randomUUID()}` }).returning();
+    createdContractorIds.push(a.id, b.id);
+
+    expect((await getContractorById(a.id))!.id).toBe(a.id);
+    expect((await getContractorById(b.id))!.id).toBe(b.id);
+    expect((await getContractorById(a.id))!.businessName).not.toBe((await getContractorById(b.id))!.businessName);
+  });
+
+  it("zero fallback cruzado: um ID de employee nunca é encontrado por getContractorById, e vice-versa", async () => {
+    const db = getDb()!;
+    const [employee] = await db.insert(employees).values({ fullName: `Fase2 cruzado CLT ${randomUUID()}`, role: "Cargo" }).returning();
+    createdEmployeeIds.push(employee.id);
+    expect(await getContractorById(employee.id)).toBeNull();
+
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase2 cruzado PJ ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    expect(await getEmployeeById(contractor.id)).toBeNull();
+  });
+
+  it("chamadas repetidas a getEmployeeById/getContractorById são 100% leitura — nenhuma linha nova, nenhuma alteração", async () => {
+    const db = getDb()!;
+    const [employee] = await db.insert(employees).values({ fullName: `Fase2 repetido CLT ${randomUUID()}`, role: "Cargo" }).returning();
+    createdEmployeeIds.push(employee.id);
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase2 repetido PJ ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+
+    const countsQuery = sql<{ employees: number; contractors: number }>`select (select count(*)::int from employees) as employees, (select count(*)::int from contractors) as contractors`;
+    const [before] = (await db.execute(countsQuery)) as unknown as Array<{ employees: number; contractors: number }>;
+
+    await getEmployeeById(employee.id);
+    await getEmployeeById(employee.id);
+    await getEmployeeById(randomUUID());
+    await getContractorById(contractor.id);
+    await getContractorById(contractor.id);
+    await getContractorById(randomUUID());
+
+    const [after] = (await db.execute(countsQuery)) as unknown as Array<{ employees: number; contractors: number }>;
+    expect(after).toEqual(before);
+
+    // e os dados continuam exatamente os mesmos, sem nenhuma alteração por efeito colateral
+    expect(await getEmployeeById(employee.id)).toEqual(employee);
+    expect(await getContractorById(contractor.id)).toEqual(contractor);
+  });
+});
+
 describe.skipIf(!hasRealDb)("Ficha individual — getEmployeeById/getContractorById/getCollaboratorProfile (Fase 1, 20/09/2026)", () => {
   it("13) getEmployeeById retorna null para ID inexistente", async () => {
     const result = await getEmployeeById(randomUUID());
