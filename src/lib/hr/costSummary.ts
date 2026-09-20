@@ -19,6 +19,20 @@ export type EmployeePaymentCategory =
   | "encargo"
   | "outro";
 
+/**
+ * Fase 4 (20/09/2026) — categorias que "Registrar pagamento" aceita: só as que já têm exemplo real
+ * confirmado na auditoria E mapeamento de DRE conhecido para uma pessoa específica. Vive aqui (não
+ * em `hr/repository.ts`, que tem `"server-only"`) porque tanto a server action quanto o formulário
+ * (Client Component, precisa renderizar as opções do `<select>`) precisam da mesma lista — nunca
+ * duas listas mantidas separadamente. Fora desta lista, de propósito:
+ * - `adiantamento` — pertence a `employee_advances` (ação própria, nunca esta função);
+ * - `encargo`/`desconto_compensacao`/`rescisao`/`ferias`/`decimo_terceiro` — nenhum exemplo real
+ *   encontrado na auditoria vinculado a uma pessoa específica (o único exemplo de `encargo`, o
+ *   FGTS, é sempre sem colaborador) — nunca inventamos o `category_id` de DRE correspondente.
+ */
+export const RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES = ["salario_fixo", "comissao", "bonus", "diaria_freelancer", "beneficio_auxilio", "reembolso", "outro"] as const;
+export type RecordableEmployeePaymentCategory = (typeof RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES)[number];
+
 export interface EmployeePaymentForSummary {
   category: EmployeePaymentCategory;
   amount: number;

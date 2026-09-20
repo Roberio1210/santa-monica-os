@@ -14,6 +14,8 @@ import { parsePeriodParams } from "@/lib/utils/timezone";
 import { formatCurrency, formatDateBR } from "@/lib/utils/format";
 import { getCurrentUser } from "@/lib/auth/session";
 import { CollaboratorEditForm } from "@/components/hr/collaborator-edit-form";
+import { CollaboratorPaymentForm } from "@/components/hr/collaborator-payment-form";
+import { listFinancialAccountOptions } from "@/lib/hr/repository";
 
 // Ficha individual (Fase 1, 20/09/2026) — mesmo padrão de /departamento-pessoal: consulta dados
 // reais a cada acesso, nunca cacheada (a folha muda a qualquer momento).
@@ -35,7 +37,7 @@ export default async function ColaboradorPage({ params, searchParams }: { params
   const { id } = await params;
   const searchParamsValue = await searchParams;
   const period = parsePeriodParams(searchParamsValue);
-  const profile = await getCollaboratorProfile(id, { from: period.from, to: period.to });
+  const [profile, financialAccounts] = await Promise.all([getCollaboratorProfile(id, { from: period.from, to: period.to }), listFinancialAccountOptions()]);
 
   if (!profile) notFound();
 
@@ -121,6 +123,8 @@ export default async function ColaboradorPage({ params, searchParams }: { params
       </Card>
 
       <CollaboratorEditForm profile={profile} canEdit={canEdit} />
+
+      <CollaboratorPaymentForm profile={profile} financialAccounts={financialAccounts} canEdit={canEdit} />
 
       <Card>
         <CardHeader>

@@ -130,6 +130,20 @@ export const employeePayments = pgTable("employee_payments", {
   description: text("description").notNull(),
   /** Vínculo com o registro financeiro real — nunca um valor solto/paralelo ao financeiro. */
   cashMovementId: uuid("cash_movement_id").references(() => cashMovements.id),
+  /**
+   * Fase 4 do Departamento Pessoal (20/09/2026) — garantia real de idempotência no banco para
+   * "Registrar pagamento" (duplo clique, refresh, retry de rede, duas requisições concorrentes
+   * nunca criam dois pagamentos), mesmo padrão já maduro de
+   * `inventory_consumption_confirmations.idempotency_key` (`src/db/schema/inventory.ts`) — UNIQUE
+   * é a garantia real, não apenas uma checagem de aplicação. Nullable de propósito: todo o
+   * histórico já existente (backfill de missões anteriores) nunca teve essa chave e continua
+   * válido — Postgres trata múltiplos `NULL` como distintos numa constraint UNIQUE, então isso
+   * nunca colide entre si nem impede nenhum registro antigo. Calculada no SERVIDOR (nunca confiada
+   * do cliente) a partir dos campos normalizados do pagamento — determinística, não aleatória, para
+   * também proteger contra um F5/refresh seguido de reenvio do mesmo formulário (um UUID aleatório
+   * gerado só no cliente não sobreviveria a um refresh).
+   */
+  idempotencyKey: text("idempotency_key").unique(),
   active: active(),
   source: source(),
   externalId: externalId(),

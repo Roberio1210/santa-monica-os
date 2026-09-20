@@ -1,0 +1,2 @@
+ALTER TABLE "employee_payments" ADD COLUMN "idempotency_key" text;--> statement-breakpoint
+ALTER TABLE "employee_payments" ADD CONSTRAINT "employee_payments_idempotency_key_unique" UNIQUE("idempotency_key");

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { cashMovements, employeeAdvances, employeePayments, employees, contractors, auditLogs, users } from "@/db/schema";
-import { inArray, sql } from "drizzle-orm";
+import { cashMovements, employeeAdvances, employeePayments, employees, contractors, auditLogs, users, financialAccounts, financialCategories } from "@/db/schema";
+import { inArray, eq, sql } from "drizzle-orm";
 import {
   createEmployeeAdvance,
   createEmployeePayment,
@@ -11,8 +11,12 @@ import {
   getContractorById,
   updateEmployee,
   updateContractor,
+  recordEmployeePayment,
   NotFoundError,
   ConcurrencyConflictError,
+  InvalidPaymentCategoryError,
+  InvalidFinancialAccountError,
+  InvalidAmountError,
 } from "@/lib/hr/repository";
 import { getCollaboratorProfile } from "@/lib/hr/service";
 
@@ -49,10 +53,12 @@ afterAll(async () => {
   const db = getDb();
   if (!db) return;
   if (createdAdvanceIds.length > 0) await db.delete(employeeAdvances).where(inArray(employeeAdvances.id, createdAdvanceIds));
+  // audit_logs de employee_payment (Fase 4, entityId = payment.id) precisam sumir ANTES de
+  // employee_payments/users, senão a FK audit_logs.actor_user_id -> users trava o delete de users.
+  const auditableIds = [...createdEmployeeIds, ...createdContractorIds, ...createdPaymentIds];
+  if (auditableIds.length > 0) await db.delete(auditLogs).where(inArray(auditLogs.entityId, auditableIds));
   if (createdPaymentIds.length > 0) await db.delete(employeePayments).where(inArray(employeePayments.id, createdPaymentIds));
   if (createdCashMovementIds.length > 0) await db.delete(cashMovements).where(inArray(cashMovements.id, createdCashMovementIds));
-  const auditableIds = [...createdEmployeeIds, ...createdContractorIds];
-  if (auditableIds.length > 0) await db.delete(auditLogs).where(inArray(auditLogs.entityId, auditableIds));
   if (createdEmployeeIds.length > 0) await db.delete(employees).where(inArray(employees.id, createdEmployeeIds));
   if (createdContractorIds.length > 0) await db.delete(contractors).where(inArray(contractors.id, createdContractorIds));
   if (createdUserIds.length > 0) await db.delete(users).where(inArray(users.id, createdUserIds));
@@ -556,5 +562,332 @@ describe.skipIf(!hasRealDb)("updateEmployee / updateContractor — Fase 3 (20/09
 
     const [after] = (await db.execute(countsQuery)) as unknown as Array<{ employee_payments: number; employee_advances: number; cash_movements: number }>;
     expect(after).toEqual(before);
+  });
+});
+
+/**
+ * Fase 4 do Departamento Pessoal (20/09/2026) — "Registrar pagamento": `recordEmployeePayment`
+ * cria `cash_movements` + `employee_payments` numa única transação, com idempotência garantida
+ * pelo `UNIQUE` real de `employee_payments.idempotency_key` (migration 0062), nunca por
+ * `bank_statement_lines` fictícia, nunca criando `employee_advances` por engano.
+ */
+describe.skipIf(!hasRealDb)("recordEmployeePayment — Fase 4 (20/09/2026)", () => {
+  async function accountId(name: string): Promise<string> {
+    const db = getDb()!;
+    const [row] = await db.select().from(financialAccounts).where(eq(financialAccounts.name, name)).limit(1);
+    if (!row) throw new Error(`Conta de teste não encontrada: ${name}`);
+    return row.id;
+  }
+  async function categoryIdByExternalId(externalId: string): Promise<string> {
+    const db = getDb()!;
+    const [row] = await db.select().from(financialCategories).where(eq(financialCategories.externalId, externalId)).limit(1);
+    if (!row) throw new Error(`Categoria DRE de teste não encontrada: ${externalId}`);
+    return row.id;
+  }
+
+  it("1/2/3/4/5) pagamento válido cria exatamente 1 cash_movement + 1 employee_payment, vinculados, colaborador/valor/categoria/competência/data corretos", async () => {
+    const db = getDb()!;
+    const [employee] = await db.insert(employees).values({ fullName: `Fase4 registrar ${randomUUID()}`, role: "Cargo" }).returning();
+    createdEmployeeIds.push(employee.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeePayment(
+      {
+        subjectType: "employee",
+        subjectId: employee.id,
+        category: "salario_fixo",
+        amount: 500,
+        date: "2026-09-05",
+        competenceDate: null,
+        description: "Pagamento de teste Fase 4",
+        notes: null,
+        financialAccountId: stoneId,
+        idempotencyKey: `fase4-${randomUUID()}`,
+      },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.created).toBe(true);
+    expect(result.payment.subjectId).toBe(employee.id);
+    expect(result.payment.cashMovementId).toBe(result.cashMovement.id);
+    expect(result.payment.amount).toBe("500.00");
+    expect(result.cashMovement.amount).toBe("500.00");
+    expect(result.payment.category).toBe("salario_fixo");
+    expect(result.payment.date).toBe("2026-09-05");
+    expect(result.payment.competenceDate).toBeNull();
+    expect(result.cashMovement.financialAccountId).toBe(stoneId);
+
+    const paymentsInDb = await db.select().from(employeePayments).where(eq(employeePayments.cashMovementId, result.cashMovement.id));
+    expect(paymentsInDb).toHaveLength(1); // exatamente 1, nunca mais
+  });
+
+  it("comissão de mês anterior: competenceDate diferente de date, nunca derivada automaticamente", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 comissao ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeePayment(
+      {
+        subjectType: "contractor",
+        subjectId: contractor.id,
+        category: "comissao",
+        amount: 1200,
+        date: "2026-08-10",
+        competenceDate: "2026-07-01",
+        description: "Comissão de julho, paga em agosto",
+        notes: null,
+        financialAccountId: stoneId,
+        idempotencyKey: `fase4-${randomUUID()}`,
+      },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.payment.date).toBe("2026-08-10");
+    expect(result.payment.competenceDate).toBe("2026-07-01");
+  });
+
+  it("benefício: categoria beneficio_auxilio persiste e usa DRE de Prestadores PJ (PJ)", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 beneficio ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const prestadoresPjId = await categoryIdByExternalId("despesa-prestadores-pj");
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "beneficio_auxilio", amount: 450, date: "2026-09-01", competenceDate: null, description: "Transporte+lanche", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.payment.category).toBe("beneficio_auxilio");
+    expect(result.cashMovement.categoryId).toBe(prestadoresPjId);
+  });
+
+  it("reembolso NUNCA usa a mesma categoria DRE de remuneração — usa 'Reembolso a sócios/colaboradores', nunca 'Prestadores PJ'", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 reembolso ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const reembolsoId = await categoryIdByExternalId("despesa-reembolso-a-socios-colaboradores");
+    const prestadoresPjId = await categoryIdByExternalId("despesa-prestadores-pj");
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "reembolso", amount: 30, date: "2026-09-10", competenceDate: null, description: "Gasolina de cliente", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.cashMovement.categoryId).toBe(reembolsoId);
+    expect(result.cashMovement.categoryId).not.toBe(prestadoresPjId); // nunca contamina o balde de remuneração
+  });
+
+  it("pagamento em dinheiro usa Caixa físico, sem nenhuma bank_statement_line criada", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 dinheiro ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const caixaId = await accountId("Caixa físico");
+    const [{ n: bslBefore }] = (await db.execute(sql`select count(*)::int as n from bank_statement_lines`)) as unknown as Array<{ n: number }>;
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "salario_fixo", amount: 200, date: "2026-09-05", competenceDate: null, description: "Pago em dinheiro", notes: null, financialAccountId: caixaId, idempotencyKey: `fase4-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.cashMovement.financialAccountId).toBe(caixaId);
+    const [{ n: bslAfter }] = (await db.execute(sql`select count(*)::int as n from bank_statement_lines`)) as unknown as Array<{ n: number }>;
+    expect(bslAfter).toBe(bslBefore); // nenhuma linha de extrato fictícia criada
+  });
+
+  it("Ailos/CredCrea também é aceita como origem", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 ailos ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const ailosId = await accountId("Ailos / CredCrea");
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 100, date: "2026-09-05", competenceDate: null, description: "Pago via Ailos", notes: null, financialAccountId: ailosId, idempotencyKey: `fase4-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.cashMovement.financialAccountId).toBe(ailosId);
+  });
+
+  it("idempotencyKey é persistida no employee_payment criado", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 idkey ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase4-persist-${randomUUID()}`;
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 10, date: "2026-09-05", competenceDate: null, description: "teste chave", notes: null, financialAccountId: stoneId, idempotencyKey: key },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    expect(result.payment.idempotencyKey).toBe(key);
+  });
+
+  it("mesma idempotencyKey chamada duas vezes -> só 1 pagamento, o segundo retorna created:false e o MESMO registro", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 dedupe ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase4-dedupe-${randomUUID()}`;
+    const input = { subjectType: "contractor" as const, subjectId: contractor.id, category: "outro" as const, amount: 77, date: "2026-09-05", competenceDate: null, description: "teste dedupe", notes: null, financialAccountId: stoneId, idempotencyKey: key };
+
+    const first = await recordEmployeePayment(input, null);
+    const second = await recordEmployeePayment(input, null);
+    createdPaymentIds.push(first.payment.id);
+    createdCashMovementIds.push(first.cashMovement.id);
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.payment.id).toBe(first.payment.id);
+    expect(second.cashMovement.id).toBe(first.cashMovement.id);
+
+    const count = await db.select().from(employeePayments).where(eq(employeePayments.idempotencyKey, key));
+    expect(count).toHaveLength(1); // nunca 2
+  });
+
+  it("duas requisições CONCORRENTES com a mesma idempotencyKey -> apenas 1 pagamento (garantia do UNIQUE do banco, não só da aplicação)", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 concorrencia ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const key = `fase4-race-${randomUUID()}`;
+    const input = { subjectType: "contractor" as const, subjectId: contractor.id, category: "outro" as const, amount: 88, date: "2026-09-05", competenceDate: null, description: "teste concorrência", notes: null, financialAccountId: stoneId, idempotencyKey: key };
+
+    const [a, b] = await Promise.all([recordEmployeePayment(input, null), recordEmployeePayment(input, null)]);
+    createdPaymentIds.push(a.payment.id);
+    createdCashMovementIds.push(a.cashMovement.id);
+
+    expect(a.payment.id).toBe(b.payment.id); // as duas chamadas concorrentes convergem para o MESMO registro
+    const count = await db.select().from(employeePayments).where(eq(employeePayments.idempotencyKey, key));
+    expect(count).toHaveLength(1);
+  });
+
+  it("chaves diferentes para o mesmo colaborador/valor -> pagamentos distintos, nunca fundidos", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 chaves-diferentes ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+    const base = { subjectType: "contractor" as const, subjectId: contractor.id, category: "outro" as const, amount: 50, date: "2026-09-05", competenceDate: null, description: "teste", notes: null, financialAccountId: stoneId };
+
+    const first = await recordEmployeePayment({ ...base, idempotencyKey: `fase4-diff-a-${randomUUID()}` }, null);
+    const second = await recordEmployeePayment({ ...base, idempotencyKey: `fase4-diff-b-${randomUUID()}` }, null);
+    createdPaymentIds.push(first.payment.id, second.payment.id);
+    createdCashMovementIds.push(first.cashMovement.id, second.cashMovement.id);
+
+    expect(first.payment.id).not.toBe(second.payment.id);
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+  });
+
+  it("colaborador inexistente -> NotFoundError, ROLLBACK completo (zero cash_movement, zero employee_payment)", async () => {
+    const db = getDb()!;
+    const stoneId = await accountId("Stone");
+    const key = `fase4-notfound-${randomUUID()}`;
+    const [{ n: cmBefore }] = (await db.execute(sql`select count(*)::int as n from cash_movements`)) as unknown as Array<{ n: number }>;
+
+    await expect(
+      recordEmployeePayment({ subjectType: "contractor", subjectId: randomUUID(), category: "outro", amount: 10, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: key }, null),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    const [{ n: cmAfter }] = (await db.execute(sql`select count(*)::int as n from cash_movements`)) as unknown as Array<{ n: number }>;
+    expect(cmAfter).toBe(cmBefore); // nenhum cash_movement órfão ficou para trás
+    const orphanPayment = await db.select().from(employeePayments).where(eq(employeePayments.idempotencyKey, key));
+    expect(orphanPayment).toHaveLength(0);
+  });
+
+  it("categoria 'adiantamento' é rejeitada — pertence a employee_advances, nunca a esta função", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 sem-adiantamento ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    await expect(
+      recordEmployeePayment({ subjectType: "contractor", subjectId: contractor.id, category: "adiantamento" as never, amount: 10, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidPaymentCategoryError);
+
+    const advancesCount = await db.select().from(employeeAdvances).where(eq(employeeAdvances.subjectId, contractor.id));
+    expect(advancesCount).toHaveLength(0); // nenhum employee_advance criado acidentalmente
+  });
+
+  it("valor zero e valor negativo são bloqueados", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 valor-invalido ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const stoneId = await accountId("Stone");
+
+    await expect(
+      recordEmployeePayment({ subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 0, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidAmountError);
+    await expect(
+      recordEmployeePayment({ subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: -10, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidAmountError);
+  });
+
+  it("conta financeira inválida/inexistente -> InvalidFinancialAccountError, rollback completo", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 conta-invalida ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+
+    await expect(
+      recordEmployeePayment({ subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 10, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: randomUUID(), idempotencyKey: `fase4-${randomUUID()}` }, null),
+    ).rejects.toBeInstanceOf(InvalidFinancialAccountError);
+  });
+
+  it("outro colaborador não é afetado por um novo pagamento", async () => {
+    const db = getDb()!;
+    const [target] = await db.insert(contractors).values({ businessName: `Fase4 alvo-pagamento ${randomUUID()}` }).returning();
+    const [other] = await db.insert(contractors).values({ businessName: `Fase4 outro-pagamento ${randomUUID()}` }).returning();
+    createdContractorIds.push(target.id, other.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: target.id, category: "outro", amount: 60, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` },
+      null,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const otherPayments = await db.select().from(employeePayments).where(eq(employeePayments.subjectId, other.id));
+    expect(otherPayments).toHaveLength(0);
+  });
+
+  it("audit_log é criado com entidade, ação, ator e referência ao cash_movement", async () => {
+    const db = getDb()!;
+    const [contractor] = await db.insert(contractors).values({ businessName: `Fase4 audit ${randomUUID()}` }).returning();
+    createdContractorIds.push(contractor.id);
+    const [actor] = await db.insert(users).values({ email: `fase4-audit-${randomUUID()}@teste.local`, name: "Admin de teste", role: "admin" }).returning();
+    createdUserIds.push(actor.id);
+    const stoneId = await accountId("Stone");
+
+    const result = await recordEmployeePayment(
+      { subjectType: "contractor", subjectId: contractor.id, category: "outro", amount: 15, date: "2026-09-05", competenceDate: null, description: "x", notes: null, financialAccountId: stoneId, idempotencyKey: `fase4-${randomUUID()}` },
+      actor.id,
+    );
+    createdPaymentIds.push(result.payment.id);
+    createdCashMovementIds.push(result.cashMovement.id);
+
+    const logs = await db.select().from(auditLogs).where(inArray(auditLogs.entityId, [result.payment.id]));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.entityType).toBe("employee_payment");
+    expect(logs[0]!.action).toBe("create_employee_payment");
+    expect(logs[0]!.actorUserId).toBe(actor.id);
+    expect(logs[0]!.notes).toContain(result.cashMovement.id);
   });
 });

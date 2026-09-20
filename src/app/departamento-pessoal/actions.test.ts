@@ -4,12 +4,21 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn() }));
 vi.mock("@/lib/hr/repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/hr/repository")>();
-  return { ...actual, updateEmployee: vi.fn(), updateContractor: vi.fn() };
+  return { ...actual, updateEmployee: vi.fn(), updateContractor: vi.fn(), recordEmployeePayment: vi.fn() };
 });
 
-import { updateEmployeeAction, updateContractorAction, toggleCollaboratorActiveAction } from "@/app/departamento-pessoal/actions";
+import { updateEmployeeAction, updateContractorAction, toggleCollaboratorActiveAction, registerEmployeePaymentAction } from "@/app/departamento-pessoal/actions";
 import { getCurrentUser } from "@/lib/auth/session";
-import { updateEmployee, updateContractor, NotFoundError, ConcurrencyConflictError } from "@/lib/hr/repository";
+import {
+  updateEmployee,
+  updateContractor,
+  recordEmployeePayment,
+  NotFoundError,
+  ConcurrencyConflictError,
+  InvalidPaymentCategoryError,
+  InvalidFinancialAccountError,
+  InvalidAmountError,
+} from "@/lib/hr/repository";
 
 /**
  * Fase 3 do Departamento Pessoal (20/09/2026) — prova que a autorização é FAIL-CLOSED e vive no
@@ -32,6 +41,7 @@ beforeEach(() => {
   vi.mocked(getCurrentUser).mockReset();
   vi.mocked(updateEmployee).mockReset();
   vi.mocked(updateContractor).mockReset();
+  vi.mocked(recordEmployeePayment).mockReset();
 });
 
 describe("updateEmployeeAction / updateContractorAction — RBAC fail-closed (Fase 3, 20/09/2026)", () => {
@@ -153,5 +163,161 @@ describe("toggleCollaboratorActiveAction — RBAC fail-closed (Fase 3, 20/09/202
     const result = await toggleCollaboratorActiveAction({ error: null, success: null }, formData({ id: "con-1", type: "contractor", active: "true", expectedUpdatedAt: "2026-09-20T10:00:00.000Z" }));
     expect(result.error).toBeNull();
     expect(updateContractor).toHaveBeenCalledWith("con-1", { active: true }, expect.any(Date), "admin-1");
+  });
+});
+
+const validPaymentPayload = {
+  subjectId: "con-1",
+  subjectType: "contractor",
+  category: "salario_fixo",
+  amount: "500.00",
+  date: "2026-09-05",
+  description: "Pagamento de teste",
+  financialAccountId: "stone-1",
+};
+
+describe("registerEmployeePaymentAction — Fase 4 (20/09/2026)", () => {
+  it("16) sem sessão -> erro, recordEmployeePayment NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue(null);
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(result.error).toMatch(/não autorizado/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("17) sessão operacional (não-admin) -> erro, recordEmployeePayment NUNCA é chamado", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "u1", email: "op@example.com", name: "Operacional", role: "operacional" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(result.error).toMatch(/administradores/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("18) admin autorizado -> recordEmployeePayment é chamado com os campos certos, incluindo idempotencyKey determinística", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(recordEmployeePayment).mockResolvedValue({ payment: {} as never, cashMovement: {} as never, created: true });
+
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+
+    expect(result.error).toBeNull();
+    expect(recordEmployeePayment).toHaveBeenCalledTimes(1);
+    const [input, actorId] = vi.mocked(recordEmployeePayment).mock.calls[0]!;
+    expect(input.subjectId).toBe("con-1");
+    expect(input.subjectType).toBe("contractor");
+    expect(input.category).toBe("salario_fixo");
+    expect(input.amount).toBe(500);
+    expect(input.date).toBe("2026-09-05");
+    expect(input.competenceDate).toBeNull(); // nunca derivada automaticamente da data de pagamento
+    expect(input.financialAccountId).toBe("stone-1");
+    expect(typeof input.idempotencyKey).toBe("string");
+    expect(input.idempotencyKey.length).toBeGreaterThan(0);
+    expect(actorId).toBe("admin-1");
+  });
+
+  it("19) a idempotencyKey calculada é determinística: os MESMOS campos produzem a MESMA chave em duas chamadas", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(recordEmployeePayment).mockResolvedValue({ payment: {} as never, cashMovement: {} as never, created: true });
+
+    await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+
+    const key1 = vi.mocked(recordEmployeePayment).mock.calls[0]![0].idempotencyKey;
+    const key2 = vi.mocked(recordEmployeePayment).mock.calls[1]![0].idempotencyKey;
+    expect(key1).toBe(key2); // mesmo conteúdo -> mesma chave -> duplo clique/refresh nunca cria 2 pagamentos
+  });
+
+  it("20) competência diferente da data de pagamento produz uma chave DIFERENTE — nunca fundida com outra competência", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(recordEmployeePayment).mockResolvedValue({ payment: {} as never, cashMovement: {} as never, created: true });
+
+    await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, competenceDate: "2026-07-01" }));
+    await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, competenceDate: "2026-08-01" }));
+
+    const key1 = vi.mocked(recordEmployeePayment).mock.calls[0]![0].idempotencyKey;
+    const key2 = vi.mocked(recordEmployeePayment).mock.calls[1]![0].idempotencyKey;
+    expect(key1).not.toBe(key2);
+  });
+
+  it("21) categoria vazia/ausente é bloqueada antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, category: "" }));
+    expect(result.error).toMatch(/categoria/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("22) categoria 'adiantamento' é bloqueada na própria action (nem chega no repositório)", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, category: "adiantamento" }));
+    expect(result.error).toMatch(/categoria/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("23) valor ausente/zero/negativo é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const r1 = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, amount: "" }));
+    const r2 = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, amount: "0" }));
+    const r3 = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, amount: "-10" }));
+    expect(r1.error).toMatch(/valor/i);
+    expect(r2.error).toMatch(/valor/i);
+    expect(r3.error).toMatch(/valor/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("24) data do pagamento ausente é bloqueada antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, date: "" }));
+    expect(result.error).toMatch(/data/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("25) descrição ausente é bloqueada antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, description: "" }));
+    expect(result.error).toMatch(/descrição/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("26) origem/conta ausente é bloqueada antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, financialAccountId: "" }));
+    expect(result.error).toMatch(/origem|conta/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("27) colaborador não identificado (subjectId/subjectType ausentes) é bloqueado antes de chamar o repositório", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData({ ...validPaymentPayload, subjectId: "" }));
+    expect(result.error).toMatch(/colaborador/i);
+    expect(recordEmployeePayment).not.toHaveBeenCalled();
+  });
+
+  it("28) NotFoundError/InvalidPaymentCategoryError/InvalidFinancialAccountError/InvalidAmountError do repositório viram mensagens amigáveis, nunca stack trace/SQL", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+
+    vi.mocked(recordEmployeePayment).mockRejectedValueOnce(new NotFoundError("Colaborador não encontrado: con-1"));
+    const r1 = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(r1.error).toBe("Colaborador não encontrado.");
+
+    vi.mocked(recordEmployeePayment).mockRejectedValueOnce(new InvalidPaymentCategoryError("Categoria não suportada"));
+    const r2 = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(r2.error).toBe("Categoria não suportada");
+
+    vi.mocked(recordEmployeePayment).mockRejectedValueOnce(new InvalidFinancialAccountError("Conta inválida"));
+    const r3 = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(r3.error).toMatch(/conta.*inválida/i);
+
+    vi.mocked(recordEmployeePayment).mockRejectedValueOnce(new InvalidAmountError("Valor inválido"));
+    const r4 = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+    expect(r4.error).toBe("Valor inválido");
+
+    for (const r of [r1, r2, r3, r4]) expect(r.error).not.toMatch(/select|insert|update|SQL|Error:/i);
+  });
+
+  it("29) created:false (idempotência) retorna mensagem própria, nunca a mensagem de sucesso normal", async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: "admin-1", email: "a@example.com", name: "Admin", role: "admin" });
+    vi.mocked(recordEmployeePayment).mockResolvedValue({ payment: {} as never, cashMovement: {} as never, created: false });
+
+    const result = await registerEmployeePaymentAction({ error: null, success: null }, formData(validPaymentPayload));
+
+    expect(result.error).toBeNull();
+    expect(result.success).toMatch(/já havia sido registrado/i);
   });
 });

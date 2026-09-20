@@ -1,8 +1,20 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/session";
-import { updateEmployee, updateContractor, ConcurrencyConflictError, NotFoundError } from "@/lib/hr/repository";
+import {
+  updateEmployee,
+  updateContractor,
+  recordEmployeePayment,
+  ConcurrencyConflictError,
+  NotFoundError,
+  InvalidPaymentCategoryError,
+  InvalidFinancialAccountError,
+  InvalidAmountError,
+  RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES,
+  type RecordableEmployeePaymentCategory,
+} from "@/lib/hr/repository";
 
 export interface FormActionState {
   error: string | null;
@@ -158,4 +170,88 @@ export async function toggleCollaboratorActiveAction(_prevState: FormActionState
   revalidatePath("/departamento-pessoal");
   revalidatePath(`/departamento-pessoal/${id}`);
   return { error: null, success: active ? "Colaborador reativado." : "Colaborador marcado como inativo." };
+}
+
+/**
+ * Fase 4 (20/09/2026) — "Registrar pagamento". `idempotencyKey` é calculada AQUI, no servidor, a
+ * partir dos campos já validados/normalizados (nunca confiada do cliente) — determinística, não
+ * aleatória, de propósito: um duplo clique, um F5 seguido de reenvio do mesmo formulário, ou um
+ * retry de rede reenviam exatamente os mesmos valores, produzindo a MESMA chave, então a garantia
+ * `UNIQUE` do banco (`employee_payments.idempotency_key`) barra a segunda escrita — nunca cria um
+ * segundo pagamento. Um pagamento genuinamente novo (outro valor, outra data, outra categoria ou
+ * mesmo só uma descrição diferente) sempre produz uma chave diferente, nunca é bloqueado.
+ */
+function computePaymentIdempotencyKey(input: {
+  subjectId: string;
+  category: string;
+  amount: number;
+  date: string;
+  competenceDate: string | null;
+  description: string;
+}): string {
+  const raw = [input.subjectId, input.category, input.amount.toFixed(2), input.date, input.competenceDate ?? "", input.description].join("|");
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+function parseCategory(value: FormDataEntryValue | null): RecordableEmployeePaymentCategory | null {
+  const str = String(value ?? "");
+  return (RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES as readonly string[]).includes(str) ? (str as RecordableEmployeePaymentCategory) : null;
+}
+
+/**
+ * Registra um pagamento novo (nunca edita um existente). O colaborador vem sempre da ficha
+ * (`subjectType`/`subjectId` em campos ocultos, preenchidos pelo servidor ao renderizar a página
+ * — o formulário nunca expõe um seletor de colaborador, então não há como "trocar
+ * silenciosamente" quem recebe). Nunca aceita categoria `adiantamento` (fluxo próprio de
+ * `employee_advances`, fora desta action) nem qualquer categoria sem mapeamento de DRE confirmado
+ * — ver `RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES`.
+ */
+export async function registerEmployeePaymentAction(_prevState: FormActionState, formData: FormData): Promise<FormActionState> {
+  const auth = await requireAdmin();
+  if (auth.error !== null) return { error: auth.error, success: null };
+
+  const subjectId = String(formData.get("subjectId") ?? "");
+  const subjectTypeRaw = String(formData.get("subjectType") ?? "");
+  const subjectType = subjectTypeRaw === "employee" || subjectTypeRaw === "contractor" ? subjectTypeRaw : null;
+  if (!subjectId || !subjectType) return { error: "Colaborador não identificado.", success: null };
+
+  const category = parseCategory(formData.get("category"));
+  if (!category) return { error: "Categoria inválida. Adiantamento tem uma ação própria, fora deste formulário.", success: null };
+
+  const amountResult = parseOptionalMoney(formData.get("amount"));
+  if (!amountResult.ok || amountResult.value === null || amountResult.value <= 0) return { error: "Valor deve ser numérico e maior que zero.", success: null };
+
+  const date = parseOptionalString(formData.get("date"));
+  if (!date) return { error: "Data do pagamento é obrigatória.", success: null };
+
+  // Competência é conceito independente da data do pagamento — nunca derivada automaticamente aqui.
+  const competenceDate = parseOptionalString(formData.get("competenceDate"));
+
+  const description = parseOptionalString(formData.get("description"));
+  if (!description) return { error: "Descrição é obrigatória.", success: null };
+
+  const financialAccountId = String(formData.get("financialAccountId") ?? "");
+  if (!financialAccountId) return { error: "Origem/conta do pagamento é obrigatória.", success: null };
+
+  const notes = parseOptionalString(formData.get("notes"));
+
+  const idempotencyKey = computePaymentIdempotencyKey({ subjectId, category, amount: amountResult.value, date, competenceDate, description });
+
+  let result;
+  try {
+    result = await recordEmployeePayment(
+      { subjectType, subjectId, category, amount: amountResult.value, date, competenceDate, description, notes, financialAccountId, idempotencyKey },
+      auth.user.id,
+    );
+  } catch (err) {
+    if (err instanceof NotFoundError) return { error: "Colaborador não encontrado.", success: null };
+    if (err instanceof InvalidPaymentCategoryError) return { error: err.message, success: null };
+    if (err instanceof InvalidFinancialAccountError) return { error: "Conta/origem do pagamento inválida.", success: null };
+    if (err instanceof InvalidAmountError) return { error: err.message, success: null };
+    return { error: "Falha ao registrar o pagamento. Tente novamente.", success: null };
+  }
+
+  revalidatePath("/departamento-pessoal");
+  revalidatePath(`/departamento-pessoal/${subjectId}`);
+  return { error: null, success: result.created ? "Pagamento registrado." : "Este pagamento já havia sido registrado — nenhum novo lançamento foi criado." };
 }

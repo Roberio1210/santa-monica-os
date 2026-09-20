@@ -1,8 +1,11 @@
 import "server-only";
 import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { employees, contractors, employeeDocuments, employeePayments, employeeAdvances, auditLogs } from "@/db/schema";
+import { employees, contractors, employeeDocuments, employeePayments, employeeAdvances, auditLogs, cashMovements, financialAccounts, financialCategories } from "@/db/schema";
 import { applyAdvanceCompensation, type EmployeeAdvanceState } from "@/lib/hr/advances";
+import { RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES, type RecordableEmployeePaymentCategory } from "@/lib/hr/costSummary";
+
+export { RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES, type RecordableEmployeePaymentCategory };
 
 /**
  * Missão 86 (Departamento Pessoal) — camada de I/O sobre `employees`/`contractors`/
@@ -385,4 +388,168 @@ export async function listEmployeeDocuments(subjectType: "employee" | "contracto
     .select()
     .from(employeeDocuments)
     .where(and(eq(employeeDocuments.subjectType, subjectType), eq(employeeDocuments.subjectId, subjectId), eq(employeeDocuments.active, true)));
+}
+
+export type CashMovementRow = typeof cashMovements.$inferSelect;
+export type FinancialAccountOption = { id: string; name: string };
+
+/** Contas reais disponíveis hoje (Stone, Ailos/CredCrea, Caixa físico) — nunca inventa conta nova. */
+export async function listFinancialAccountOptions(): Promise<FinancialAccountOption[]> {
+  return db()
+    .select({ id: financialAccounts.id, name: financialAccounts.name })
+    .from(financialAccounts)
+    .where(eq(financialAccounts.active, true));
+}
+
+export class InvalidPaymentCategoryError extends Error {}
+export class InvalidFinancialAccountError extends Error {}
+export class InvalidAmountError extends Error {}
+
+/**
+ * `reembolso` sempre mapeia para "Reembolso a sócios/colaboradores" (DRE), nunca para o mesmo
+ * balde de "Prestadores PJ"/"Salários CLT" — é exatamente a distinção que impede um reembolso de
+ * contaminar remuneração (mesmo raciocínio já aplicado ao R$25 de Vinícius, Fase 3). Resolvido
+ * por `external_id` estável (nunca um UUID fixo no código — `financial_categories.external_id`
+ * é o "slug estável... para seed idempotente" já documentado no próprio schema).
+ */
+function dreCategoryExternalIdFor(subjectType: "employee" | "contractor", category: RecordableEmployeePaymentCategory): string {
+  if (category === "reembolso") return "despesa-reembolso-a-socios-colaboradores";
+  return subjectType === "employee" ? "despesa-salarios-clt" : "despesa-prestadores-pj";
+}
+
+export interface RecordEmployeePaymentInput {
+  subjectType: "employee" | "contractor";
+  subjectId: string;
+  category: RecordableEmployeePaymentCategory;
+  amount: number;
+  date: string;
+  competenceDate: string | null;
+  description: string;
+  notes: string | null;
+  financialAccountId: string;
+  /** Determinística, calculada pelo chamador a partir dos campos normalizados — nunca um valor confiado sem checagem. */
+  idempotencyKey: string;
+}
+
+export interface RecordEmployeePaymentResult {
+  payment: EmployeePaymentRow;
+  cashMovement: CashMovementRow;
+  /** `false` quando a `idempotencyKey` já existia — o pagamento retornado é o ORIGINAL, nenhum novo foi criado. */
+  created: boolean;
+}
+
+/**
+ * O erro que chega aqui é o wrapper do drizzle-orm (`Failed query: ...`), nunca o `PostgresError`
+ * bruto — os campos `code`/`constraint_name` reais ficam em `err.cause` (confirmado ao vivo por
+ * teste: o primeiro código só checava o objeto externo e nunca reconhecia a violação real,
+ * deixando a requisição perdedora da corrida estourar em vez de retornar o pagamento já
+ * existente). Verifica os dois níveis para nunca depender de detalhe de implementação do driver.
+ */
+function isUniqueViolation(err: unknown, constraint: string): boolean {
+  for (const candidate of [err, (err as { cause?: unknown } | null)?.cause]) {
+    const pgErr = candidate as { code?: string; constraint_name?: string; message?: string } | null;
+    if (pgErr && pgErr.code === "23505" && (pgErr.constraint_name === constraint || (pgErr.message?.includes(constraint) ?? false))) return true;
+  }
+  return false;
+}
+
+async function findByIdempotencyKey(idempotencyKey: string): Promise<RecordEmployeePaymentResult | null> {
+  const [existing] = await db().select().from(employeePayments).where(eq(employeePayments.idempotencyKey, idempotencyKey)).limit(1);
+  if (!existing || !existing.cashMovementId) return null;
+  const [movement] = await db().select().from(cashMovements).where(eq(cashMovements.id, existing.cashMovementId)).limit(1);
+  if (!movement) return null;
+  return { payment: existing, cashMovement: movement, created: false };
+}
+
+/**
+ * Fase 4 (20/09/2026) — "Registrar pagamento": cria `cash_movements` + `employee_payments` numa
+ * ÚNICA transação (mesmo padrão de `recordPayablePayment`, `src/lib/finance/postgres-repository.ts`
+ * — insere `cash_movements` DIRETO dentro da própria `tx`, nunca chamando `createCashMovement`
+ * separadamente, o que abriria uma segunda transação e quebraria a atomicidade). Nunca cria
+ * `bank_statement_line` (não existe extrato para um pagamento manual — a conciliação futura, se
+ * o Pix aparecer depois no extrato real, é trabalho separado, fora desta função). Nunca cria
+ * `employee_advance` — categoria `adiantamento` é rejeitada por `RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES`.
+ *
+ * Idempotência: checagem otimista ANTES de abrir transação (caminho rápido do reenvio comum) e
+ * novamente pelo UNIQUE do banco (`employee_payments_idempotency_key_unique`) — se uma segunda
+ * requisição concorrente ganhar a corrida, a primeira que chegar ao COMMIT define o pagamento
+ * real; a que perder recebe de volta o mesmo registro (`created: false`), nunca um erro nem um
+ * segundo pagamento.
+ */
+export async function recordEmployeePayment(input: RecordEmployeePaymentInput, actorUserId: string | null): Promise<RecordEmployeePaymentResult> {
+  const existingByKey = await findByIdempotencyKey(input.idempotencyKey);
+  if (existingByKey) return existingByKey;
+
+  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new InvalidAmountError("Valor deve ser maior que zero.");
+  if (!RECORDABLE_EMPLOYEE_PAYMENT_CATEGORIES.includes(input.category)) {
+    throw new InvalidPaymentCategoryError(`Categoria não suportada por "Registrar pagamento": ${input.category}. Adiantamento usa o fluxo próprio de employee_advances.`);
+  }
+
+  try {
+    return await db().transaction(async (tx) => {
+      if (input.subjectType === "employee") {
+        const [subject] = await tx.select().from(employees).where(eq(employees.id, input.subjectId)).limit(1);
+        if (!subject) throw new NotFoundError(`Colaborador (CLT) não encontrado: ${input.subjectId}`);
+      } else {
+        const [subject] = await tx.select().from(contractors).where(eq(contractors.id, input.subjectId)).limit(1);
+        if (!subject) throw new NotFoundError(`Prestador (PJ) não encontrado: ${input.subjectId}`);
+      }
+
+      const [account] = await tx.select().from(financialAccounts).where(and(eq(financialAccounts.id, input.financialAccountId), eq(financialAccounts.active, true))).limit(1);
+      if (!account) throw new InvalidFinancialAccountError(`Conta financeira inválida ou inativa: ${input.financialAccountId}`);
+
+      const dreExternalId = dreCategoryExternalIdFor(input.subjectType, input.category);
+      const [dreCategory] = await tx.select().from(financialCategories).where(eq(financialCategories.externalId, dreExternalId)).limit(1);
+
+      const [movement] = await tx
+        .insert(cashMovements)
+        .values({
+          date: input.date,
+          type: "saida",
+          amount: String(input.amount),
+          description: input.description,
+          categoryId: dreCategory?.id ?? null,
+          financialAccountId: input.financialAccountId,
+          competenceDate: input.competenceDate,
+          source: "manual",
+          notes: input.notes,
+        })
+        .returning();
+
+      const [payment] = await tx
+        .insert(employeePayments)
+        .values({
+          subjectType: input.subjectType,
+          subjectId: input.subjectId,
+          category: input.category,
+          amount: String(input.amount),
+          date: input.date,
+          competenceDate: input.competenceDate,
+          description: input.description,
+          cashMovementId: movement.id,
+          idempotencyKey: input.idempotencyKey,
+          notes: input.notes,
+        })
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        actorUserId,
+        action: "create_employee_payment",
+        entityType: "employee_payment",
+        entityId: payment.id,
+        beforeState: null,
+        afterState: { ...payment, cashMovementId: movement.id },
+        source: "manual",
+        notes: `cash_movement_id: ${movement.id}`,
+      });
+
+      return { payment, cashMovement: movement, created: true };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err, "employee_payments_idempotency_key_unique")) {
+      const resolved = await findByIdempotencyKey(input.idempotencyKey);
+      if (resolved) return resolved;
+    }
+    throw err;
+  }
 }
