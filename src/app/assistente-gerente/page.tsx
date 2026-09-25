@@ -1,7 +1,6 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RefreshButton } from "@/components/operations/refresh-button";
-import { AutoRefresh } from "@/components/operations-center/auto-refresh";
 import { AlertCard } from "@/components/manager-assistant/alert-card";
 import { PriorityList } from "@/components/manager-assistant/priority-list";
 import { ClientAttentionCard } from "@/components/manager-assistant/client-attention-card";
@@ -12,7 +11,9 @@ import { SummaryPeriodToggle } from "@/components/manager-assistant/summary-peri
 import { fetchManagerAssistant, fetchOwnerSummary } from "@/lib/manager-assistant/service";
 import { saoPauloDateISO, addDaysIso } from "@/lib/utils/timezone";
 
-// Visão ao vivo — sincroniza notificações a cada acesso; o auto-refresh de 30s depende disso.
+// Visão ao vivo — sincroniza notificações a cada acesso. Auditoria de Network Transfer do Neon
+// (23/09/2026) removeu o auto-refresh automático de 30s daqui — atualização agora só acontece no
+// carregamento da página ou por ação explícita do usuário (botão "Atualizar", em PageHeader.actions).
 export const dynamic = "force-dynamic";
 
 export default async function AssistenteGerentePage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string }> }) {
@@ -25,8 +26,6 @@ export default async function AssistenteGerentePage({ searchParams }: { searchPa
 
   return (
     <div className="space-y-6">
-      <AutoRefresh intervalMs={30_000} />
-
       <PageHeader title="Assistente do Gerente" description="O que precisa de atenção agora, prioridades do dia e descontos concedidos." actions={<RefreshButton />} />
 
       <Card>

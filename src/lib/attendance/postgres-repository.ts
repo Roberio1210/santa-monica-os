@@ -338,6 +338,12 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
     return rows.map(toDiagnostic);
   }
 
+  async listDiagnosticsForVisits(visitIds: string[]): Promise<Diagnostic[]> {
+    if (visitIds.length === 0) return [];
+    const rows = await this.db().select().from(diagnostics).where(inArray(diagnostics.serviceVisitId, visitIds));
+    return rows.map(toDiagnostic);
+  }
+
   async addRecommendation(input: AddRecommendationInput): Promise<TechnicalRecommendation> {
     const [row] = await this.db()
       .insert(technicalRecommendations)

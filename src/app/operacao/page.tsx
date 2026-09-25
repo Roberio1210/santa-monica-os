@@ -2,7 +2,6 @@ import { Car, CheckCircle2, ClipboardCheck, PackageCheck, Receipt, Timer, Wallet
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/cards/stat-card";
 import { RefreshButton } from "@/components/operations/refresh-button";
-import { AutoRefresh } from "@/components/operations-center/auto-refresh";
 import { OperationsOrderCard } from "@/components/operations-center/order-card";
 import { AlertsList } from "@/components/operations-center/alerts-list";
 import { QuickSearch } from "@/components/operations-center/quick-search";
@@ -14,7 +13,10 @@ import type { ManagerBoardOrder } from "@/lib/attendance/types";
 import { formatCurrency, formatDateBR, formatDurationMinutes } from "@/lib/utils/format";
 import { saoPauloDateISO, saoPauloTimeHM } from "@/lib/utils/timezone";
 
-// Visão ao vivo — nunca serve HTML desatualizado; o auto-refresh de 30s depende de cada acesso buscar dados novos.
+// Visão ao vivo — nunca serve HTML desatualizado; cada acesso/clique em "Atualizar" busca dados
+// novos. Auditoria de Network Transfer do Neon (23/09/2026) removeu o auto-refresh automático de
+// 30s daqui — atualização agora só acontece no carregamento da página ou por ação explícita do
+// usuário (botão "Atualizar", já existente em PageHeader.actions abaixo).
 export const dynamic = "force-dynamic";
 
 export default async function OperacaoPage() {
@@ -23,8 +25,6 @@ export default async function OperacaoPage() {
 
   return (
     <div className="space-y-6">
-      <AutoRefresh intervalMs={30_000} />
-
       <PageHeader
         title="Central de Operações"
         description={`${formatDateBR(saoPauloDateISO(now))} · ${saoPauloTimeHM(now)}`}

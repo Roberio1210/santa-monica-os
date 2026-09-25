@@ -99,6 +99,14 @@ export interface AttendanceRepository {
   saveDiagnostic(input: SaveDiagnosticInput): Promise<Diagnostic>;
   getDiagnosticByVisit(serviceVisitId: string): Promise<Diagnostic | null>;
   listDiagnosticsByCustomer(customerId: string): Promise<Diagnostic[]>;
+  /**
+   * Auditoria de Network Transfer do Neon (25/09/2026) — versão em lote de
+   * `listDiagnosticsByCustomer`, mesmo espírito/motivação de `listRecommendationsForVisits`
+   * (recebe os `visitId`s já resolvidos em lote, evita repetir `listVisitsByCustomer` por cliente).
+   * Existe para eliminar o N+1 de `fetchManagerAssistant` (`manager-assistant/service.ts`), que
+   * antes chamava `buildHistory()` uma vez por cliente do dia.
+   */
+  listDiagnosticsForVisits(visitIds: string[]): Promise<Diagnostic[]>;
 
   addRecommendation(input: AddRecommendationInput): Promise<TechnicalRecommendation>;
   listRecommendationsByVisit(serviceVisitId: string): Promise<TechnicalRecommendation[]>;

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerQuickCustomerAndVehicle, startAttendance, startServiceOrder, setServiceOrderStatus, fetchServiceCatalog, createServiceOrderFromApprovedServices } from "@/lib/attendance/service";
 import { fetchManagerAssistant, fetchOwnerSummary, registerDiscount, markNotificationSeen } from "@/lib/manager-assistant/service";
 import { getManagerAssistantRepository } from "@/lib/manager-assistant/repository-factory";
+import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 
 /** Testa contra os repositórios em memória (sem DATABASE_URL) — mesmo padrão de attendance/service.test.ts. */
@@ -91,5 +92,78 @@ describe("markNotificationSeen", () => {
     const updated = await markNotificationSeen(notification.id);
     expect(updated.status).toBe("vista");
     expect(updated.id).toBe(notification.id);
+  });
+});
+
+/**
+ * Fase Network Transfer do Neon (25/09/2026) — regressão do N+1 eliminado em `fetchManagerAssistant`
+ * (clientsAttention) e em `computeLiveAlerts` (diagnóstico da coluna "recebido"). Testa contra o
+ * repositório em memória real (sem DATABASE_URL/TEST_DATABASE_URL — mesmo padrão do resto deste
+ * arquivo), espionando os métodos BATCH do repositório para provar que a contagem de chamadas não
+ * cresce com o número de clientes/pedidos — nunca 1 consulta por cliente/pedido.
+ */
+describe("fetchManagerAssistant — sem N+1 (Fase Network Transfer, 25/09/2026)", () => {
+  it("clientsAttention: com 4 clientes distintos com pedido hoje, cada método batch é chamado exatamente 1 vez (nunca 1 por cliente)", async () => {
+    const repo = getAttendanceRepository();
+    for (let i = 0; i < 4; i++) {
+      const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: `NT Batch Cliente ${i}`, customerPhone: `4899990500${i}`, vehiclePlate: `NTB${i}T01` });
+      const visit = await startAttendance(customer.id, vehicle.id, null);
+      await startServiceOrder(visit.id);
+    }
+
+    const spies = {
+      getCustomersByIds: vi.spyOn(repo, "getCustomersByIds"),
+      listVehiclesForCustomers: vi.spyOn(repo, "listVehiclesForCustomers"),
+      listVisitsForCustomers: vi.spyOn(repo, "listVisitsForCustomers"),
+      listRecommendationsForVisits: vi.spyOn(repo, "listRecommendationsForVisits"),
+      listServiceOrdersForVisits: vi.spyOn(repo, "listServiceOrdersForVisits"),
+    };
+
+    await fetchManagerAssistant();
+
+    for (const [name, spy] of Object.entries(spies)) {
+      expect(spy, `${name} deveria ser chamado exatamente 1 vez, nunca 1 por cliente`).toHaveBeenCalledTimes(1);
+    }
+
+    Object.values(spies).forEach((s) => s.mockRestore());
+  });
+
+  it("clientsAttention: com 1 cliente ou com 5 clientes, cada método batch continua chamado exatamente 1 vez (prova de que a contagem não escala com N)", async () => {
+    const repo = getAttendanceRepository();
+
+    async function criarClienteComPedidoHoje(label: string) {
+      const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: `NT Escala ${label}`, customerPhone: `489999051${label.padStart(2, "0")}`, vehiclePlate: `NTE${label}T1` });
+      const visit = await startAttendance(customer.id, vehicle.id, null);
+      await startServiceOrder(visit.id);
+    }
+
+    await criarClienteComPedidoHoje("A");
+    const spyFor1 = vi.spyOn(repo, "listVisitsForCustomers");
+    await fetchManagerAssistant();
+    expect(spyFor1).toHaveBeenCalledTimes(1);
+    spyFor1.mockRestore();
+
+    for (const label of ["B", "C", "D", "E"]) await criarClienteComPedidoHoje(label);
+    const spyFor5 = vi.spyOn(repo, "listVisitsForCustomers");
+    await fetchManagerAssistant();
+    expect(spyFor5).toHaveBeenCalledTimes(1); // mesmo 1 chamada com 5 clientes no total — nunca 5
+    spyFor5.mockRestore();
+  });
+
+  it("computeLiveAlerts: diagnóstico da coluna 'recebido' é buscado em lote — listDiagnosticsForVisits nunca escala com o número de pedidos", async () => {
+    const repo = getAttendanceRepository();
+    for (let i = 0; i < 3; i++) {
+      const { customer, vehicle } = await registerQuickCustomerAndVehicle({ customerName: `NT Diag Cliente ${i}`, customerPhone: `4899990520${i}`, vehiclePlate: `NTD${i}T01` });
+      const visit = await startAttendance(customer.id, vehicle.id, null);
+      await startServiceOrder(visit.id); // fica em "recebido", sem diagnóstico
+    }
+
+    const spy = vi.spyOn(repo, "listDiagnosticsForVisits");
+    await fetchManagerAssistant();
+    // Chamado 2x por execução (1x em computeLiveAlerts para a coluna "recebido", 1x no bloco de
+    // clientsAttention para o histórico dos clientes do dia) — nunca 1x por pedido/cliente. As duas
+    // chamadas são independentes e cada uma já é O(1); nunca deveria crescer além disso.
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
   });
 });

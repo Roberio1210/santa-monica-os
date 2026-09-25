@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
-import { getInventoryRepository } from "@/lib/inventory/repository-factory";
 import { getRecipeRepository } from "@/lib/recipes/repository-factory";
+import { fetchRawInventoryItems } from "@/lib/inventory/service";
 import { listServices, type ServiceCatalogEntry } from "@/lib/inventory/services-catalog";
 import { listSuggestions, type ProductStepSuggestion } from "@/lib/inventory/suggestions";
 import { toItemView } from "@/lib/inventory/status";
@@ -28,11 +28,17 @@ export interface DataQualitySummary {
  * existe (Fases A/B), nada persistido, nada inventado. Fornecedor e localização passaram a
  * existir no cadastro de produto na Missão 22 (Estoque Inteligente) — ver
  * `src/app/estoque/produtos/[id]/page.tsx` para a edição desses campos.
+ *
+ * Auditoria de Network Transfer do Neon (23/09/2026) — usa `fetchRawInventoryItems`
+ * (`inventory/service.ts`), nunca `getInventoryRepository().listItems()` direto: essa função é
+ * chamada na mesma requisição que `fetchInventoryOverview` (via `fetchGlobalSituation`/
+ * `fetchCentralOverview`), e as duas precisam exatamente da mesma tabela inteira de itens ativos —
+ * usar a mesma função `cache()`-wrapped faz o React deduplicar a consulta em vez de rodá-la 2x.
  */
 /** Missão Performance 6B — `React.cache()` por requisição: chamada tanto pelo cabeçalho global (`fetchGlobalSituation`) quanto pela Central de Operações (`fetchCentralOverview`) na mesma requisição. */
 export const fetchDataQualitySummary = cache(async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
   const [rawItems, recipes, services, suggestions, serviceCostEstimates] = await Promise.all([
-    getInventoryRepository().listItems(),
+    fetchRawInventoryItems(),
     getRecipeRepository().listRecipes(),
     listServices(),
     listSuggestions(),

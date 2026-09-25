@@ -1002,6 +1002,19 @@ export const fetchAllCashMovementsForCashFlow = cache(() => getFinanceRepository
 export const fetchAllAccountTransfersForCashFlow = cache(() => getFinanceRepository().listAccountTransfers());
 
 /**
+ * Auditoria de Network Transfer do Neon (25/09/2026) — mesmo raciocínio do bloco acima
+ * (Missão Performance 6C), mas para `listFinancialClassifications`/`listClassificationRules`:
+ * `fetchCashFlowOverview` (ledger completo, sem `skipLedger`) e `fetchDreSourceData` (usada por
+ * `fetchClassificationQueue`) chamavam o repositório DIRETO cada uma — dentro de
+ * `fetchCentralOverview` (`central.ts`), que roda as duas no mesmo `Promise.all`, isso disparava
+ * `listFinancialClassifications`/`listClassificationRules` DUAS vezes por requisição (mesma tabela
+ * inteira, mesmo filtro `active=true`, nenhuma diferença entre as duas chamadas). Não afeta
+ * `fetchGlobalSituation` (usa `skipLedger: true`, que já pulava essa busca antes desta alteração).
+ */
+export const fetchAllFinancialClassificationsRaw = cache(() => getFinanceRepository().listFinancialClassifications());
+export const fetchAllClassificationRulesRaw = cache(() => getFinanceRepository().listClassificationRules());
+
+/**
  * Missão V4.1 — `periodFrom`/`periodTo` (Fase 2) são opcionais e, quando omitidos, caem em
  * `asOfDate` (equivalente ao preset "Hoje"), preservando exatamente o comportamento anterior para
  * quem já chama esta função sem eles (Central de Operações, `agora-panel`, etc.).
@@ -1041,8 +1054,8 @@ export const fetchCashFlowOverview = cache(async function fetchCashFlowOverview(
     fetchAllAccountTransfersForCashFlow(),
     fetchAccountsReceivableOverview(asOfDate),
     fetchAccountsPayableOverview(asOfDate),
-    skipLedger ? Promise.resolve([]) : getFinanceRepository().listFinancialClassifications(),
-    skipLedger ? Promise.resolve([]) : getFinanceRepository().listClassificationRules(),
+    skipLedger ? Promise.resolve([]) : fetchAllFinancialClassificationsRaw(),
+    skipLedger ? Promise.resolve([]) : fetchAllClassificationRulesRaw(),
   ]);
 
   const dashboard = computeCashFlowDashboard(accounts, movements, arOverview.items, apOverview.items, asOfDate, periodFrom, periodTo);
@@ -1107,8 +1120,8 @@ export const fetchDreSourceData = cache(async function fetchDreSourceData(): Pro
     fetchAllAccountsPayableRaw(),
     fetchAllAccountsReceivableRaw(),
     fetchAllCashMovementsForCashFlow(),
-    repo.listFinancialClassifications(),
-    repo.listClassificationRules(),
+    fetchAllFinancialClassificationsRaw(),
+    fetchAllClassificationRulesRaw(),
     repo.listPartners(),
     fetchJumpParkRevenueCandidates(),
     fetchStoneFeeCandidatesForDre(),

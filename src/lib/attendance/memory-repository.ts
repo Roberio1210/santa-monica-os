@@ -227,6 +227,11 @@ export class MemoryAttendanceRepository implements AttendanceRepository {
     return Array.from(this.diagnostics.values()).filter((d) => visitIds.has(d.serviceVisitId));
   }
 
+  async listDiagnosticsForVisits(visitIds: string[]): Promise<Diagnostic[]> {
+    const ids = new Set(visitIds);
+    return Array.from(this.diagnostics.values()).filter((d) => ids.has(d.serviceVisitId));
+  }
+
   async addRecommendation(input: AddRecommendationInput): Promise<TechnicalRecommendation> {
     const recommendation: TechnicalRecommendation = {
       id: randomUUID(),

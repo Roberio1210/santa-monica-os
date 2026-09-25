@@ -35,9 +35,20 @@ export function computeInventorySummary(items: InventoryItemView[]): InventorySu
   };
 }
 
+/**
+ * Auditoria de Network Transfer do Neon (23/09/2026) — `fetchInventoryOverview` e
+ * `fetchDataQualitySummary` (`src/lib/inventory/data-quality.ts`) sempre precisaram exatamente do
+ * mesmo `listItems()` (tabela inteira de itens ativos), mas cada uma chamava o repositório
+ * diretamente — dentro de `fetchGlobalSituation`/`fetchCentralOverview` (`central.ts`), que roda
+ * as duas em paralelo no mesmo `Promise.all`, isso disparava a MESMA consulta duas vezes por
+ * requisição. `React.cache()` só dedupe por identidade de função, então só resolve isso se as duas
+ * chamadoras usarem esta MESMA função — nunca `getInventoryRepository().listItems()` direto.
+ */
+export const fetchRawInventoryItems = cache(() => getInventoryRepository().listItems());
+
 /** Missão Performance 6B — `React.cache()` por requisição: chamada tanto pelo cabeçalho global (`fetchGlobalSituation`) quanto pela Central de Operações (`fetchCentralOverview`) na mesma requisição. */
 export const fetchInventoryOverview = cache(async function fetchInventoryOverview(): Promise<{ items: InventoryItemView[]; summary: InventorySummary }> {
-  const items = await getInventoryRepository().listItems();
+  const items = await fetchRawInventoryItems();
   const views = items.map(toItemView).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   return { items: views, summary: computeInventorySummary(views) };
 });

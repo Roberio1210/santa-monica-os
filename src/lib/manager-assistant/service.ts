@@ -1,6 +1,7 @@
 import "server-only";
 import { getAttendanceRepository } from "@/lib/attendance/repository-factory";
-import { fetchManagerBoard, fetchCustomerSearchResult } from "@/lib/attendance/service";
+import { fetchManagerBoard } from "@/lib/attendance/service";
+import { summarizeCustomerHistory } from "@/lib/attendance/history";
 import { saoPauloDateISO } from "@/lib/utils/timezone";
 import { getManagerAssistantRepository } from "@/lib/manager-assistant/repository-factory";
 import { deriveManagerAlerts, type AlertType, type ManagerAlert } from "@/lib/manager-assistant/alerts";
@@ -9,11 +10,24 @@ import { deriveClientAttention, type ClientAttentionEntry } from "@/lib/manager-
 import type { CreateDiscountInput, Discount, Notification, NotificationRecipient, NotificationStatus } from "@/lib/manager-assistant/types";
 import type { ServiceOrderStatus } from "@/lib/attendance/types";
 
+/** Mesmo utilitário de `crm-intelligente/overview.ts:groupBy` — pequeno demais para justificar extrair um módulo compartilhado só por isso. */
+function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const list = map.get(key) ?? [];
+    list.push(item);
+    map.set(key, list);
+  }
+  return map;
+}
+
 /**
  * Orquestração do Assistente Operacional do Gerente — único ponto de I/O deste módulo.
- * Reaproveita o Atendimento (fetchManagerBoard, fetchCustomerSearchResult) e o repositório
- * próprio (descontos + notificações), nunca duplica dados: alertas e prioridades são sempre
- * recalculados ao vivo a partir do board real, nunca lidos de volta da tabela de notificações.
+ * Reaproveita o Atendimento (`fetchManagerBoard`, repositório de clientes/visitas/ordens em lote)
+ * e o repositório próprio (descontos + notificações), nunca duplica dados: alertas e prioridades
+ * são sempre recalculados ao vivo a partir do board real, nunca lidos de volta da tabela de
+ * notificações.
  */
 
 function round2(value: number): number {
@@ -35,16 +49,27 @@ export interface ManagerAlertView extends ManagerAlert {
   status: NotificationStatus | null;
 }
 
+/**
+ * Auditoria de Network Transfer do Neon (25/09/2026) — N+1 remanescente: antes, 1 consulta
+ * `getDiagnosticByVisit` por pedido na coluna "recebido" (Q(N) = N). `saveDiagnostic` faz upsert
+ * por `serviceVisitId` (constraint única, ver `attendance/postgres-repository.ts`), então nunca há
+ * mais de um diagnóstico por visita — "existe diagnóstico para a visita" é exatamente equivalente
+ * a "a visita aparece no resultado de uma busca em lote". Reaproveita `listDiagnosticsForVisits`
+ * (método batch já criado nesta auditoria para o N+1 do Manager Assistant, `attendance/
+ * repository.ts`) — nenhum método novo, nenhuma mudança de schema. Só o conteúdo de `diagnostic`
+ * é descartado (nunca foi usado aqui, só a existência) — `recebidoWithoutDiagnostic` continua
+ * sendo exatamente os `order`s da coluna "recebido" sem diagnóstico, na mesma ordem de antes.
+ */
 async function computeLiveAlerts(): Promise<{ alerts: ManagerAlert[]; activeOrders: Awaited<ReturnType<typeof fetchManagerBoard>>["columns"][number]["orders"]; recebidoWithoutDiagnosticCount: number; board: Awaited<ReturnType<typeof fetchManagerBoard>> }> {
   const attendanceRepo = getAttendanceRepository();
   const board = await fetchManagerBoard();
   const activeOrders = board.columns.flatMap((c) => c.orders);
   const recebidoOrders = board.columns.find((c) => c.status === "recebido")?.orders ?? [];
 
-  const diagnosticChecks = await Promise.all(
-    recebidoOrders.map(async (order) => ({ order, hasDiagnostic: (await attendanceRepo.getDiagnosticByVisit(order.visitId)) !== null })),
-  );
-  const recebidoWithoutDiagnostic = diagnosticChecks.filter((c) => !c.hasDiagnostic).map((c) => c.order);
+  const recebidoVisitIds = recebidoOrders.map((o) => o.visitId);
+  const diagnosticsForRecebido = await attendanceRepo.listDiagnosticsForVisits(recebidoVisitIds);
+  const visitIdsWithDiagnostic = new Set(diagnosticsForRecebido.map((d) => d.serviceVisitId));
+  const recebidoWithoutDiagnostic = recebidoOrders.filter((order) => !visitIdsWithDiagnostic.has(order.visitId));
 
   const alerts = deriveManagerAlerts({ activeOrders, deliveredToday: board.deliveredToday, recebidoWithoutDiagnostic });
 
@@ -180,14 +205,58 @@ export async function fetchManagerAssistant(): Promise<ManagerAssistant> {
 
   const todaysEntries = await attendanceRepo.listOrdersInRange(today, today);
   const uniqueCustomerIds = Array.from(new Set(todaysEntries.map((o) => o.customerId)));
-  const clientsAttentionRaw = await Promise.all(
-    uniqueCustomerIds.map(async (customerId) => {
-      const [result, visits] = await Promise.all([fetchCustomerSearchResult(customerId), attendanceRepo.listVisitsByCustomer(customerId)]);
-      if (!result) return null;
-      return deriveClientAttention({ customer: result.customer, vehicles: result.vehicles, history: result.history, visitCount: visits.length });
-    }),
-  );
-  const clientsAttention = clientsAttentionRaw.filter((c): c is ClientAttentionEntry => c !== null);
+
+  /**
+   * Auditoria de Network Transfer do Neon (25/09/2026) — antes, cada cliente único do dia
+   * disparava seu próprio `fetchCustomerSearchResult` (que sozinho já fazia 6 consultas via
+   * `buildHistory`) + `listVisitsByCustomer`: N clientes = até 7×N consultas, cada uma sem nenhuma
+   * janela temporal (histórico de vida inteira). Reescrito no mesmo espírito de
+   * `crm-intelligente/overview.ts:listCustomerOverviews` — poucas consultas em LOTE (uma por
+   * categoria de dado, nunca uma por cliente) e agrupamento em memória. `summarizeCustomerHistory`
+   * (mesma função pura de sempre, `attendance/history.ts`) continua recebendo exatamente os mesmos
+   * campos por cliente — só a origem dos dados mudou, nunca o cálculo.
+   */
+  const [customersList, catalog] = await Promise.all([attendanceRepo.getCustomersByIds(uniqueCustomerIds), attendanceRepo.listServiceCatalog()]);
+  const servicePriceById = Object.fromEntries(catalog.filter((s) => s.defaultPrice !== null).map((s) => [s.id, s.defaultPrice as number]));
+
+  const [allVehicles, allVisits] = await Promise.all([attendanceRepo.listVehiclesForCustomers(uniqueCustomerIds), attendanceRepo.listVisitsForCustomers(uniqueCustomerIds)]);
+  const visitIds = allVisits.map((v) => v.id);
+  const visitToCustomerId = new Map(allVisits.map((v) => [v.id, v.customerId]));
+
+  const [allDiagnostics, allRecommendations, allOrders] = await Promise.all([
+    attendanceRepo.listDiagnosticsForVisits(visitIds),
+    attendanceRepo.listRecommendationsForVisits(visitIds),
+    attendanceRepo.listServiceOrdersForVisits(visitIds),
+  ]);
+
+  const vehiclesByCustomer = groupBy(allVehicles, (v) => v.customerId);
+  const visitsByCustomer = groupBy(allVisits, (v) => v.customerId);
+  const diagnosticsByCustomer = groupBy(allDiagnostics, (d) => visitToCustomerId.get(d.serviceVisitId) ?? "");
+  const recommendationsByCustomer = groupBy(allRecommendations, (r) => visitToCustomerId.get(r.serviceVisitId) ?? "");
+  const ordersByCustomer = groupBy(allOrders, (o) => visitToCustomerId.get(o.serviceVisitId) ?? "");
+
+  // `WHERE id IN (...)` (`getCustomersByIds`) não garante a mesma ordem de `uniqueCustomerIds` —
+  // reordena aqui para preservar exatamente a ordem antiga (primeira aparição em `todaysEntries`),
+  // nunca a ordem arbitrária que o Postgres devolver.
+  const customerById = new Map(customersList.map((c) => [c.id, c]));
+  const orderedCustomers = uniqueCustomerIds.map((id) => customerById.get(id)).filter((c): c is (typeof customersList)[number] => c !== undefined);
+
+  const clientsAttention = orderedCustomers
+    .map((customer) => {
+      const vehicles = vehiclesByCustomer.get(customer.id) ?? [];
+      const visits = visitsByCustomer.get(customer.id) ?? [];
+      const history = summarizeCustomerHistory({
+        customer,
+        vehicles,
+        visits,
+        diagnostics: diagnosticsByCustomer.get(customer.id) ?? [],
+        recommendations: recommendationsByCustomer.get(customer.id) ?? [],
+        orders: ordersByCustomer.get(customer.id) ?? [],
+        servicePriceById,
+      });
+      return deriveClientAttention({ customer, vehicles, history, visitCount: visits.length });
+    })
+    .filter((c): c is ClientAttentionEntry => c !== null);
 
   const summaryNow = await fetchOwnerSummary(today);
   const discounts = summaryNow.descontos;
