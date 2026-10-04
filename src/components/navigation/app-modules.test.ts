@@ -74,9 +74,10 @@ function isRouteReachableFromSomeModule(route: string): boolean {
 describe("APP_MODULES — Missão UX/Navegação 3", () => {
   it("1) o menu principal tem por volta de 9-11 módulos (nunca a lista antiga de 48 itens)", () => {
     // Missão 86 — "Departamento Pessoal" adicionado como módulo próprio (deliberadamente separado
-    // de Financeiro), subindo o teto de 10 para 11. Continua bem longe dos 48 itens antigos.
+    // de Financeiro), subindo o teto de 10 para 11. Módulo Emergência (Fase 1, 04/10/2026) — pedido
+    // explícito de item próprio "Emergência" no menu, teto 12. Continua bem longe dos 48 itens antigos.
     expect(APP_MODULES.length).toBeGreaterThanOrEqual(8);
-    expect(APP_MODULES.length).toBeLessThanOrEqual(11);
+    expect(APP_MODULES.length).toBeLessThanOrEqual(12);
   });
 
   it("2) cada módulo tem um id/label/href únicos — nunca duas entradas colidindo na lateral", () => {

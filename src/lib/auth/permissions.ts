@@ -29,6 +29,10 @@ export const OPERATIONAL_ALLOWED_PREFIXES: string[] = [
   "/estoque/consumos",
   "/estoque/pendencias",
   "/estoque/compras-sugeridas",
+  // Módulo Emergência (Fase 1) — Central de consulta (contatos/protocolos/seguro), somente leitura
+  // para operacional. A administração fica em /configuracoes/emergencia, fora desta lista
+  // (continua bloqueada pelo default-deny).
+  "/emergencia",
 ];
 
 /** Página inicial de cada papel após o login — ADMIN mantém o dashboard atual, OPERACIONAL cai direto na Gestão do Dia. */

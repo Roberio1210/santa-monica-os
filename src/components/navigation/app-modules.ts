@@ -45,6 +45,7 @@ import {
   GitMerge,
   Zap,
   Users,
+  Siren,
   type LucideIcon,
 } from "lucide-react";
 import { isPathAllowedForRole } from "@/lib/auth/permissions";
@@ -122,6 +123,16 @@ export const APP_MODULES: AppModule[] = [
       { href: "/alertas", label: "Alertas", icon: BellRing, group: "gestao" },
       { href: "/agenda", label: "Agenda", icon: CalendarDays, group: "gestao" },
     ],
+  },
+  {
+    // Módulo Emergência (Fase 1, 04/10/2026) — Central de contatos, protocolos e resumo do seguro.
+    // Liberado também para OPERACIONAL (ver `OPERATIONAL_ALLOWED_PREFIXES`).
+    id: "emergencia",
+    label: "Emergência",
+    icon: Siren,
+    href: "/emergencia",
+    matchPrefixes: [],
+    shortcuts: [],
   },
   {
     id: "atendimento",
@@ -232,6 +243,7 @@ export const APP_MODULES: AppModule[] = [
     matchPrefixes: ["/seguranca"],
     shortcuts: [
       { href: "/configuracoes/status", label: "Status das integrações", icon: Settings },
+      { href: "/configuracoes/emergencia", label: "Central de Emergência (cadastros)", icon: Siren },
       { href: "/seguranca", label: "Segurança", icon: ShieldCheck },
     ],
   },

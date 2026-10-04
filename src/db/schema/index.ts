@@ -18,3 +18,4 @@ export * from "./planning";
 export * from "./historicalSpreadsheet";
 export * from "./outboundMessaging";
 export * from "./whatsapp";
+export * from "./emergency";
