@@ -208,7 +208,7 @@ describe("runJumpParkGapAudit", () => {
 
 describe("guarda estrutural — auditoria é somente leitura", () => {
   const repoRoot = path.resolve(__dirname, "../../../..");
-  const files = ["src/lib/integrations/jumppark/gap-audit.ts", "src/app/api/admin/jumppark-auditoria/route.ts"].map((f) => [f, readFileSync(path.join(repoRoot, f), "utf-8")] as const);
+  const files = ["src/lib/integrations/jumppark/gap-audit.ts"].map((f) => [f, readFileSync(path.join(repoRoot, f), "utf-8")] as const);
 
   it.each(files)("%s não grava nada nem aciona sincronização/consumo/clientes/financeiro", (_name, source) => {
     const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");

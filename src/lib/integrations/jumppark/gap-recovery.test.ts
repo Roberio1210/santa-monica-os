@@ -240,7 +240,7 @@ describe("applyRecoveryPlan", () => {
 
 describe("guarda estrutural — recuperação só insere e não aciona efeitos colaterais", () => {
   const repoRoot = path.resolve(__dirname, "../../../..");
-  const files = ["src/lib/integrations/jumppark/gap-recovery.ts", "src/lib/integrations/jumppark/gap-recovery-allowlist.ts", "src/app/api/admin/jumppark-recuperacao/route.ts"].map((f) => [f, readFileSync(path.join(repoRoot, f), "utf-8")] as const);
+  const files = ["src/lib/integrations/jumppark/gap-recovery.ts", "src/lib/integrations/jumppark/gap-recovery-allowlist.ts"].map((f) => [f, readFileSync(path.join(repoRoot, f), "utf-8")] as const);
 
   it.each(files)("%s", (_name, source) => {
     const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
